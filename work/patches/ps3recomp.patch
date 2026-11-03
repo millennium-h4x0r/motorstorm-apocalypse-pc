@@ -1,5 +1,5 @@
 diff --git a/.gitignore b/.gitignore
-index d320252..a075898 100644
+index d3202526..a075898f 100644
 --- a/.gitignore
 +++ b/.gitignore
 @@ -106,3 +106,6 @@ build-gate/
@@ -10,7 +10,7 @@ index d320252..a075898 100644
 +# SPU differential test build products (runtime/spu/tests/build_diff_test.sh)
 +runtime/spu/tests/build_diff/
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index f843504..705523d 100644
+index f843504e..705523dd 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -26,7 +26,7 @@ option(PS3RECOMP_BUILD_TESTS "Build unit tests" OFF)
@@ -145,7 +145,7 @@ index f843504..705523d 100644
  
          add_executable(ps3recomp_boot_smoke
 diff --git a/docs/DIAGNOSTICS.md b/docs/DIAGNOSTICS.md
-index c7a0fd4..3441723 100644
+index c7a0fd4d..34417238 100644
 --- a/docs/DIAGNOSTICS.md
 +++ b/docs/DIAGNOSTICS.md
 @@ -992,7 +992,7 @@ not changed while a title runs.
@@ -176,7 +176,7 @@ index c7a0fd4..3441723 100644
  - **`SPU_IRQTRACE`** — _(no description in source)_
    `runtime/spu/spu_channels.c:1548`  _(+1 more sites)_
 diff --git a/docs/FIRMWARE_LLE.md b/docs/FIRMWARE_LLE.md
-index 863e9d1..7056a0e 100644
+index 863e9d12..7056a0e3 100644
 --- a/docs/FIRMWARE_LLE.md
 +++ b/docs/FIRMWARE_LLE.md
 @@ -139,27 +139,42 @@ discovery pass (branch targets, tail entries) fills in interior functions within
@@ -245,7 +245,7 @@ index 863e9d1..7056a0e 100644
  
 diff --git a/docs/KNOWN_DIFFERENCES.md b/docs/KNOWN_DIFFERENCES.md
 new file mode 100644
-index 0000000..670ae7e
+index 00000000..670ae7e1
 --- /dev/null
 +++ b/docs/KNOWN_DIFFERENCES.md
 @@ -0,0 +1,94 @@
@@ -344,7 +344,7 @@ index 0000000..670ae7e
 +`type_base | index << step` and maps an id back to its slot, with the type checked on
 +lookup (a wrong-type id is ESRCH, as on lv2).
 diff --git a/libs/audio/cellAudio.c b/libs/audio/cellAudio.c
-index b51fb7c..d2f8c67 100644
+index b51fb7c4..d2f8c671 100644
 --- a/libs/audio/cellAudio.c
 +++ b/libs/audio/cellAudio.c
 @@ -373,7 +373,7 @@ static int audio_backend_room(void)
@@ -445,7 +445,7 @@ index b51fb7c..d2f8c67 100644
                  portNum, port->running ? "RUN" : "READY",
                  (u32)port->port_addr, (u32)port->read_idx_addr); }
 diff --git a/libs/codec/cellAdec.c b/libs/codec/cellAdec.c
-index 3da7017..9484872 100644
+index 3da70179..9484872d 100644
 --- a/libs/codec/cellAdec.c
 +++ b/libs/codec/cellAdec.c
 @@ -97,7 +97,7 @@ static void adec_notify(CellAdecHandle handle, u32 msg_type, s32 msg_data)
@@ -476,7 +476,7 @@ index 3da7017..9484872 100644
                 handle, GUEST_EA(pcmItem),
                 handle < MAX_ADEC ? s_adec[handle].hasPcm : -1); }
 diff --git a/libs/filesystem/cellFs.c b/libs/filesystem/cellFs.c
-index 5166a47..daf0bfa 100644
+index 5166a47d..daf0bfaf 100644
 --- a/libs/filesystem/cellFs.c
 +++ b/libs/filesystem/cellFs.c
 @@ -14,6 +14,7 @@
@@ -503,7 +503,7 @@ index 5166a47..daf0bfa 100644
                     (uint32_t)(uintptr_t)buf,
                     (unsigned long long)nbytes, (unsigned long long)bytes_read);
 diff --git a/libs/filesystem/cellFsUtility.c b/libs/filesystem/cellFsUtility.c
-index 3f74504..512e50e 100644
+index 3f745045..512e50e6 100644
 --- a/libs/filesystem/cellFsUtility.c
 +++ b/libs/filesystem/cellFsUtility.c
 @@ -18,6 +18,7 @@
@@ -525,7 +525,7 @@ index 3f74504..512e50e 100644
  
      if (bytesRead) vm_write64((u32)(uintptr_t)bytesRead, (u64)n);
 diff --git a/libs/input/cellPad.c b/libs/input/cellPad.c
-index f2b4c11..fc08e7c 100644
+index f2b4c119..fc08e7c2 100644
 --- a/libs/input/cellPad.c
 +++ b/libs/input/cellPad.c
 @@ -287,8 +287,13 @@ static u8 pad_sdl_trigger_to_u8(int raw)
@@ -819,7 +819,7 @@ index f2b4c11..fc08e7c 100644
  #endif
  
 diff --git a/libs/network/cellHttp.c b/libs/network/cellHttp.c
-index d39d88d..c7ec705 100644
+index d39d88df..c7ec705b 100644
 --- a/libs/network/cellHttp.c
 +++ b/libs/network/cellHttp.c
 @@ -34,6 +34,8 @@ typedef int http_socket_t;
@@ -842,7 +842,7 @@ index d39d88d..c7ec705 100644
              /* Error - if we already have some data, return it */
              if (filled > 0)
 diff --git a/libs/network/cellSsl.c b/libs/network/cellSsl.c
-index 7ed91da..2cff0a7 100644
+index 7ed91daf..2cff0a71 100644
 --- a/libs/network/cellSsl.c
 +++ b/libs/network/cellSsl.c
 @@ -19,6 +19,7 @@
@@ -864,7 +864,7 @@ index 7ed91da..2cff0a7 100644
      } else {
          for (u32 i = 0; i < size; i++)
 diff --git a/libs/network/sysNet.c b/libs/network/sysNet.c
-index 8be6664..34c4e1b 100644
+index 8be6664a..34c4e1b7 100644
 --- a/libs/network/sysNet.c
 +++ b/libs/network/sysNet.c
 @@ -55,6 +55,7 @@
@@ -897,7 +897,7 @@ index 8be6664..34c4e1b 100644
          if (s_sockets[s].p2p && n > 0) {
              uint32_t un = (uint32_t)n;
 diff --git a/libs/spurs/cellSpurs.c b/libs/spurs/cellSpurs.c
-index 688ff04..33eaf7b 100644
+index 688ff041..fc8c4271 100644
 --- a/libs/spurs/cellSpurs.c
 +++ b/libs/spurs/cellSpurs.c
 @@ -14,11 +14,15 @@
@@ -1208,7 +1208,12 @@ index 688ff04..33eaf7b 100644
 -s32 cellSpursAttributeInitialize(CellSpursAttribute* attr, s32 nSpus,
 -                                 s32 spuPriority, s32 ppuPriority,
 -                                 u8 exitIfNoWork)
--{
++/* The SDK's cellSpursAttributeInitialize() is an inline wrapper over this
++ * export (NID 0x95180230); it fills the real big-endian attribute. */
++s32 _cellSpursAttributeInitialize(CellSpursAttribute* attr, u32 revision,
++                                  u32 sdkVersion, u32 nSpus, s32 spuPriority,
++                                  s32 ppuPriority, u8 exitIfNoWork)
+ {
 -    (void)ppuPriority; (void)exitIfNoWork;
 -
 -    if (!attr)
@@ -1224,12 +1229,6 @@ index 688ff04..33eaf7b 100644
 -        attr->spuPriority[i] = spuPriority;
 -
 -    printf("[cellSpurs] AttributeInitialize(nSpus=%d)\n", nSpus);
-+/* The SDK's cellSpursAttributeInitialize() is an inline wrapper over this
-+ * export (NID 0x95180230); it fills the real big-endian attribute. */
-+s32 _cellSpursAttributeInitialize(CellSpursAttribute* attr, u32 revision,
-+                                  u32 sdkVersion, u32 nSpus, s32 spuPriority,
-+                                  s32 ppuPriority, u8 exitIfNoWork)
-+{
 +    const u32 a = (u32)(uintptr_t)attr;
 +    if (!a) return CELL_SPURS_CORE_ERROR_NULL_POINTER;
 +    if (a & 7) return CELL_SPURS_CORE_ERROR_ALIGN;
@@ -1499,7 +1498,45 @@ index 688ff04..33eaf7b 100644
      printf("[cellSpurs] DetachLv2EventQueue(port=%u)\n", port);
      return CELL_OK;
  }
-@@ -1012,9 +1140,10 @@ s32 cellSpursCreateTask(CellSpursTaskset* taskset, CellSpursTaskId* taskId,
+@@ -857,9 +985,27 @@ s32 cellSpursTasksetAttributeSetName(CellSpursTasksetAttribute* attr,
+  * from an EA computed out of r3 = that argument (spu_0003 task main @0x17e70:
+  * `wrch $ch18, f(r3.word3)`), so a zero argument makes it GET from EA 0 and
+  * stall. lsPattern/argument arrive as guest EAs (generic adapter forwards r3..r10). */
++/* reserved (may be NULL): a 128-bit task-id bitmap (task 0 = MSB of byte 0) of
++ * ids the slot search must also skip. Taskset2 passes its exited-but-not-yet-
++ * joined ids there, since a Taskset2 task id stays allocated until
++ * cellSpursJoinTask2/TryJoinTask2 reaps it (see the Taskset2 section). */
++static s32 spurs_create_task_impl(CellSpursTaskset* taskset, CellSpursTaskId* taskId,
++                                  void* elf, void* context, u32 sizeContext,
++                                  u32 lsPattern_ea, u32 argument_ea,
++                                  const uint8_t* reserved);
++
+ s32 cellSpursCreateTask(CellSpursTaskset* taskset, CellSpursTaskId* taskId,
+                         void* elf, void* context, u32 sizeContext,
+                         u32 lsPattern_ea, u32 argument_ea)
++{
++    return spurs_create_task_impl(taskset, taskId, elf, context, sizeContext,
++                                  lsPattern_ea, argument_ea, NULL);
++}
++
++static s32 spurs_create_task_impl(CellSpursTaskset* taskset, CellSpursTaskId* taskId,
++                                  void* elf, void* context, u32 sizeContext,
++                                  u32 lsPattern_ea, u32 argument_ea,
++                                  const uint8_t* reserved)
+ {
+     (void)context; (void)sizeContext;
+ 
+@@ -903,7 +1049,8 @@ s32 cellSpursCreateTask(CellSpursTaskset* taskset, CellSpursTaskId* taskId,
+      * (taskset, id) if a title joins tasks in two tasksets at once. */
+     u32 free_slot = CELL_SPURS_MAX_TASK;
+     for (u32 t = 0; t < CELL_SPURS_MAX_TASK; t++)
+-        if (!(vm_read8(taskset_ea + 0x30 + t / 8) & (0x80u >> (t % 8)))) { free_slot = t; break; }
++        if (!((vm_read8(taskset_ea + 0x30 + t / 8) | (reserved ? reserved[t / 8] : 0))
++              & (0x80u >> (t % 8)))) { free_slot = t; break; }
+     if (free_slot < CELL_SPURS_MAX_TASK) {
+         u32 i = free_slot;
+         {
+@@ -1012,15 +1159,16 @@ s32 cellSpursCreateTask(CellSpursTaskset* taskset, CellSpursTaskId* taskId,
                  size_t sz = spu_elf_image_size(host_elf, 2u * 1024 * 1024);
                  if (sz)
                      /* Async: SPURS tasks are persistent workers — running them
@@ -1513,7 +1550,14 @@ index 688ff04..33eaf7b 100644
              }
              return CELL_OK;
          }
-@@ -1123,7 +1252,7 @@ s32 cellSpursCreateTaskWithAttribute(CellSpursTaskset* taskset,
+     }
+ 
+-    fprintf(stderr, "[cellSpurs] CreateTask: taskset 0x%08X has no free task id (all 128 enabled)\n",
++    fprintf(stderr, "[cellSpurs] CreateTask: taskset 0x%08X has no free task id (all 128 in use)\n",
+             taskset_ea);
+     return CELL_SPURS_TASK_ERROR_NOMEM;
+ }
+@@ -1123,7 +1271,7 @@ s32 cellSpursCreateTaskWithAttribute(CellSpursTaskset* taskset,
       * (a no-context task may not block -- SPU task-lib waits then fail with
       * ERROR_STAT). Learn the real field offsets from the bytes. */
      { uint32_t aea = (uint32_t)(uintptr_t)attr;
@@ -1522,7 +1566,271 @@ index 688ff04..33eaf7b 100644
          fprintf(stderr, "[cellSpurs] CreateTaskWithAttr attr=0x%08X raw:", aea);
          for (int o = 0; o < 0x40; o += 4) fprintf(stderr, " %08X", vm_read32(aea + o));
          fprintf(stderr, "\n"); } }
-@@ -1206,64 +1335,120 @@ s32 cellSpursTaskAttributeInitialize(CellSpursTaskAttribute* attr)
+@@ -1202,68 +1350,384 @@ s32 cellSpursTaskAttributeInitialize(CellSpursTaskAttribute* attr)
+     return CELL_OK;
+ }
+ 
++/* =========================================================================
++ * Taskset2 (cellSpursCreateTaskset2 / CreateTask2 / JoinTask2 ...)
++ *
++ * Layouts follow RPCS3's cellSpurs.h (behavioural reference only, no code
++ * taken): CellSpursTaskset2 is 128*82 = 0x2900 bytes, 128-aligned, and is the
++ * v1 CellSpursTaskset (0x1900) with the same header and TaskInfo[128] at 0x80,
++ * plus a v128 task_exit_code[128] at 0x1980. CellSpursTasksetAttribute2 is 512
++ * bytes; CellSpursTaskAttribute2 is 256. RPCS3 implements only CreateTaskset2
++ * and the attribute initializer; CreateTask2/JoinTask2/TryJoinTask2/
++ * DestroyTaskset2 are UNIMPLEMENTED there, so their ABI was taken from the
++ * caller in MotorStorm Apocalypse (hkSpuUtil, EBOOT fn 0x8C06FC..0x8C0D64):
++ *
++ *   CreateTask2(r3=taskset, r4=&id, r5=elf, r6=CellSpursTaskArgument*,
++ *               r7=CellSpursTaskAttribute2* (Havok passes NULL))
++ *   JoinTask2/TryJoinTask2(r3=taskset, r4=id, r5=s32* exitCode)
++ *   DestroyTaskset2(r3=taskset)
++ *
++ * which is the SDK prototype. Havok traps (twu) on a non-zero CreateTaskset2/
++ * CreateTask2/DestroyTaskset2 return and ignores the Join return codes; it
++ * reaps by TryJoinTask2 over ids 0..127 before every batch of creates
++ * (fn 0x8C1780) and JoinTask2 over 0..127 before DestroyTaskset2.
++ *
++ * The run-time is the v1 path unchanged (spurs_create_task_impl ->
++ * spurs_taskset_add_task + spu_task_dispatch): the PM and lifted tasks only
++ * read the header/TaskInfo part, which is the same in both layouts.
++ *
++ * What Taskset2 adds on top is id lifetime: a Taskset2 task's id stays
++ * allocated after the task exits until it is joined (that is why Havok
++ * TryJoins all 128 ids). The task-exit path clears the enabled bit, so the
++ * "exited but not joined" state is kept in a host-side table here and fed to
++ * the slot search as reserved ids. The task-name buffer pointer from the
++ * attribute is kept there too (its slot inside the 0x2900 struct is unknown).
++ *
++ * STUB: exit codes. The runtime does not capture a task's exit code, so the
++ * joins report task_exit_code[id] word 0, which is zeroed at create and never
++ * written -- i.e. 0. */
++enum {
++    CSTS2_SIZE           = 0x2900,   /* sizeof(CellSpursTaskset2) */
++    CSTS2_TASK_EXIT_CODE = 0x1980,   /* v128 task_exit_code[128] */
++    TS2A_SIZE            = 0x200,    /* sizeof(CellSpursTasksetAttribute2) */
++    TS2A_REVISION        = 0x00,     /* be u32 */
++    TS2A_NAME            = 0x04,     /* be u32 char* */
++    TS2A_ARGS            = 0x08,     /* be u64 */
++    TS2A_PRIORITY        = 0x10,     /* u8[8] */
++    TS2A_MAX_CONTENTION  = 0x18,     /* be u32 */
++    TS2A_ENABLE_CLEAR_LS = 0x1C,     /* be s32 */
++    TS2A_TASK_NAME_BUF   = 0x20,     /* be u32 CellSpursTaskNameBuffer* (char[128][32]) */
++    TA2_REVISION         = 0x00,     /* CellSpursTaskAttribute2 (256 B): be u32 */
++    TA2_SIZE_CONTEXT     = 0x04,     /* be u32 */
++    TA2_EA_CONTEXT       = 0x08,     /* be u64 */
++    TA2_LS_PATTERN       = 0x10,     /* 16 B */
++    TA2_NAME             = 0x20,     /* be u32 char* */
++    TS2_TASK_NAME_LEN    = 32,       /* CELL_SPURS_MAX_TASK_NAME_LENGTH */
++};
++
++#define SPURS_TS2_MAX 16
++typedef struct {
++    u32     ea;                  /* CellSpursTaskset2 guest EA, 0 = free */
++    u32     name_buf;            /* CellSpursTaskNameBuffer EA or 0 */
++    uint8_t unjoined[16];        /* created, not yet joined (task 0 = MSB of [0]) */
++} SpursTs2;
++static SpursTs2 s_ts2[SPURS_TS2_MAX];
++static int      s_ts2_lock;
++
++static void ts2_lock(void)
++{ while (__atomic_exchange_n(&s_ts2_lock, 1, __ATOMIC_ACQUIRE)) Sleep(0); }
++static void ts2_unlock(void) { __atomic_store_n(&s_ts2_lock, 0, __ATOMIC_RELEASE); }
++
++/* caller holds the lock */
++static SpursTs2* ts2_find(u32 ea)
++{
++    for (int i = 0; i < SPURS_TS2_MAX; i++) if (s_ts2[i].ea == ea) return &s_ts2[i];
++    return NULL;
++}
++
++static inline int ts2_bit(const uint8_t* b, u32 id) { return (b[id / 8] >> (7 - id % 8)) & 1; }
++
++static void ts2_copy_name(u32 dst, u32 src)
++{
++    u32 n = 0;
++    if (src) for (; n < TS2_TASK_NAME_LEN - 1; n++) {
++        uint8_t c = vm_read8(src + n);
++        if (!c) break;
++        vm_write8(dst + n, c);
++    }
++    for (; n < TS2_TASK_NAME_LEN; n++) vm_write8(dst + n, 0);
++}
++
++/* _cellSpursTasksetAttribute2Initialize(attr, revision) -- the SDK's inline
++ * cellSpursTasksetAttribute2Initialize. Defaults per RPCS3: all priorities 1,
++ * max_contention 8, no name, no task-name buffer. */
++s32 _cellSpursTasksetAttribute2Initialize(u64 attr_ea, u32 revision)
++{
++    u32 a = (u32)attr_ea;
++    if (!a) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
++    if (a & 7) return CELL_SPURS_TASK_ERROR_ALIGN;
++    memset(vm_base + a, 0, TS2A_SIZE);
++    vm_write32(a + TS2A_REVISION, revision);
++    for (u32 i = 0; i < 8; i++) vm_write8(a + TS2A_PRIORITY + i, 1);
++    vm_write32(a + TS2A_MAX_CONTENTION, 8);
++    return CELL_OK;
++}
++
++s32 cellSpursCreateTaskset2(u64 spurs_ea, u64 taskset_ea, u64 attr_ea)
++{
++    u32 sp = (u32)spurs_ea, ts = (u32)taskset_ea, a = (u32)attr_ea;
++    if (!sp || !ts) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
++    if ((sp | ts) & 0x7F) return CELL_SPURS_TASK_ERROR_ALIGN;
++
++    u64 args = 0; u32 max_contention = 8, name = 0, name_buf = 0; s32 clear_ls = 0;
++    if (a) {
++        args           = vm_read64(a + TS2A_ARGS);
++        max_contention = vm_read32(a + TS2A_MAX_CONTENTION);
++        name           = vm_read32(a + TS2A_NAME);
++        clear_ls       = (s32)vm_read32(a + TS2A_ENABLE_CLEAR_LS);
++        name_buf       = vm_read32(a + TS2A_TASK_NAME_BUF);
++    }
++    if (name_buf & 0xF) return CELL_SPURS_TASK_ERROR_ALIGN;
++
++    /* create_taskset zeroes the whole object (its size is what tells v1 and v2
++     * apart); the v1 builder then writes the shared header. */
++    memset(vm_base + ts, 0, CSTS2_SIZE);
++    s32 rc = cellSpursCreateTaskset((CellSpurs*)(uintptr_t)sp,
++                                    (CellSpursTaskset*)(uintptr_t)ts, args,
++                                    a ? (const u8*)(uintptr_t)(a + TS2A_PRIORITY) : NULL,
++                                    max_contention);
++    if (rc != CELL_OK) return rc;
++    vm_write32(ts + CSTS_SIZE_FIELD, CSTS2_SIZE);
++    vm_write8(ts + CSTS_ENABLE_CLEAR_LS, clear_ls > 0 ? 1 : 0);
++
++    ts2_lock();
++    SpursTs2* r = ts2_find(ts);
++    if (!r) r = ts2_find(0);
++    if (r) { memset(r, 0, sizeof *r); r->ea = ts; r->name_buf = name_buf; }
++    ts2_unlock();
++    if (!r) {
++        fprintf(stderr, "[cellSpurs] CreateTaskset2: more than %d live Taskset2s; "
++                        "0x%08X created without join tracking\n", SPURS_TS2_MAX, ts);
++    }
++
++    char nm[32] = {0};
++    for (u32 i = 0; name && i < sizeof nm - 1; i++) { nm[i] = (char)vm_read8(name + i); if (!nm[i]) break; }
++    printf("[cellSpurs] CreateTaskset2(spurs=0x%08X ts=0x%08X attr=0x%08X name=\"%s\" "
++           "args=0x%llX maxc=%u clearLS=%d namebuf=0x%08X)\n", sp, ts, a, nm,
++           (unsigned long long)args, max_contention, clear_ls, name_buf);
++    return CELL_OK;
++}
++
++s32 cellSpursCreateTask2(u64 taskset_ea, u64 id_ea, u64 elf_ea, u64 arg_ea, u64 attr_ea)
++{
++    u32 ts = (u32)taskset_ea, idp = (u32)id_ea, elf = (u32)elf_ea, a = (u32)attr_ea;
++    if (!ts || !idp || !elf) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
++    if ((ts & 0x7F) || (elf & 0xF) || (a & 0xF)) return CELL_SPURS_TASK_ERROR_ALIGN;
++
++    u32 ctx = 0, ctx_size = 0, lsp = 0, name = 0;
++    if (a) {
++        ctx      = (u32)vm_read64(a + TA2_EA_CONTEXT);
++        ctx_size = vm_read32(a + TA2_SIZE_CONTEXT);
++        lsp      = a + TA2_LS_PATTERN;
++        name     = vm_read32(a + TA2_NAME);
++        if (ctx & 0x7F) return CELL_SPURS_TASK_ERROR_ALIGN;
++    }
++
++    /* Serialize Taskset2 creates so the slot search and the unjoined mark are
++     * one step; the task may start (and even exit) before we mark it, which is
++     * fine -- it stays unjoined until a join reaps it. */
++    ts2_lock();
++    SpursTs2* r = ts2_find(ts);
++    uint8_t reserved[16];
++    if (r) memcpy(reserved, r->unjoined, sizeof reserved);
++    s32 rc = spurs_create_task_impl((CellSpursTaskset*)(uintptr_t)ts,
++                                    (CellSpursTaskId*)(uintptr_t)idp,
++                                    (void*)(uintptr_t)elf, (void*)(uintptr_t)ctx, ctx_size,
++                                    lsp, (u32)arg_ea, r ? reserved : NULL);
++    if (rc == CELL_OK) {
++        u32 id = vm_read32(idp);
++        if (id < CELL_SPURS_MAX_TASK) {
++            for (u32 o = 0; o < 16; o += 4) vm_write32(ts + CSTS2_TASK_EXIT_CODE + id * 16 + o, 0);
++            if (r) {
++                r->unjoined[id / 8] |= (uint8_t)(0x80u >> (id % 8));
++                if (r->name_buf) ts2_copy_name(r->name_buf + id * TS2_TASK_NAME_LEN, name);
++            }
++        }
++    }
++    ts2_unlock();
++    return rc;
++}
++
++/* blocking = JoinTask2 (wait for the task to exit), else TryJoinTask2 (BUSY). */
++static s32 spurs_join_task2(u32 ts, u32 id, u32 exit_ea, int blocking)
++{
++    if (!ts) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
++    if (ts & 0x7F) return CELL_SPURS_TASK_ERROR_ALIGN;
++    if (id >= CELL_SPURS_MAX_TASK) return CELL_SPURS_TASK_ERROR_INVAL;
++
++    ts2_lock();
++    SpursTs2* r = ts2_find(ts);
++    int known = r && ts2_bit(r->unjoined, id);
++    ts2_unlock();
++    if (r && !known) return CELL_SPURS_TASK_ERROR_SRCH;   /* never created, or joined */
++
++    /* The task-exit path (spu_taskset_task_exited) clears the enabled bit. An
++     * untracked taskset (table overflow) only gets this "enabled = running" view. */
++    while (vm_read8(ts + CSTS_ENABLED + id / 8) & (0x80u >> (id % 8))) {
++        if (!blocking) return CELL_SPURS_TASK_ERROR_BUSY;
++        Sleep(1);
++    }
++
++    if (r) {
++        ts2_lock();
++        int still = r->ea == ts && ts2_bit(r->unjoined, id);
++        if (still) r->unjoined[id / 8] &= (uint8_t)~(0x80u >> (id % 8));
++        ts2_unlock();
++        if (!still) return CELL_SPURS_TASK_ERROR_SRCH;   /* another thread joined it */
++    }
++
++    if (exit_ea) vm_write32(exit_ea, vm_read32(ts + CSTS2_TASK_EXIT_CODE + id * 16));
++    return CELL_OK;
++}
++
++s32 cellSpursJoinTask2(u64 taskset_ea, u32 id, u64 exit_ea)
++{
++    return spurs_join_task2((u32)taskset_ea, id, (u32)exit_ea, 1);
++}
++
++s32 cellSpursTryJoinTask2(u64 taskset_ea, u32 id, u64 exit_ea)
++{
++    return spurs_join_task2((u32)taskset_ea, id, (u32)exit_ea, 0);
++}
++
++s32 cellSpursDestroyTaskset2(u64 taskset_ea)
++{
++    u32 ts = (u32)taskset_ea;
++    if (!ts) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
++    if (ts & 0x7F) return CELL_SPURS_TASK_ERROR_ALIGN;
++    ts2_lock();
++    SpursTs2* r = ts2_find(ts);
++    if (r) memset(r, 0, sizeof *r);
++    ts2_unlock();
++    printf("[cellSpurs] DestroyTaskset2(ts=0x%08X)\n", ts);
++    return cellSpursDestroyTaskset((CellSpursTaskset*)(uintptr_t)ts);
++}
++
++/* cellSpursBarrierInitialize(taskset, barrier, total) -- CellSpursBarrier is
++ * 128 bytes, 128-aligned: +0x00 be u32 zero, +0x04 be u32 remained (= total),
++ * +0x34 be u32 taskset EA (RPCS3 cellSpurs.h/.cpp). The barrier itself is
++ * operated on by task-side code in main memory; this only lays it out. */
++s32 cellSpursBarrierInitialize(u64 taskset_ea, u64 barrier_ea, u32 total)
++{
++    u32 ts = (u32)taskset_ea, b = (u32)barrier_ea;
++    if (!ts || !b) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
++    if ((ts | b) & 0x7F) return CELL_SPURS_TASK_ERROR_ALIGN;
++    if (!total || total > CELL_SPURS_MAX_TASK) return CELL_SPURS_TASK_ERROR_INVAL;
++    if (vm_read32(ts + CSTS_WID) >= 2u * CELL_SPURS_MAX_WORKLOAD) return CELL_SPURS_TASK_ERROR_INVAL;
++    memset(vm_base + b, 0, 128);
++    vm_write32(b + 0x04, total);
++    vm_write32(b + 0x34, ts);
++    return CELL_OK;
++}
++
+ /* =========================================================================
   * Workload
   * =====================================================================*/
  
@@ -1696,7 +2004,7 @@ index 688ff04..33eaf7b 100644
  }
  
  /* Real (BE) CellSpursWorkloadAttribute offsets (libspurs layout; the game's
-@@ -1285,35 +1470,13 @@ enum {
+@@ -1285,35 +1749,13 @@ enum {
      WKATTR_HOOK_ARG   = 0x34,   /* be u32 */
  };
  
@@ -1734,7 +2042,7 @@ index 688ff04..33eaf7b 100644
  
      /* Decode the REAL BE attribute from guest memory. */
      u32 pm_ea = vm_read32(attr_ea + WKATTR_PM);
-@@ -1324,66 +1487,9 @@ s32 cellSpursAddWorkloadWithAttribute(CellSpurs* spurs,
+@@ -1324,66 +1766,9 @@ s32 cellSpursAddWorkloadWithAttribute(CellSpurs* spurs,
      u32 nmcls = vm_read32(attr_ea + WKATTR_NAME_CLASS);
      u32 nmins = vm_read32(attr_ea + WKATTR_NAME_INST);
  
@@ -1804,7 +2112,7 @@ index 688ff04..33eaf7b 100644
  }
  
  /* The SDK-versioned workload-attribute initializer (the import the game links;
-@@ -1393,7 +1499,13 @@ s32 _cellSpursWorkloadAttributeInitialize(u64 attr_ea, u32 revision, u32 sdkVers
+@@ -1393,7 +1778,13 @@ s32 _cellSpursWorkloadAttributeInitialize(u64 attr_ea, u32 revision, u32 sdkVers
                                            u64 pm_ea, u32 size, u64 data,
                                            u64 prio_ea, u32 minContention)
  {
@@ -1819,7 +2127,7 @@ index 688ff04..33eaf7b 100644
      vm_write32((u32)attr_ea + WKATTR_REVISION,   revision);
      vm_write32((u32)attr_ea + WKATTR_SDKVERSION, sdkVersion);
      vm_write32((u32)attr_ea + WKATTR_PM,         (u32)pm_ea);
-@@ -1403,7 +1515,10 @@ s32 _cellSpursWorkloadAttributeInitialize(u64 attr_ea, u32 revision, u32 sdkVers
+@@ -1403,7 +1794,10 @@ s32 _cellSpursWorkloadAttributeInitialize(u64 attr_ea, u32 revision, u32 sdkVers
          *(vm_base + (u32)attr_ea + WKATTR_PRIORITY + i) =
              prio_ea ? *(vm_base + (u32)prio_ea + i) : 0;
      vm_write32((u32)attr_ea + WKATTR_MIN_CONT, minContention);
@@ -1831,7 +2139,7 @@ index 688ff04..33eaf7b 100644
      vm_write32((u32)attr_ea + WKATTR_NAME_CLASS, 0);
      vm_write32((u32)attr_ea + WKATTR_NAME_INST,  0);
      vm_write32((u32)attr_ea + WKATTR_HOOK,     0);
-@@ -1413,9 +1528,22 @@ s32 _cellSpursWorkloadAttributeInitialize(u64 attr_ea, u32 revision, u32 sdkVers
+@@ -1413,9 +1807,22 @@ s32 _cellSpursWorkloadAttributeInitialize(u64 attr_ea, u32 revision, u32 sdkVers
      return CELL_OK;
  }
  
@@ -1855,7 +2163,7 @@ index 688ff04..33eaf7b 100644
      vm_write32((u32)attr_ea + WKATTR_NAME_CLASS, (u32)nameClass_ea);
      vm_write32((u32)attr_ea + WKATTR_NAME_INST,  (u32)nameInstance_ea);
      printf("[cellSpurs] WorkloadAttributeSetName(attr=0x%08X, \"%s\", \"%s\")\n",
-@@ -1427,15 +1555,38 @@ s32 cellSpursWorkloadAttributeSetName(u64 attr_ea, u64 nameClass_ea, u64 nameIns
+@@ -1427,15 +1834,38 @@ s32 cellSpursWorkloadAttributeSetName(u64 attr_ea, u64 nameClass_ea, u64 nameIns
  
  s32 cellSpursRemoveWorkload(CellSpurs* spurs, CellSpursWorkloadId wid)
  {
@@ -1884,8 +2192,8 @@ index 688ff04..33eaf7b 100644
      printf("[cellSpurs] RemoveWorkload(wid=%u)\n", wid);
      return CELL_OK;
 +
-+}
-+
+ }
+ 
 +s32 cellSpursWorkloadAttributeSetShutdownCompletionEventHook(u64 attr_ea, u64 hook_ea, u64 arg_ea)
 +{
 +    if (!attr_ea || !hook_ea) return CELL_SPURS_POLICY_MODULE_ERROR_NULL_POINTER;
@@ -1893,13 +2201,13 @@ index 688ff04..33eaf7b 100644
 +    vm_write32((u32)attr_ea + WKATTR_HOOK, (u32)hook_ea);
 +    vm_write32((u32)attr_ea + WKATTR_HOOK_ARG, (u32)arg_ea);
 +    return CELL_OK;
- }
- 
++}
++
 +/* SDK inline wrapper over the export above (not itself a firmware export). */
  s32 cellSpursWorkloadAttributeInitialize(CellSpursWorkloadAttribute* attr,
                                           u32 revision, u32 sdkVersion,
                                           const void* pm, u32 sizePm,
-@@ -1443,325 +1594,66 @@ s32 cellSpursWorkloadAttributeInitialize(CellSpursWorkloadAttribute* attr,
+@@ -1443,325 +1873,66 @@ s32 cellSpursWorkloadAttributeInitialize(CellSpursWorkloadAttribute* attr,
                                           u32 minContention,
                                           u32 maxContention)
  {
@@ -2268,7 +2576,7 @@ index 688ff04..33eaf7b 100644
      return CELL_OK;
  }
  
-@@ -1769,58 +1661,82 @@ s32 cellSpursReadyCountCompareAndSwap(CellSpurs* spurs,
+@@ -1769,58 +1940,82 @@ s32 cellSpursReadyCountCompareAndSwap(CellSpurs* spurs,
                                         CellSpursWorkloadId wid,
                                         u32* old, u32 compare, u32 value)
  {
@@ -2395,7 +2703,7 @@ index 688ff04..33eaf7b 100644
      return CELL_OK;
  }
  
-@@ -1892,7 +1808,7 @@ s32 cellSpursEventFlagSet(CellSpursEventFlag* eventFlag, u16 bits)
+@@ -1892,7 +2087,7 @@ s32 cellSpursEventFlagSet(CellSpursEventFlag* eventFlag, u16 bits)
      if (!sync)
          return CELL_SPURS_TASK_ERROR_STAT;
  
@@ -2404,7 +2712,7 @@ index 688ff04..33eaf7b 100644
          fprintf(stderr, "[cellSpurs] EventFlagSet#%d flagEA=0x%08X bits=0x%04X "
                  "events=0x%04X used=0x%04X pend=0x%04X mode=0x%04X\n",
                  _n, ea, (unsigned)bits,
-@@ -2000,11 +1916,12 @@ s32 cellSpursEventFlagWait(CellSpursEventFlag* eventFlag, u16* bits,
+@@ -2000,11 +2195,12 @@ s32 cellSpursEventFlagWait(CellSpursEventFlag* eventFlag, u16* bits,
  
      __atomic_sub_fetch(&s_ef_ppu_waiters, 1, __ATOMIC_SEQ_CST);
      ef_wait_stats(ea, ef_t0.QuadPart);
@@ -2420,7 +2728,7 @@ index 688ff04..33eaf7b 100644
          fprintf(stderr, "[cellSpurs] EventFlagWait WAKE tid=%lu flagEA=0x%08X "
                  "pattern=0x%04X got=0x%04X (waits=%u)\n",
                  (unsigned long)GetCurrentThreadId(), ea, pattern, current, waits); }
-@@ -2252,7 +2169,7 @@ s32 cellSpursCreateJobChainWithAttribute(u64 spurs_ea, u64 jc_ea, u64 attr_ea)
+@@ -2252,7 +2448,7 @@ s32 cellSpursCreateJobChainWithAttribute(u64 spurs_ea, u64 jc_ea, u64 attr_ea)
          } else if (_n == 3) {
              printf("[cellSpurs] CreateJobChainWA raw dumps suppressed from here\n");
          }
@@ -2429,7 +2737,7 @@ index 688ff04..33eaf7b 100644
      }
      printf("[cellSpurs] CreateJobChainWithAttribute(jc=0x%08X entry=0x%08X sizeDesc=%u maxGrab=%u name=\"%s\")\n",
             (u32)jc_ea, entry, sd_mg >> 16, sd_mg & 0xFFFFu,
-@@ -2285,7 +2202,7 @@ s32 cellSpursCreateJobChain(u64 spurs_ea, u64 jc_ea, u64 entry_ea,
+@@ -2285,7 +2481,7 @@ s32 cellSpursCreateJobChain(u64 spurs_ea, u64 jc_ea, u64 entry_ea,
      if (!jc_ea) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
  
      static int _n = 0;
@@ -2438,7 +2746,7 @@ index 688ff04..33eaf7b 100644
          printf("[cellSpurs] CreateJobChain(jc=0x%08X entry=0x%08X sizeDesc=%u maxGrab=%u "
                 "maxCont=%u autoReq=%u)\n",
                 (u32)jc_ea, (u32)entry_ea, sizeJobDescriptor, maxGrabbedJob,
-@@ -2322,12 +2239,96 @@ enum {                              /* CellSpursJobHeader (48 B) */
+@@ -2322,12 +2518,96 @@ enum {                              /* CellSpursJobHeader (48 B) */
      JH_SIZE          = 0x30,
  };
  
@@ -2473,7 +2781,8 @@ index 688ff04..33eaf7b 100644
 + * read a descriptor beyond one of those before the jobs ahead of it are done,
 + * and a title may fill it only then. */
 +static void jc_prefetch_lap(u32 pc, u32 size_desc, u32 max_grab)
-+{
+ {
+-    u64 ea_bin_raw = vm_read64(job_ea + JH_EA_BINARY);
 +    static int on = -1;
 +    if (on < 0) { const char* e = getenv("PS3RECOMP_JC_PREFETCH"); on = !e || e[0] != '0'; }
 +    t_pf_n = 0;
@@ -2500,8 +2809,7 @@ index 688ff04..33eaf7b 100644
 +/* The copy for this command, used once: a later pass over the same command
 + * (a loop with no guard in it) reads the descriptor afresh. */
 +static const u8* jc_prefetched(u32 pc, u32 job_ea, u8* out, u32 dsz)
- {
--    u64 ea_bin_raw = vm_read64(job_ea + JH_EA_BINARY);
++{
 +    for (int i = 0; i < t_pf_n; i++)
 +        if (t_pf[i].pc == pc && t_pf[i].job_ea == job_ea) {
 +            memcpy(out, t_pf[i].desc, dsz);
@@ -2539,7 +2847,7 @@ index 688ff04..33eaf7b 100644
  
      { static int _n = 0;
        if (_n < 8) {
-@@ -2339,14 +2340,14 @@ static void jc_run_one_job(u32 job_ea, int idx, u32 size_desc)
+@@ -2339,14 +2619,14 @@ static void jc_run_one_job(u32 job_ea, int idx, u32 size_desc)
            }
            printf("\n");
        }
@@ -2557,7 +2865,7 @@ index 688ff04..33eaf7b 100644
      }
      /* A jobchain job is NOT a SPURS task: Sony's jm2 stages the whole working
       * set in local store and enters the job's CRT with r3 = CellSpursJobContext2*
-@@ -2355,7 +2356,7 @@ static void jc_run_one_job(u32 job_ea, int idx, u32 size_desc)
+@@ -2355,7 +2635,7 @@ static void jc_run_one_job(u32 job_ea, int idx, u32 size_desc)
       * DMA traffic at all. spu_workload_dispatch_job reproduces jm2's staging.
       * Synchronous by design: a job runs to completion, and the chain's own
       * NEXT/CALL/RET commands are what order them. */
@@ -2566,7 +2874,7 @@ index 688ff04..33eaf7b 100644
  }
  
  /* Walk one chain's command stream. Bounded: a malformed or self-looping stream
-@@ -2381,6 +2382,81 @@ static void jc_run_one_job(u32 job_ea, int idx, u32 size_desc)
+@@ -2381,6 +2661,81 @@ static void jc_run_one_job(u32 job_ea, int idx, u32 size_desc)
   * what makes "run this job when I say so" mean anything.
   * -----------------------------------------------------------------------*/
  
@@ -2648,7 +2956,7 @@ index 688ff04..33eaf7b 100644
  #define MAX_JOBGUARDS 32
  static struct {
      u32 ea;          /* guest CellSpursJobGuard address (128-byte aligned) */
-@@ -2388,9 +2464,30 @@ static struct {
+@@ -2388,9 +2743,30 @@ static struct {
      u32 reset;       /* value to restore when autoReset is set             */
      u32 pending;     /* notifications received, not yet consumed        */
      u32 auto_reset;
@@ -2679,7 +2987,7 @@ index 688ff04..33eaf7b 100644
  static int jg_find(u32 ea)
  {
      for (int i = 0; i < MAX_JOBGUARDS; i++)
-@@ -2411,17 +2508,21 @@ s32 cellSpursJobGuardInitialize(u64 jc_ea, u64 guard_ea, u32 notify_count,
+@@ -2411,17 +2787,21 @@ s32 cellSpursJobGuardInitialize(u64 jc_ea, u64 guard_ea, u32 notify_count,
      u32 ea = (u32)guard_ea;
      if (!ea) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
  
@@ -2702,7 +3010,7 @@ index 688ff04..33eaf7b 100644
  
      /* Mirror the count into guest memory. The SPU side reads the guard on
       * hardware; keeping the two consistent costs nothing and makes a guest-side
-@@ -2447,13 +2548,48 @@ s32 cellSpursJobGuardNotify(u64 guard_ea)
+@@ -2447,13 +2827,48 @@ s32 cellSpursJobGuardNotify(u64 guard_ea)
       * OBSERVED zero, which threw away any notify that arrived while the job
       * was still running -- the title notified 6 times and the chain completed
       * 2 laps, so the thread waiting on the other 4 completions never woke. */
@@ -2753,7 +3061,7 @@ index 688ff04..33eaf7b 100644
            printf("[cellSpurs] JobGuardNotify(0x%08X) -> %u remaining\n",
                   ea, s_jobguards[i].count); }
      return CELL_OK;
-@@ -2465,8 +2601,13 @@ s32 cellSpursJobGuardReset(u64 guard_ea)
+@@ -2465,8 +2880,13 @@ s32 cellSpursJobGuardReset(u64 guard_ea)
      u32 ea = (u32)guard_ea;
      int i = jg_find(ea);
      if (i < 0) return CELL_SPURS_TASK_ERROR_INVAL;
@@ -2767,7 +3075,7 @@ index 688ff04..33eaf7b 100644
      return CELL_OK;
  }
  
-@@ -2474,11 +2615,26 @@ s32 cellSpursJobGuardReset(u64 guard_ea)
+@@ -2474,11 +2894,26 @@ s32 cellSpursJobGuardReset(u64 guard_ea)
   * chain then gives up this pass rather than spinning the walker thread
   * forever). An unknown guard opens immediately -- a chain guarded by something
   * we never saw initialised must not deadlock the walker. */
@@ -2796,7 +3104,7 @@ index 688ff04..33eaf7b 100644
          if (s_jobguards[i].pending >= s_jobguards[i].reset) {
              /* Consume exactly one release worth of credits, so notifies that
               * arrived during the previous lap still count. */
-@@ -2486,15 +2642,47 @@ static int jg_wait(u32 ea)
+@@ -2486,15 +2921,47 @@ static int jg_wait(u32 ea)
              if (!s_jobguards[i].auto_reset) s_jobguards[i].reset = 0;
              s_jobguards[i].count = s_jobguards[i].reset;
              vm_write32(ea, s_jobguards[i].count);
@@ -2848,7 +3156,7 @@ index 688ff04..33eaf7b 100644
      return 0;
  }
  
-@@ -2527,6 +2715,13 @@ static u64 spurs_event_data3_probe(void)
+@@ -2527,6 +2994,13 @@ static u64 spurs_event_data3_probe(void)
      return (u64)(unsigned)v;
  }
  
@@ -2862,7 +3170,7 @@ index 688ff04..33eaf7b 100644
  static void jc_signal_done(u32 jc_ea, int job_index)
  {
      /* Carry the job's mailbox answer in the completion event. On hardware the
-@@ -2541,6 +2736,7 @@ static void jc_signal_done(u32 jc_ea, int job_index)
+@@ -2541,6 +3015,7 @@ static void jc_signal_done(u32 jc_ea, int job_index)
       * so a data2 pinned at 0 never ends that loop -- with the chain's lwmutex
       * held, which blocks the main thread's teardown behind it. A chain-level
       * signal (job_index < 0) sends 0. */
@@ -2870,7 +3178,7 @@ index 688ff04..33eaf7b 100644
      u64 d2 = (u64)(unsigned)(job_index < 0 ? 0 : job_index);
      u64 mbox = 0, d3 = 0;
      (void)spurs_event_data3_probe();   /* prime d3_probe_valid */
-@@ -2574,7 +2770,7 @@ static void jc_signal_done(u32 jc_ea, int job_index)
+@@ -2574,7 +3049,7 @@ static void jc_signal_done(u32 jc_ea, int job_index)
                                                  ? spurs_event_data3_probe()
                                                  : (answers_a_count ? mbox : 0));
          static int n = 0;
@@ -2879,7 +3187,7 @@ index 688ff04..33eaf7b 100644
              printf("[cellSpurs] chain 0x%08X job %d done -> event queue %u "
                     "(data2=%llu rc=%d)\n",
                     jc_ea, job_index, s_spurs_event_queue[i],
-@@ -2582,10 +2778,189 @@ static void jc_signal_done(u32 jc_ea, int job_index)
+@@ -2582,10 +3057,189 @@ static void jc_signal_done(u32 jc_ea, int job_index)
      }
  }
  
@@ -3071,7 +3379,7 @@ index 688ff04..33eaf7b 100644
      /* Bound IDLE steps, not total steps. A SPURS job chain is frequently a
       * SERVICE LOOP -- guard, job, sync, next, repeat -- and is meant to run for
       * the lifetime of the subsystem. A flat cap on total commands therefore
-@@ -2596,21 +2971,64 @@ static void jc_execute(u32 entry_ea, u32 jc_ea, u32 size_desc)
+@@ -2596,21 +3250,64 @@ static void jc_execute(u32 entry_ea, u32 jc_ea, u32 size_desc)
      int idle = 0;
      for (;; idle++) {
          if (idle > 4096) break;
@@ -3140,7 +3448,7 @@ index 688ff04..33eaf7b 100644
              pc += 8; continue;
          }
          if (op == 1) { pc = (u32)(cmd & ~7ull); continue; }   /* RESET_PC */
-@@ -2619,22 +3037,35 @@ static void jc_execute(u32 entry_ea, u32 jc_ea, u32 size_desc)
+@@ -2619,22 +3316,35 @@ static void jc_execute(u32 entry_ea, u32 jc_ea, u32 size_desc)
          if (op == 7) {
              if (ext == (7 | (15 << 3))) {                     /* END */
                  printf("[cellSpurs] chain 0x%08X: END after %d job(s)\n", jc_ea, jobs);
@@ -3182,7 +3490,7 @@ index 688ff04..33eaf7b 100644
          }
          /* NOP(0) / SYNC+LWSYNC(2, one virtual SPU: nothing to wait for) /
           * FLUSH(5) / JOBLIST(6, nested arrays TODO) / SET_LABEL */
-@@ -2643,6 +3074,8 @@ static void jc_execute(u32 entry_ea, u32 jc_ea, u32 size_desc)
+@@ -2643,6 +3353,8 @@ static void jc_execute(u32 entry_ea, u32 jc_ea, u32 size_desc)
      printf("[cellSpurs] chain 0x%08X: 4096 commands with no job run after %d "
             "job(s) -- malformed?\n",
             jc_ea, jobs);
@@ -3191,7 +3499,7 @@ index 688ff04..33eaf7b 100644
  }
  
  static DWORD WINAPI jc_thread(LPVOID p)
-@@ -2655,12 +3088,12 @@ static DWORD WINAPI jc_thread(LPVOID p)
+@@ -2655,12 +3367,12 @@ static DWORD WINAPI jc_thread(LPVOID p)
       * Confirms timing-vs-never before committing to the async rewrite. */
      { const char* d = getenv("SPURS_JC_DELAY");
        if (d && *d) Sleep((unsigned)atoi(d)); }
@@ -3207,7 +3515,7 @@ index 688ff04..33eaf7b 100644
      return 0;
  }
  
-@@ -2693,7 +3126,9 @@ static s32 jc_start(u64 jc_ea, const char* who)
+@@ -2693,7 +3405,9 @@ static s32 jc_start(u64 jc_ea, const char* who)
          if (s_off || !s_jobchains[i].entry_ea) return CELL_OK;
          /* Coalesce: a chain already being walked must not start twice. */
          if (_InterlockedCompareExchange(&s_jobchains[i].running, 1, 0) == 0) {
@@ -3218,7 +3526,7 @@ index 688ff04..33eaf7b 100644
              if (th) CloseHandle(th);
              else s_jobchains[i].running = 0;
          }
-@@ -2724,10 +3159,11 @@ s32 cellSpursRunJobChain(u64 jc_ea)
+@@ -2724,10 +3438,11 @@ s32 cellSpursRunJobChain(u64 jc_ea)
  s32 cellSpursShutdownJobChain(u64 jc_ea)
  {
      static int _n = 0;
@@ -3231,7 +3539,7 @@ index 688ff04..33eaf7b 100644
              return CELL_OK;
          }
      }
-@@ -2739,7 +3175,7 @@ s32 cellSpursShutdownJobChain(u64 jc_ea)
+@@ -2739,7 +3454,7 @@ s32 cellSpursShutdownJobChain(u64 jc_ea)
  s32 cellSpursJoinJobChain(u64 jc_ea)
  {
      static int _n = 0;
@@ -3240,7 +3548,7 @@ index 688ff04..33eaf7b 100644
      /* Run/Kick walk the chain on a host thread, so Join has to wait for it.
       * Returning at once told the title its jobs were done while they were
       * still running. The Simpsons Arcade Game runs and joins a chain every
-@@ -2764,7 +3200,7 @@ s32 cellSpursJoinJobChain(u64 jc_ea)
+@@ -2764,7 +3479,7 @@ s32 cellSpursJoinJobChain(u64 jc_ea)
  s32 cellSpursJobChainGetError(u64 jc_ea, u64 cause_out_ea)
  {
      static int _n = 0;
@@ -3249,7 +3557,7 @@ index 688ff04..33eaf7b 100644
      if (cause_out_ea) vm_write32((u32)cause_out_ea, 0);
      return CELL_OK;
  }
-@@ -2827,7 +3263,7 @@ s32 _cellSpursQueueInitialize(u64 spurs_ea, u64 taskset_ea, u64 queue_ea,
+@@ -2827,7 +3542,7 @@ s32 _cellSpursQueueInitialize(u64 spurs_ea, u64 taskset_ea, u64 queue_ea,
      memset(vm_base + (uint32_t)buffer_ea, 0, (size_t)size * depth);
  
      static int _n = 0;
@@ -3258,7 +3566,7 @@ index 688ff04..33eaf7b 100644
          printf("[cellSpurs] _QueueInitialize(taskset=0x%08X q=0x%08X buf=0x%08X size=%u depth=%u dir=%u) -> BE line written\n",
                 (u32)taskset_ea, (u32)queue_ea, (u32)buffer_ea, size, depth, direction);
      return CELL_OK;
-@@ -2836,7 +3272,7 @@ s32 _cellSpursQueueInitialize(u64 spurs_ea, u64 taskset_ea, u64 queue_ea,
+@@ -2836,7 +3551,7 @@ s32 _cellSpursQueueInitialize(u64 spurs_ea, u64 taskset_ea, u64 queue_ea,
  s32 cellSpursQueueClear(u64 queue_ea)
  {
      static int _n = 0;
@@ -3267,7 +3575,7 @@ index 688ff04..33eaf7b 100644
      return CELL_OK;
  }
  
-@@ -2867,7 +3303,7 @@ s32 cellSpursQueuePushBody(u64 queue_ea, u64 data_ea, u32 isBlocking)
+@@ -2867,7 +3582,7 @@ s32 cellSpursQueuePushBody(u64 queue_ea, u64 data_ea, u32 isBlocking)
                     (u32)queue_ea, (u32)data_ea, isBlocking);
          else if (_n == 8)
              printf("[cellSpurs] QueuePushBody further logs suppressed\n");
@@ -3276,7 +3584,7 @@ index 688ff04..33eaf7b 100644
          return CELL_OK;
      }
  
-@@ -2941,7 +3377,7 @@ s32 cellSpursQueuePushBody(u64 queue_ea, u64 data_ea, u32 isBlocking)
+@@ -2941,7 +3656,7 @@ s32 cellSpursQueuePushBody(u64 queue_ea, u64 data_ea, u32 isBlocking)
          spu_taskset_signal_task(tsp, (uint32_t)woke);
      }
  
@@ -3285,7 +3593,7 @@ index 688ff04..33eaf7b 100644
          printf("[cellSpurs] QueuePush#%d q=0x%08X slot=%u (cur=%u->%u) buf=0x%08X+0x%X "
                 "size=%u depth=%u waiters=%u woke=%d sync=%d/%d tail=%d->%d taskset=0x%08X\n",
                 _n, q, slot, cur, nxt, buf, slot * sz, sz, dep, waiters, woke, sync, nsync, tail, ntail, tsp);
-@@ -2952,83 +3388,143 @@ s32 cellSpursQueuePushBody(u64 queue_ea, u64 data_ea, u32 isBlocking)
+@@ -2952,83 +3667,143 @@ s32 cellSpursQueuePushBody(u64 queue_ea, u64 data_ea, u32 isBlocking)
   * Misc SPURS surface the title links (logged CELL_OK stubs).
   * =====================================================================*/
  
@@ -3475,7 +3783,7 @@ index 688ff04..33eaf7b 100644
      return CELL_OK;
  }
  
-@@ -3119,7 +3615,7 @@ s32 cellSpursTaskGetReadOnlyAreaPattern(u64 pattern_ea, u64 elf_ea)
+@@ -3119,7 +3894,7 @@ s32 cellSpursTaskGetReadOnlyAreaPattern(u64 pattern_ea, u64 elf_ea)
      vm_write64((uint32_t)pattern_ea + 8, word[1]);
  
      static int _n = 0;
@@ -3484,7 +3792,7 @@ index 688ff04..33eaf7b 100644
          printf("[cellSpurs] TaskGetReadOnlyAreaPattern(elf=0x%08X) -> %016llX %016llX\n",
                 (u32)elf_ea, (unsigned long long)word[0], (unsigned long long)word[1]);
      return CELL_OK;
-@@ -3146,7 +3642,7 @@ s32 cellSpursTaskGetContextSaveAreaSize(u64 size_out_ea, u64 pattern_ea)
+@@ -3146,7 +3921,7 @@ s32 cellSpursTaskGetContextSaveAreaSize(u64 size_out_ea, u64 pattern_ea)
      vm_write32((uint32_t)size_out_ea, size);
  
      static int _n = 0;
@@ -3493,7 +3801,7 @@ index 688ff04..33eaf7b 100644
          printf("[cellSpurs] TaskGetContextSaveAreaSize(ls=%016llX %016llX, %u blocks) -> %u (0x%X)\n",
                 (unsigned long long)hi, (unsigned long long)lo, blocks, size, size);
      return CELL_OK;
-@@ -3159,7 +3655,7 @@ s32 cellSpursTasksetAttributeSetTasksetSize(CellSpursTasksetAttribute* attr, u32
+@@ -3159,7 +3934,7 @@ s32 cellSpursTasksetAttributeSetTasksetSize(CellSpursTasksetAttribute* attr, u32
  {
      if (!attr) return CELL_SPURS_TASK_ERROR_NULL_POINTER;
      static int _n = 0;
@@ -3502,7 +3810,7 @@ index 688ff04..33eaf7b 100644
      return CELL_OK;
  }
  
-@@ -3169,42 +3665,61 @@ s32 cellSpursTasksetAttributeSetTasksetSize(CellSpursTasksetAttribute* attr, u32
+@@ -3169,42 +3944,61 @@ s32 cellSpursTasksetAttributeSetTasksetSize(CellSpursTasksetAttribute* attr, u32
  s32 cellSpursQueueAttachLv2EventQueue(u64 queue_ea)
  {
      static int _n = 0;
@@ -3594,7 +3902,7 @@ index 688ff04..33eaf7b 100644
  s32 _cellSpursLFQueueInitialize(u64 owner_ea, u64 queue_ea, u64 buffer_ea,
                                  u32 size, u32 depth, u32 direction)
  {
-@@ -3213,30 +3728,17 @@ s32 _cellSpursLFQueueInitialize(u64 owner_ea, u64 queue_ea, u64 buffer_ea,
+@@ -3213,30 +4007,17 @@ s32 _cellSpursLFQueueInitialize(u64 owner_ea, u64 queue_ea, u64 buffer_ea,
  
      uint32_t q = (uint32_t)queue_ea;
      for (uint32_t o = 0; o < 128; o += 4) vm_write32(q + o, 0);
@@ -3632,12 +3940,21 @@ index 688ff04..33eaf7b 100644
                 (u32)owner_ea, (u32)queue_ea, (u32)buffer_ea, size, depth, direction);
      return CELL_OK;
  }
-@@ -3244,6 +3746,135 @@ s32 _cellSpursLFQueueInitialize(u64 owner_ea, u64 queue_ea, u64 buffer_ea,
+@@ -3244,6 +4025,144 @@ s32 _cellSpursLFQueueInitialize(u64 owner_ea, u64 queue_ea, u64 buffer_ea,
  s32 cellSpursLFQueueAttachLv2EventQueue(u64 queue_ea)
  {
      static int _n = 0;
 -    if (_n++ < 8) printf("[cellSpurs] LFQueueAttachLv2EventQueue(q=0x%08X)\n", (u32)queue_ea);
 +    if (__atomic_load_n(&_n, __ATOMIC_RELAXED) < 8 && __atomic_fetch_add(&_n, 1, __ATOMIC_RELAXED) < 8) printf("[cellSpurs] LFQueueAttachLv2EventQueue(q=0x%08X)\n", (u32)queue_ea);
++    return CELL_OK;
++}
++
++/* The mirror of cellSpursLFQueueAttachLv2EventQueue: there is no lv2 queue
++ * bound (waiters are woken through the taskset signal path), so accept. */
++s32 cellSpursLFQueueDetachLv2EventQueue(u64 queue_ea)
++{
++    static int _n = 0;
++    if (__atomic_load_n(&_n, __ATOMIC_RELAXED) < 8 && __atomic_fetch_add(&_n, 1, __ATOMIC_RELAXED) < 8) printf("[cellSpurs] LFQueueDetachLv2EventQueue(q=0x%08X)\n", (u32)queue_ea);
 +    return CELL_OK;
 +}
 +
@@ -3770,7 +4087,7 @@ index 688ff04..33eaf7b 100644
      return CELL_OK;
  }
 diff --git a/libs/spurs/cellSpurs.h b/libs/spurs/cellSpurs.h
-index 3023f1b..ddf2184 100644
+index 3023f1b3..3fce6d46 100644
 --- a/libs/spurs/cellSpurs.h
 +++ b/libs/spurs/cellSpurs.h
 @@ -30,18 +30,32 @@ extern "C" {
@@ -3818,17 +4135,28 @@ index 3023f1b..ddf2184 100644
  
  /* ---------------------------------------------------------------------------
   * Constants
-@@ -289,6 +303,7 @@ s32 cellSpursQueueAttachLv2EventQueue(u64 queue_ea);
+@@ -289,6 +303,18 @@ s32 cellSpursQueueAttachLv2EventQueue(u64 queue_ea);
  s32 _cellSpursLFQueueInitialize(u64 owner_ea, u64 queue_ea, u64 buffer_ea,
                                  u32 size, u32 depth, u32 direction);
  s32 cellSpursLFQueueAttachLv2EventQueue(u64 queue_ea);
++s32 cellSpursLFQueueDetachLv2EventQueue(u64 queue_ea);
++
++/* Taskset2 (CellSpursTaskset2 = 0x2900 bytes, CellSpursTasksetAttribute2 = 512,
++ * CellSpursTaskAttribute2 = 256; all arguments are guest EAs). */
++s32 _cellSpursTasksetAttribute2Initialize(u64 attr_ea, u32 revision);
++s32 cellSpursCreateTaskset2(u64 spurs_ea, u64 taskset_ea, u64 attr_ea);
++s32 cellSpursCreateTask2(u64 taskset_ea, u64 id_ea, u64 elf_ea, u64 arg_ea, u64 attr_ea);
++s32 cellSpursJoinTask2(u64 taskset_ea, u32 id, u64 exit_ea);
++s32 cellSpursTryJoinTask2(u64 taskset_ea, u32 id, u64 exit_ea);
++s32 cellSpursDestroyTaskset2(u64 taskset_ea);
++s32 cellSpursBarrierInitialize(u64 taskset_ea, u64 barrier_ea, u32 total);
 +s32 _cellSpursLFQueuePushBody(u64 queue_ea, u64 data_ea, u32 flags);
  
  s32 cellSpursEventFlagSet(CellSpursEventFlag* eventFlag, u16 bits);
  s32 cellSpursEventFlagWait(CellSpursEventFlag* eventFlag, u16* bits,
 diff --git a/libs/spurs/spurs_instance.h b/libs/spurs/spurs_instance.h
 new file mode 100644
-index 0000000..eb0596f
+index 00000000..eb0596fc
 --- /dev/null
 +++ b/libs/spurs/spurs_instance.h
 @@ -0,0 +1,102 @@
@@ -3936,7 +4264,7 @@ index 0000000..eb0596f
 +#endif
 diff --git a/libs/spurs/spurs_kernel.c b/libs/spurs/spurs_kernel.c
 new file mode 100644
-index 0000000..570ba85
+index 00000000..570ba85a
 --- /dev/null
 +++ b/libs/spurs/spurs_kernel.c
 @@ -0,0 +1,993 @@
@@ -4933,8 +5261,250 @@ index 0000000..570ba85
 +    in->handler_th = in->event_th = NULL;
 +    ReleaseSRWLockExclusive(&s_table);
 +}
+diff --git a/libs/spurs/tests/test_spurs_stubs.c b/libs/spurs/tests/test_spurs_stubs.c
+new file mode 100644
+index 00000000..e592013e
+--- /dev/null
++++ b/libs/spurs/tests/test_spurs_stubs.c
+@@ -0,0 +1,45 @@
++/*
++ * ps3recomp - link stubs for the libs/spurs host tests
++ *
++ * libps3recomp_runtime.a leaves the PPU side (runtime/ppu: loader, HLE table,
++ * reservation and write-watch hooks, VFS root) to the title's executable. A
++ * test that links the library without a title supplies these instead. None of
++ * them is reached by the paths the spurs tests exercise; they only satisfy the
++ * linker for objects pulled in alongside cellSpurs.o. Deliberately does NOT
++ * include ppu_memory.h: the extern vm_* below are the out-of-line copies some
++ * C++ objects expect, while the C sources use the header's static inlines.
++ */
++#include <stdint.h>
++#include <string.h>
++
++extern uint8_t* vm_base;
++
++int         g_resv_store_active;
++uint32_t    g_ww_lo, g_ww_hi;
++uint32_t    ppu_vm_size = 0x10000000u;
++int         g_barrier_sync_watch;
++const char* ppu_vfs_root = ".";
++uint32_t    g_spu_image_src_ea, g_spu_image_ls_start, g_spu_image_span;
++__thread void* g_active_ctx;
++
++void ps3_ww_report_inline(void) {}
++void ppu_resv_break_store(void) {}
++void ppu_resv_register(void) {}
++void ppu_register_function(void) {}
++void ppu_dump_guest_stack(void) {}
++void ppu_dump_bctrl_ring(void) {}
++void ppu_log_host_chain(void) {}
++void ppu_guest_callstack(void) {}
++void ppu_guest_caller(void) {}
++void ppu_guard_page(uint32_t a) { (void)a; }
++void lbp_breadcrumb_dump(void) {}
++const char* ppu_prof_resolve_host(void) { return "?"; }
++void ps3_hle_register_ctx(uint32_t nid, const char* name, void (*fn)(void*))
++{ (void)nid; (void)name; (void)fn; }
++
++static uint32_t bswap32(uint32_t v) { return __builtin_bswap32(v); }
++uint8_t  vm_read8(uint32_t a)  { return vm_base[a]; }
++uint32_t vm_read32(uint32_t a) { uint32_t v; memcpy(&v, vm_base + a, 4); return bswap32(v); }
++uint64_t vm_read64(uint32_t a) { return ((uint64_t)vm_read32(a) << 32) | vm_read32(a + 4); }
++void vm_write8(uint32_t a, uint8_t v)   { vm_base[a] = v; }
++void vm_write32(uint32_t a, uint32_t v) { v = bswap32(v); memcpy(vm_base + a, &v, 4); }
+diff --git a/libs/spurs/tests/test_spurs_taskset2.c b/libs/spurs/tests/test_spurs_taskset2.c
+new file mode 100644
+index 00000000..8d29b294
+--- /dev/null
++++ b/libs/spurs/tests/test_spurs_taskset2.c
+@@ -0,0 +1,185 @@
++/*
++ * ps3recomp - cellSpurs Taskset2 / Barrier HLE test
++ *
++ * Drives the Taskset2 entry points the way MotorStorm Apocalypse's Havok
++ * (hkSpuUtil) does -- attribute init, CreateTaskset2, CreateTask2 with a NULL
++ * attribute, TryJoinTask2/JoinTask2 reaping, DestroyTaskset2 -- and checks the
++ * big-endian guest layout they leave behind, plus cellSpursBarrierInitialize.
++ *
++ * The task "ELF" is not an ELF, so spu_elf_image_size() returns 0 and nothing
++ * is dispatched: a task exit is simulated by clearing its enabled bit, which
++ * is what the runtime's task-exit path (spu_taskset_task_exited) does.
++ *
++ * Build (from the ps3recomp root, after building the runtime library into
++ * <build>, e.g. cmake -S . -B <build> -G Ninja && cmake --build <build>
++ * --target ps3recomp_runtime):
++ *
++ *   cc -std=gnu17 -O1 -D_GNU_SOURCE -Iinclude -Ilibs/spurs -Iruntime/spu \
++ *      -Iruntime/ppu -Iruntime/memory -Iruntime/syscalls -Iruntime/platform \
++ *      libs/spurs/tests/test_spurs_taskset2.c libs/spurs/tests/test_spurs_stubs.c \
++ *      <build>/libps3recomp_runtime.a \
++ *      -lpthread -lm -lstdc++ -o /tmp/test_spurs_taskset2 && /tmp/test_spurs_taskset2
++ */
++#include "cellSpurs.h"
++#include "spurs_taskset.h"
++#include <pthread.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#define MEM_SIZE (16u << 20)
++uint8_t* vm_base;
++
++static int g_fail, g_pass;
++#define CHECK(c) do { if (c) g_pass++; else { g_fail++; \
++    fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); } } while (0)
++
++enum {
++    SPURS_EA   = 0x100000,   /* CellSpurs (128-aligned) */
++    TS_EA      = 0x200000,   /* CellSpursTaskset2 (0x2900) */
++    ATTR_EA    = 0x210000,   /* CellSpursTasksetAttribute2 (512) */
++    NAMEBUF_EA = 0x211000,   /* CellSpursTaskNameBuffer (128 x 32) */
++    TS_NAME_EA = 0x213000,
++    ELF_EA     = 0x220000,   /* not an SPU ELF -> never dispatched */
++    ARG_EA     = 0x230000,   /* CellSpursTaskArgument (16) */
++    ID_EA      = 0x230100,   /* CellSpursTaskId out */
++    EXIT_EA    = 0x230200,   /* s32 exit code out */
++    TATTR_EA   = 0x230400,   /* CellSpursTaskAttribute2 (256) */
++    TNAME_EA   = 0x230600,
++    BARRIER_EA = 0x240000,
++};
++
++static void put_str(u32 ea, const char* s) { memcpy(vm_base + ea, s, strlen(s) + 1); }
++
++static void task_exit(u32 id)   /* what spu_taskset_task_exited does to the bitsets */
++{
++    vm_write8(TS_EA + CSTS_ENABLED + id / 8,
++              (uint8_t)(vm_read8(TS_EA + CSTS_ENABLED + id / 8) & ~(0x80u >> (id % 8))));
++}
++
++static int create(u32 attr)
++{
++    vm_write32(ID_EA, 0xDEADBEEF);
++    s32 rc = cellSpursCreateTask2(TS_EA, ID_EA, ELF_EA, ARG_EA, attr);
++    return rc == CELL_OK ? (int)vm_read32(ID_EA) : -1;
++}
++
++static void* exit_later(void* p)
++{
++    usleep(30 * 1000);
++    task_exit((u32)(uintptr_t)p);
++    return NULL;
++}
++
++int main(void)
++{
++    vm_base = (uint8_t*)calloc(1, MEM_SIZE);
++    if (!vm_base) return 2;
++
++    CHECK(cellSpursInitialize((CellSpurs*)(uintptr_t)SPURS_EA, 1, 100, 1000, 0) == CELL_OK);
++
++    /* ---- attribute defaults (RPCS3 _cellSpursTasksetAttribute2Initialize) ---- */
++    memset(vm_base + ATTR_EA, 0xCC, 0x200);
++    CHECK(_cellSpursTasksetAttribute2Initialize(ATTR_EA, 0) == CELL_OK);
++    CHECK(vm_read32(ATTR_EA + 0x00) == 0);
++    CHECK(vm_read32(ATTR_EA + 0x04) == 0);
++    CHECK(vm_read64(ATTR_EA + 0x08) == 0);
++    for (int i = 0; i < 8; i++) CHECK(vm_read8(ATTR_EA + 0x10 + i) == 1);
++    CHECK(vm_read32(ATTR_EA + 0x18) == 8);
++    CHECK(vm_read32(ATTR_EA + 0x20) == 0);
++    CHECK(vm_read8(ATTR_EA + 0x1FF) == 0);
++    CHECK(_cellSpursTasksetAttribute2Initialize(0, 0) == (s32)CELL_SPURS_TASK_ERROR_NULL_POINTER);
++
++    /* Havok fills in name, args, priorities and max contention */
++    put_str(TS_NAME_EA, "HavokSpursTaskset");
++    vm_write32(ATTR_EA + 0x04, TS_NAME_EA);
++    vm_write64(ATTR_EA + 0x08, 0x1122334455667788ull);
++    vm_write32(ATTR_EA + 0x18, 5);
++    vm_write32(ATTR_EA + 0x1C, 1);
++    vm_write32(ATTR_EA + 0x20, NAMEBUF_EA);
++
++    /* ---- CreateTaskset2 ---- */
++    CHECK(cellSpursCreateTaskset2(SPURS_EA, TS_EA + 8, ATTR_EA) == (s32)CELL_SPURS_TASK_ERROR_ALIGN);
++    CHECK(cellSpursCreateTaskset2(0, TS_EA, ATTR_EA) == (s32)CELL_SPURS_TASK_ERROR_NULL_POINTER);
++    memset(vm_base + TS_EA, 0xAB, 0x2900);
++    CHECK(cellSpursCreateTaskset2(SPURS_EA, TS_EA, ATTR_EA) == CELL_OK);
++    CHECK(vm_read64(TS_EA + CSTS_SPURS) == SPURS_EA);
++    CHECK(vm_read64(TS_EA + CSTS_ARGS) == 0x1122334455667788ull);
++    CHECK(vm_read8(TS_EA + CSTS_ENABLE_CLEAR_LS) == 1);
++    CHECK(vm_read32(TS_EA + CSTS_SIZE_FIELD) == 0x2900);
++    CHECK(vm_read32(TS_EA + CSTS_ENABLED) == 0);
++    CHECK(vm_read32(TS_EA + 0x1980) == 0);      /* task_exit_code[0] */
++    CHECK(vm_read8(TS_EA + 0x28FF) == 0);       /* whole 0x2900 zeroed */
++
++    /* ---- CreateTask2: ids, TaskInfo, names ---- */
++    for (int i = 0; i < 4; i++) vm_write32(ARG_EA + i * 4, 0xA0 + i);
++    CHECK(cellSpursCreateTask2(TS_EA, 0, ELF_EA, ARG_EA, 0) == (s32)CELL_SPURS_TASK_ERROR_NULL_POINTER);
++    CHECK(cellSpursCreateTask2(TS_EA, ID_EA, ELF_EA + 4, ARG_EA, 0) == (s32)CELL_SPURS_TASK_ERROR_ALIGN);
++    CHECK(create(0) == 0);
++    CHECK(create(0) == 1);
++    memset(vm_base + TATTR_EA, 0, 256);
++    put_str(TNAME_EA, "hkpIntegrate");
++    vm_write32(TATTR_EA + 0x20, TNAME_EA);
++    vm_write32(TATTR_EA + 0x10, 0x12345678);    /* lsPattern word 0 */
++    CHECK(create(TATTR_EA) == 2);
++    u32 ti2 = spurs_taskset_taskinfo_ea(TS_EA, 2);
++    CHECK(vm_read32(ti2 + TI_ARGS + 0) == 0xA0 && vm_read32(ti2 + TI_ARGS + 12) == 0xA3);
++    CHECK(vm_read64(ti2 + TI_ELF) == ELF_EA);
++    CHECK(vm_read32(ti2 + TI_LS_PATTERN) == 0x12345678);
++    CHECK(strcmp((const char*)vm_base + NAMEBUF_EA + 2 * 32, "hkpIntegrate") == 0);
++    CHECK(vm_read8(NAMEBUF_EA + 0) == 0);       /* no name for task 0 */
++    CHECK(vm_read32(TS_EA + CSTS_ENABLED) == 0xE0000000u);
++    CHECK(vm_read32(TS_EA + CSTS_READY) == 0xE0000000u);
++
++    /* ---- TryJoinTask2: busy while running; id kept until joined ---- */
++    CHECK(cellSpursTryJoinTask2(TS_EA, 0, EXIT_EA) == (s32)CELL_SPURS_TASK_ERROR_BUSY);
++    CHECK(cellSpursTryJoinTask2(TS_EA, 77, EXIT_EA) == (s32)CELL_SPURS_TASK_ERROR_SRCH);
++    CHECK(cellSpursTryJoinTask2(TS_EA, 128, EXIT_EA) == (s32)CELL_SPURS_TASK_ERROR_INVAL);
++    task_exit(0);
++    CHECK(create(0) == 3);                      /* 0 exited but is not joined yet */
++    vm_write32(EXIT_EA, 0xFFFFFFFF);
++    CHECK(cellSpursTryJoinTask2(TS_EA, 0, EXIT_EA) == CELL_OK);
++    CHECK(vm_read32(EXIT_EA) == 0);
++    CHECK(cellSpursTryJoinTask2(TS_EA, 0, EXIT_EA) == (s32)CELL_SPURS_TASK_ERROR_SRCH);
++    CHECK(create(0) == 0);                      /* reaped id is reused */
++
++    /* ---- JoinTask2 blocks until the task exits ---- */
++    pthread_t th;
++    pthread_create(&th, NULL, exit_later, (void*)(uintptr_t)1);
++    CHECK(cellSpursJoinTask2(TS_EA, 1, EXIT_EA) == CELL_OK);
++    CHECK(!(vm_read8(TS_EA + CSTS_ENABLED) & 0x40));
++    pthread_join(th, NULL);
++    CHECK(cellSpursJoinTask2(TS_EA, 1, 0) == (s32)CELL_SPURS_TASK_ERROR_SRCH);
++
++    /* ---- 128-id cap counts unjoined ids ---- */
++    int n = 0;
++    while (create(0) >= 0) n++;
++    CHECK(n == 128 - 3);                        /* 0, 2 and 3 still held */
++    for (u32 i = 0; i < 128; i++) task_exit(i);
++    CHECK(create(0) < 0);                       /* all exited, none joined */
++    for (u32 i = 0; i < 128; i++) cellSpursTryJoinTask2(TS_EA, i, EXIT_EA);
++    CHECK(create(0) == 0);
++
++    /* ---- Barrier ---- */
++    memset(vm_base + BARRIER_EA, 0xEE, 128);
++    CHECK(cellSpursBarrierInitialize(TS_EA, BARRIER_EA, 0) == (s32)CELL_SPURS_TASK_ERROR_INVAL);
++    CHECK(cellSpursBarrierInitialize(TS_EA, BARRIER_EA, 129) == (s32)CELL_SPURS_TASK_ERROR_INVAL);
++    CHECK(cellSpursBarrierInitialize(TS_EA, BARRIER_EA + 16, 4) == (s32)CELL_SPURS_TASK_ERROR_ALIGN);
++    CHECK(cellSpursBarrierInitialize(0, BARRIER_EA, 4) == (s32)CELL_SPURS_TASK_ERROR_NULL_POINTER);
++    CHECK(cellSpursBarrierInitialize(TS_EA, BARRIER_EA, 5) == CELL_OK);
++    CHECK(vm_read32(BARRIER_EA + 0x00) == 0);
++    CHECK(vm_read32(BARRIER_EA + 0x04) == 5);
++    CHECK(vm_read32(BARRIER_EA + 0x34) == TS_EA);
++    CHECK(vm_read8(BARRIER_EA + 0x7F) == 0);
++
++    CHECK(cellSpursLFQueueDetachLv2EventQueue(0x250000) == CELL_OK);
++
++    /* ---- DestroyTaskset2 ---- */
++    CHECK(cellSpursDestroyTaskset2(TS_EA + 4) == (s32)CELL_SPURS_TASK_ERROR_ALIGN);
++    CHECK(cellSpursDestroyTaskset2(TS_EA) == CELL_OK);
++
++    printf("test_spurs_taskset2: %d passed, %d failed\n", g_pass, g_fail);
++    fflush(stdout);
++    _exit(g_fail ? 1 : 0);   /* skip atexit: the SPURS kernel threads are still up */
++}
 diff --git a/libs/sync/cellSync.c b/libs/sync/cellSync.c
-index 8c70d74..da4bb87 100644
+index 8c70d74c..da4bb878 100644
 --- a/libs/sync/cellSync.c
 +++ b/libs/sync/cellSync.c
 @@ -58,7 +58,7 @@ static int sync_trace(void){ static int v=-1; if(v<0){const char*e=getenv("SYNC_
@@ -4948,7 +5518,7 @@ index 8c70d74..da4bb87 100644
  /* The mutex word is shared with SPU code that takes it with GETLLAR/PUTLLC.
 diff --git a/libs/system/cellLibprof.c b/libs/system/cellLibprof.c
 new file mode 100644
-index 0000000..921fe34
+index 00000000..921fe345
 --- /dev/null
 +++ b/libs/system/cellLibprof.c
 @@ -0,0 +1,20 @@
@@ -4974,7 +5544,7 @@ index 0000000..921fe34
 +}
 diff --git a/libs/system/cellLibprof.h b/libs/system/cellLibprof.h
 new file mode 100644
-index 0000000..3bb484a
+index 00000000..3bb484a3
 --- /dev/null
 +++ b/libs/system/cellLibprof.h
 @@ -0,0 +1,26 @@
@@ -5005,7 +5575,7 @@ index 0000000..3bb484a
 +
 +#endif
 diff --git a/libs/system/cellSaveData.c b/libs/system/cellSaveData.c
-index 79ea8ca..4a8d430 100644
+index 79ea8cab..4a8d4303 100644
 --- a/libs/system/cellSaveData.c
 +++ b/libs/system/cellSaveData.c
 @@ -15,6 +15,7 @@
@@ -5244,7 +5814,7 @@ index 79ea8ca..4a8d430 100644
  
  s32 cellSaveDataAutoSave2(u32 version, const char* dirName,
 diff --git a/libs/system/cellSysutil.c b/libs/system/cellSysutil.c
-index 252c3e8..4825faf 100644
+index 252c3e8c..4825fafb 100644
 --- a/libs/system/cellSysutil.c
 +++ b/libs/system/cellSysutil.c
 @@ -10,6 +10,11 @@
@@ -5323,7 +5893,7 @@ index 252c3e8..4825faf 100644
          for (i = 0; s[i] && i < bufsize - 1; i++) vm_write8(buf_ea + i, (uint8_t)s[i]);
          vm_write8(buf_ea + i, 0);
 diff --git a/libs/system/sysPrxForUser.c b/libs/system/sysPrxForUser.c
-index f6e4e31..4d5e490 100644
+index f6e4e31f..4d5e4907 100644
 --- a/libs/system/sysPrxForUser.c
 +++ b/libs/system/sysPrxForUser.c
 @@ -24,6 +24,7 @@
@@ -5455,7 +6025,7 @@ index f6e4e31..4d5e490 100644
      } else {
          u8* p = (u8*)buf;
 diff --git a/libs/system/sysPrxForUser.h b/libs/system/sysPrxForUser.h
-index 30290c7..4115542 100644
+index 30290c73..41155425 100644
 --- a/libs/system/sysPrxForUser.h
 +++ b/libs/system/sysPrxForUser.h
 @@ -97,11 +97,8 @@ s32 sys_process_is_spu_lock_line_reservation_address(u32 addr, u64 flags);
@@ -5471,7 +6041,7 @@ index 30290c7..4115542 100644
  s32 _sys_strncpy(char* dst, const char* src, u32 size);
  s32 _sys_strcat(char* dst, const char* src);
 diff --git a/libs/system/tests/test_dialog_callbacks.c b/libs/system/tests/test_dialog_callbacks.c
-index 1cb09ad..f473cc3 100644
+index 1cb09add..f473cc3b 100644
 --- a/libs/system/tests/test_dialog_callbacks.c
 +++ b/libs/system/tests/test_dialog_callbacks.c
 @@ -13,6 +13,7 @@ int spu_coh_is_reserved(uint32_t a) { (void)a; return 0; }
@@ -5483,7 +6053,7 @@ index 1cb09ad..f473cc3 100644
  static unsigned calls;
  static int waiting;
 diff --git a/libs/video/cellGcmSys.c b/libs/video/cellGcmSys.c
-index cdb0464..a4e0f1e 100644
+index cdb04646..a4e0f1e0 100644
 --- a/libs/video/cellGcmSys.c
 +++ b/libs/video/cellGcmSys.c
 @@ -199,7 +199,7 @@ static void ydkj_restore_handler_opd(u32 opd, u32 code) {
@@ -6619,7 +7189,7 @@ index cdb0464..a4e0f1e 100644
  }
  
 diff --git a/libs/video/cellResc.c b/libs/video/cellResc.c
-index f039abf..828ecf4 100644
+index f039abfc..828ecf46 100644
 --- a/libs/video/cellResc.c
 +++ b/libs/video/cellResc.c
 @@ -204,7 +204,7 @@ s32 cellRescSetConvertAndFlip(s32 index)
@@ -6633,7 +7203,7 @@ index f039abf..828ecf4 100644
  
 diff --git a/libs/video/rsx_be_thread.c b/libs/video/rsx_be_thread.c
 new file mode 100644
-index 0000000..36079d3
+index 00000000..36079d3d
 --- /dev/null
 +++ b/libs/video/rsx_be_thread.c
 @@ -0,0 +1,1284 @@
@@ -7923,7 +8493,7 @@ index 0000000..36079d3
 +#endif
 diff --git a/libs/video/rsx_be_thread.h b/libs/video/rsx_be_thread.h
 new file mode 100644
-index 0000000..7beee5b
+index 00000000..7beee5b0
 --- /dev/null
 +++ b/libs/video/rsx_be_thread.h
 @@ -0,0 +1,27 @@
@@ -7955,7 +8525,7 @@ index 0000000..7beee5b
 +
 +#endif
 diff --git a/libs/video/rsx_commands.c b/libs/video/rsx_commands.c
-index d8506de..789120b 100644
+index d8506de1..789120b8 100644
 --- a/libs/video/rsx_commands.c
 +++ b/libs/video/rsx_commands.c
 @@ -152,7 +152,7 @@ static int process_surface_method(rsx_state* state, u32 method, u32 data)
@@ -8076,7 +8646,7 @@ index d8506de..789120b 100644
          u32 header = buf[pos++];
          u32 type = (header >> 29) & 0x7;
 diff --git a/libs/video/rsx_d3d12_backend.c b/libs/video/rsx_d3d12_backend.c
-index 68929ed..edc7512 100644
+index 68929ed2..edc75127 100644
 --- a/libs/video/rsx_d3d12_backend.c
 +++ b/libs/video/rsx_d3d12_backend.c
 @@ -445,7 +445,7 @@ static void subvp_capture(u32 fi)
@@ -8403,7 +8973,7 @@ index 68929ed..edc7512 100644
               * (IO-mapped) -- and count nonzero bytes over the whole plane for each.
               * If the plane the game declares (loc bits fmt&3) is zero but the OTHER
 diff --git a/libs/video/rsx_dispatch.c b/libs/video/rsx_dispatch.c
-index d105230..373cf6f 100644
+index d105230b..373cf6f9 100644
 --- a/libs/video/rsx_dispatch.c
 +++ b/libs/video/rsx_dispatch.c
 @@ -1,3 +1,5 @@
@@ -8729,7 +9299,7 @@ index d105230..373cf6f 100644
              rsx->sink.draw_index_array(rsx->sink.user, rsx,
                                         arg & 0xFFFFFF, (arg >> 24) + 1);
 diff --git a/libs/video/rsx_dispatch.h b/libs/video/rsx_dispatch.h
-index dab4380..cf36f46 100644
+index dab43803..cf36f467 100644
 --- a/libs/video/rsx_dispatch.h
 +++ b/libs/video/rsx_dispatch.h
 @@ -84,6 +84,7 @@ extern "C" {
@@ -8789,7 +9359,7 @@ index dab4380..cf36f46 100644
  /* ---- decoded state getters -------------------------------------------- */
  
 diff --git a/libs/video/rsx_draw_engine.c b/libs/video/rsx_draw_engine.c
-index 5c50e4a..7fac4e1 100644
+index 5c50e4a9..7fac4e10 100644
 --- a/libs/video/rsx_draw_engine.c
 +++ b/libs/video/rsx_draw_engine.c
 @@ -1,3 +1,9 @@
@@ -13820,7 +14390,7 @@ index 5c50e4a..7fac4e1 100644
  
  u32 rsx_draw_engine_guest_draws(void)
 diff --git a/libs/video/rsx_draw_engine.h b/libs/video/rsx_draw_engine.h
-index fa8b57d..2fe34d1 100644
+index fa8b57da..2fe34d10 100644
 --- a/libs/video/rsx_draw_engine.h
 +++ b/libs/video/rsx_draw_engine.h
 @@ -65,7 +65,9 @@ typedef enum {
@@ -14153,7 +14723,7 @@ index fa8b57d..2fe34d1 100644
  /*
   * These are the neutral parts the unit tests in libs/video/tests exercise
 diff --git a/libs/video/rsx_fp_decompiler.c b/libs/video/rsx_fp_decompiler.c
-index 545670f..45b967b 100644
+index 545670f2..45b967b2 100644
 --- a/libs/video/rsx_fp_decompiler.c
 +++ b/libs/video/rsx_fp_decompiler.c
 @@ -27,6 +27,7 @@
@@ -14842,7 +15412,7 @@ index 545670f..45b967b 100644
          for (int _q = 0; _q < n; _q++)
              fprintf(stderr, "   k[%2d] = (%g %g %g %g)%c", _q, out[_q*4+0],
 diff --git a/libs/video/rsx_fp_decompiler.h b/libs/video/rsx_fp_decompiler.h
-index cbec250..4dd9c7a 100644
+index cbec250a..4dd9c7aa 100644
 --- a/libs/video/rsx_fp_decompiler.h
 +++ b/libs/video/rsx_fp_decompiler.h
 @@ -108,6 +108,54 @@ float rsx_fp_alpha_ref(u32 raw, u32 surface_color_format);
@@ -14926,7 +15496,7 @@ index cbec250..4dd9c7a 100644
  }
 diff --git a/libs/video/rsx_hitch.h b/libs/video/rsx_hitch.h
 new file mode 100644
-index 0000000..f28b048
+index 00000000..f28b0487
 --- /dev/null
 +++ b/libs/video/rsx_hitch.h
 @@ -0,0 +1,119 @@
@@ -15050,7 +15620,7 @@ index 0000000..f28b048
 +
 +#endif
 diff --git a/libs/video/rsx_live_draw.c b/libs/video/rsx_live_draw.c
-index ef661c0..68fbaf3 100644
+index ef661c0e..68fbaf3c 100644
 --- a/libs/video/rsx_live_draw.c
 +++ b/libs/video/rsx_live_draw.c
 @@ -87,9 +87,9 @@ static volatile long g_ld_ps1_vram_ready = 0;
@@ -15236,7 +15806,7 @@ index ef661c0..68fbaf3 100644
                      "[live-draw] flip %u has no registered/rendered scanout; "
                      "falling back to current surface %u\n",
 diff --git a/libs/video/rsx_metal_backend.m b/libs/video/rsx_metal_backend.m
-index d04b34e..93bd533 100644
+index d04b34e3..93bd5338 100644
 --- a/libs/video/rsx_metal_backend.m
 +++ b/libs/video/rsx_metal_backend.m
 @@ -52,6 +52,7 @@
@@ -16213,7 +16783,7 @@ index d04b34e..93bd533 100644
      }
  #endif
 diff --git a/libs/video/rsx_null_backend.c b/libs/video/rsx_null_backend.c
-index 32e8a95..cbd28c2 100644
+index 32e8a959..cbd28c2e 100644
 --- a/libs/video/rsx_null_backend.c
 +++ b/libs/video/rsx_null_backend.c
 @@ -382,6 +382,13 @@ typedef struct {
@@ -16270,7 +16840,7 @@ index 32e8a95..cbd28c2 100644
  
  /* Headless has no event queue and no window to close. */
 diff --git a/libs/video/rsx_shader_msl.h b/libs/video/rsx_shader_msl.h
-index 50450b1..dd67e0d 100644
+index 50450b11..dd67e0df 100644
 --- a/libs/video/rsx_shader_msl.h
 +++ b/libs/video/rsx_shader_msl.h
 @@ -35,6 +35,8 @@ extern "C" {
@@ -16283,7 +16853,7 @@ index 50450b1..dd67e0d 100644
  /* 1 when the translator was built with glslang and spirv-cross, 0 when the
   * stub is in. A backend asks this once and picks its shader path. */
 diff --git a/libs/video/rsx_shader_spirv.cpp b/libs/video/rsx_shader_spirv.cpp
-index f9725b8..b802b33 100644
+index f9725b84..b802b332 100644
 --- a/libs/video/rsx_shader_spirv.cpp
 +++ b/libs/video/rsx_shader_spirv.cpp
 @@ -39,17 +39,20 @@ void put_log(char* log, u32 log_size, const char* what, const char* detail)
@@ -16344,7 +16914,7 @@ index f9725b8..b802b33 100644
  extern "C" int rsx_hlsl_to_spirv(const char* hlsl, int stage,
                                   u32* words, u32 max_words, u32* out_words,
 diff --git a/libs/video/rsx_shader_spirv.h b/libs/video/rsx_shader_spirv.h
-index f78f126..092716b 100644
+index f78f1261..092716bb 100644
 --- a/libs/video/rsx_shader_spirv.h
 +++ b/libs/video/rsx_shader_spirv.h
 @@ -39,16 +39,28 @@ extern "C" {
@@ -16378,7 +16948,7 @@ index f78f126..092716b 100644
   *   out_words : receives the word count.
   *   log       : receives a diagnostic on failure (may be NULL).
 diff --git a/libs/video/rsx_texture_layout.c b/libs/video/rsx_texture_layout.c
-index 039ebb2..a6c15a5 100644
+index 039ebb28..a6c15a57 100644
 --- a/libs/video/rsx_texture_layout.c
 +++ b/libs/video/rsx_texture_layout.c
 @@ -146,6 +146,11 @@ u32 rsx_texture_cube_face_stride(u32 rsx_fmt, u32 w, u32 h, u32 levels,
@@ -16543,7 +17113,7 @@ index 039ebb2..a6c15a5 100644
 +                                : map[ch[i]];
  }
 diff --git a/libs/video/rsx_texture_layout.h b/libs/video/rsx_texture_layout.h
-index ce99e68..9f43916 100644
+index ce99e681..9f43916f 100644
 --- a/libs/video/rsx_texture_layout.h
 +++ b/libs/video/rsx_texture_layout.h
 @@ -206,6 +206,17 @@ void rsx_texture_decode(void* dst, u32 dst_pitch,
@@ -16588,7 +17158,7 @@ index ce99e68..9f43916 100644
  #endif
 diff --git a/libs/video/rsx_ui.cpp b/libs/video/rsx_ui.cpp
 new file mode 100644
-index 0000000..cd020c9
+index 00000000..cd020c99
 --- /dev/null
 +++ b/libs/video/rsx_ui.cpp
 @@ -0,0 +1,621 @@
@@ -17215,7 +17785,7 @@ index 0000000..cd020c9
 +} /* extern "C" */
 diff --git a/libs/video/rsx_ui.h b/libs/video/rsx_ui.h
 new file mode 100644
-index 0000000..8cea11c
+index 00000000..8cea11ca
 --- /dev/null
 +++ b/libs/video/rsx_ui.h
 @@ -0,0 +1,75 @@
@@ -17296,7 +17866,7 @@ index 0000000..8cea11c
 +#endif
 diff --git a/libs/video/rsx_ui_vk.h b/libs/video/rsx_ui_vk.h
 new file mode 100644
-index 0000000..0b7655f
+index 00000000..0b7655f0
 --- /dev/null
 +++ b/libs/video/rsx_ui_vk.h
 @@ -0,0 +1,48 @@
@@ -17349,7 +17919,7 @@ index 0000000..0b7655f
 +
 +#endif
 diff --git a/libs/video/rsx_vertex_compact.c b/libs/video/rsx_vertex_compact.c
-index 4334f16..62feff1 100644
+index 4334f169..62feff1c 100644
 --- a/libs/video/rsx_vertex_compact.c
 +++ b/libs/video/rsx_vertex_compact.c
 @@ -180,6 +180,10 @@ void rsx_vertex_fetch_plan_prepare(
@@ -17838,7 +18408,7 @@ index 4334f16..62feff1 100644
  }
  
 diff --git a/libs/video/rsx_vertex_compact.h b/libs/video/rsx_vertex_compact.h
-index ad21361..e8b119a 100644
+index ad213615..e8b119a0 100644
 --- a/libs/video/rsx_vertex_compact.h
 +++ b/libs/video/rsx_vertex_compact.h
 @@ -44,6 +44,13 @@ typedef struct rsx_vertex_remap {
@@ -17899,7 +18469,7 @@ index ad21361..e8b119a 100644
  
  /* Select the live renderer's triangle topology path.  A remapped triangle
 diff --git a/libs/video/rsx_vp_decompiler.c b/libs/video/rsx_vp_decompiler.c
-index edd01d6..3839a3c 100644
+index edd01d68..3839a3cd 100644
 --- a/libs/video/rsx_vp_decompiler.c
 +++ b/libs/video/rsx_vp_decompiler.c
 @@ -30,6 +30,7 @@
@@ -17996,7 +18566,7 @@ index edd01d6..3839a3c 100644
          "}\n");
  
 diff --git a/libs/video/rsx_vp_decompiler.h b/libs/video/rsx_vp_decompiler.h
-index ecc53fc..5752611 100644
+index ecc53fce..5752611d 100644
 --- a/libs/video/rsx_vp_decompiler.h
 +++ b/libs/video/rsx_vp_decompiler.h
 @@ -52,6 +52,20 @@ int rsx_vp_analyze_inputs(const u8* ucode, u32 max_bytes,
@@ -18021,7 +18591,7 @@ index ecc53fc..5752611 100644
   * program start). Branch targets are absolute slots; this makes them relative
   * to the ucode pointer handed in. Defaults to 0. */
 diff --git a/libs/video/rsx_vulkan_backend.c b/libs/video/rsx_vulkan_backend.c
-index e2687b7..4604dec 100644
+index e2687b79..4604dec6 100644
 --- a/libs/video/rsx_vulkan_backend.c
 +++ b/libs/video/rsx_vulkan_backend.c
 @@ -38,18 +38,24 @@
@@ -23869,7 +24439,7 @@ index e2687b7..4604dec 100644
 -#endif /* !_WIN32 */
 +#endif /* !_WIN32 || __MINGW32__ */
 diff --git a/libs/video/rsx_vulkan_backend.h b/libs/video/rsx_vulkan_backend.h
-index 1f919ab..3765a65 100644
+index 1f919ab3..3765a655 100644
 --- a/libs/video/rsx_vulkan_backend.h
 +++ b/libs/video/rsx_vulkan_backend.h
 @@ -34,6 +34,9 @@
@@ -23901,7 +24471,7 @@ index 1f919ab..3765a65 100644
  u32  rsx_vulkan_backend_debug_color(void);
  
 diff --git a/libs/video/sys_rsx.c b/libs/video/sys_rsx.c
-index 2a64c8e..cf81b54 100644
+index 2a64c8e1..cf81b545 100644
 --- a/libs/video/sys_rsx.c
 +++ b/libs/video/sys_rsx.c
 @@ -217,7 +217,7 @@ void rsx_raise_user_cmd(uint32_t arg)
@@ -23914,7 +24484,7 @@ index 2a64c8e..cf81b54 100644
            fprintf(stderr, "[usercmd] #%lu arg=0x%08X handlers=0x%X qid=%u\n",
                    n, arg, mask, s_isr_qid); fflush(stderr); } }
 diff --git a/libs/video/tests/test_fp_decompiler.c b/libs/video/tests/test_fp_decompiler.c
-index b75424f..6291259 100644
+index b75424fe..62912598 100644
 --- a/libs/video/tests/test_fp_decompiler.c
 +++ b/libs/video/tests/test_fp_decompiler.c
 @@ -300,6 +300,240 @@ int main(void)
@@ -24159,7 +24729,7 @@ index b75424f..6291259 100644
      printf("Results: %d passed, %d failed\n", g_pass, g_fail);
      return g_fail ? 1 : 0;
 diff --git a/libs/video/tests/test_rsx_draw_engine.c b/libs/video/tests/test_rsx_draw_engine.c
-index 704ccef..f3192be 100644
+index 704ccefd..f3192be3 100644
 --- a/libs/video/tests/test_rsx_draw_engine.c
 +++ b/libs/video/tests/test_rsx_draw_engine.c
 @@ -152,6 +152,18 @@ static u32 stub_depth_create(void* u, u32 w, u32 h)
@@ -24437,7 +25007,7 @@ index 704ccef..f3192be 100644
      free(vm_base);
      printf(g_failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n",
 diff --git a/libs/video/tests/test_texture_layout.c b/libs/video/tests/test_texture_layout.c
-index 5a825a0..ea20eb9 100644
+index 5a825a0f..ea20eb95 100644
 --- a/libs/video/tests/test_texture_layout.c
 +++ b/libs/video/tests/test_texture_layout.c
 @@ -663,6 +663,43 @@ static void test_remap_g8b8_lanes(void)
@@ -24544,7 +25114,7 @@ index 5a825a0..ea20eb9 100644
  
 diff --git a/libs/video/tests/test_vertex_fetch.c b/libs/video/tests/test_vertex_fetch.c
 new file mode 100644
-index 0000000..c6b4940
+index 00000000..c6b49400
 --- /dev/null
 +++ b/libs/video/tests/test_vertex_fetch.c
 @@ -0,0 +1,154 @@
@@ -24704,7 +25274,7 @@ index 0000000..c6b4940
 +}
 diff --git a/libs/video/tests/test_vertex_remap.c b/libs/video/tests/test_vertex_remap.c
 new file mode 100644
-index 0000000..53d9fec
+index 00000000..53d9fec2
 --- /dev/null
 +++ b/libs/video/tests/test_vertex_remap.c
 @@ -0,0 +1,134 @@
@@ -24844,7 +25414,7 @@ index 0000000..53d9fec
 +}
 diff --git a/libs/video/tests/test_vp_const_usage.c b/libs/video/tests/test_vp_const_usage.c
 new file mode 100644
-index 0000000..d7f65db
+index 00000000..d7f65db3
 --- /dev/null
 +++ b/libs/video/tests/test_vp_const_usage.c
 @@ -0,0 +1,114 @@
@@ -24963,7 +25533,7 @@ index 0000000..d7f65db
 +    return fails ? 1 : 0;
 +}
 diff --git a/runtime/host/host_posix.c b/runtime/host/host_posix.c
-index 36acb36..9d953c1 100644
+index 36acb361..9d953c1c 100644
 --- a/runtime/host/host_posix.c
 +++ b/runtime/host/host_posix.c
 @@ -20,6 +20,7 @@
@@ -24986,7 +25556,7 @@ index 36acb36..9d953c1 100644
  
  /* One guest VM, with its size published for the OOB guard above. */
 diff --git a/runtime/host/host_stubs.c b/runtime/host/host_stubs.c
-index 6e79ec3..34602f8 100644
+index 6e79ec31..34602f86 100644
 --- a/runtime/host/host_stubs.c
 +++ b/runtime/host/host_stubs.c
 @@ -64,6 +64,16 @@ uint32_t vm_read32(uint64_t addr)
@@ -25008,7 +25578,7 @@ index 6e79ec3..34602f8 100644
  
 diff --git a/runtime/memory/guest_mem_atomic.h b/runtime/memory/guest_mem_atomic.h
 new file mode 100644
-index 0000000..2097690
+index 00000000..20976900
 --- /dev/null
 +++ b/runtime/memory/guest_mem_atomic.h
 @@ -0,0 +1,140 @@
@@ -25154,7 +25724,7 @@ index 0000000..2097690
 +#endif
 diff --git a/runtime/memory/guest_wtrack.c b/runtime/memory/guest_wtrack.c
 new file mode 100644
-index 0000000..1e29dc7
+index 00000000..1e29dc79
 --- /dev/null
 +++ b/runtime/memory/guest_wtrack.c
 @@ -0,0 +1,257 @@
@@ -25417,7 +25987,7 @@ index 0000000..1e29dc7
 +#endif
 diff --git a/runtime/memory/guest_wtrack.h b/runtime/memory/guest_wtrack.h
 new file mode 100644
-index 0000000..a430c55
+index 00000000..a430c55b
 --- /dev/null
 +++ b/runtime/memory/guest_wtrack.h
 @@ -0,0 +1,61 @@
@@ -25483,7 +26053,7 @@ index 0000000..a430c55
 +#endif
 +#endif
 diff --git a/runtime/memory/vm.h b/runtime/memory/vm.h
-index 9ea87db..ec6e542 100644
+index 9ea87dbd..ec6e5428 100644
 --- a/runtime/memory/vm.h
 +++ b/runtime/memory/vm.h
 @@ -21,6 +21,7 @@
@@ -25510,7 +26080,7 @@ index 9ea87db..ec6e542 100644
  
 diff --git a/runtime/platform/guest_vm.h b/runtime/platform/guest_vm.h
 new file mode 100644
-index 0000000..7b71868
+index 00000000..7b71868b
 --- /dev/null
 +++ b/runtime/platform/guest_vm.h
 @@ -0,0 +1,66 @@
@@ -25582,7 +26152,7 @@ index 0000000..7b71868
 +#endif /* PS3RECOMP_GUEST_VM_H */
 diff --git a/runtime/platform/mingw_posix.h b/runtime/platform/mingw_posix.h
 new file mode 100644
-index 0000000..417cdb9
+index 00000000..417cdb96
 --- /dev/null
 +++ b/runtime/platform/mingw_posix.h
 @@ -0,0 +1,20 @@
@@ -25608,7 +26178,7 @@ index 0000000..417cdb9
 +#endif
 diff --git a/runtime/platform/ps3_hot_pin.c b/runtime/platform/ps3_hot_pin.c
 new file mode 100644
-index 0000000..8d6e47f
+index 00000000..8d6e47f6
 --- /dev/null
 +++ b/runtime/platform/ps3_hot_pin.c
 @@ -0,0 +1,169 @@
@@ -25782,7 +26352,7 @@ index 0000000..8d6e47f
 +void ps3_hot_pin_register(int role) { (void)role; }
 +#endif
 diff --git a/runtime/ppu/ppu_context.h b/runtime/ppu/ppu_context.h
-index cf7f206..34ca4b8 100644
+index cf7f206a..34ca4b85 100644
 --- a/runtime/ppu/ppu_context.h
 +++ b/runtime/ppu/ppu_context.h
 @@ -95,6 +95,9 @@ typedef struct ppu_context {
@@ -25812,7 +26382,7 @@ index cf7f206..34ca4b8 100644
  }
  
 diff --git a/runtime/ppu/ppu_fs.cpp b/runtime/ppu/ppu_fs.cpp
-index e8f6c2b..9fb33d7 100644
+index e8f6c2bd..9fb33d75 100644
 --- a/runtime/ppu/ppu_fs.cpp
 +++ b/runtime/ppu/ppu_fs.cpp
 @@ -13,6 +13,12 @@
@@ -26130,7 +26700,7 @@ index e8f6c2b..9fb33d7 100644
      }
      if (getenv("PS3_FSLOG"))
 diff --git a/runtime/ppu/ppu_hle.cpp b/runtime/ppu/ppu_hle.cpp
-index acbaf12..03159da 100644
+index acbaf126..03159da6 100644
 --- a/runtime/ppu/ppu_hle.cpp
 +++ b/runtime/ppu/ppu_hle.cpp
 @@ -39,13 +39,59 @@ extern "C" void ps3_hle_register(uint32_t nid, const char* name, void* handler)
@@ -26698,7 +27268,7 @@ index acbaf12..03159da 100644
  }
  
 diff --git a/runtime/ppu/ppu_loader.cpp b/runtime/ppu/ppu_loader.cpp
-index e73a151..f4c748e 100644
+index e73a1512..f4c748e7 100644
 --- a/runtime/ppu/ppu_loader.cpp
 +++ b/runtime/ppu/ppu_loader.cpp
 @@ -20,6 +20,11 @@
@@ -28268,7 +28838,7 @@ index e73a151..f4c748e 100644
           * empty argv is hard to recognise from the guest side. */
          for (uint32_t a = 0; a < argc_n; a++) {
 diff --git a/runtime/ppu/ppu_memory.h b/runtime/ppu/ppu_memory.h
-index b3bc534..ab6dff6 100644
+index b3bc534d..ab6dff67 100644
 --- a/runtime/ppu/ppu_memory.h
 +++ b/runtime/ppu/ppu_memory.h
 @@ -11,6 +11,7 @@
@@ -28446,7 +29016,7 @@ index b3bc534..ab6dff6 100644
          ok = atomic_compare_exchange_strong_explicit(
              atom, &expected, desired,
 diff --git a/runtime/ppu/ppu_sysprx.cpp b/runtime/ppu/ppu_sysprx.cpp
-index d857f30..8269e72 100644
+index d857f308..8269e725 100644
 --- a/runtime/ppu/ppu_sysprx.cpp
 +++ b/runtime/ppu/ppu_sysprx.cpp
 @@ -16,17 +16,25 @@
@@ -29171,7 +29741,7 @@ index d857f30..8269e72 100644
      ps3_hle_register_ctx(ps3_compute_nid("sys_mmapper_map_memory"),     "sys_mmapper_map_memory",     crt_ok);
 diff --git a/runtime/ppu/ppu_trampoline_tls.cpp b/runtime/ppu/ppu_trampoline_tls.cpp
 new file mode 100644
-index 0000000..1790f24
+index 00000000..1790f24a
 --- /dev/null
 +++ b/runtime/ppu/ppu_trampoline_tls.cpp
 @@ -0,0 +1,28 @@
@@ -29205,7 +29775,7 @@ index 0000000..1790f24
 +#endif
 diff --git a/runtime/ppu/ppu_vmx.h b/runtime/ppu/ppu_vmx.h
 new file mode 100644
-index 0000000..04336bc
+index 00000000..04336bc7
 --- /dev/null
 +++ b/runtime/ppu/ppu_vmx.h
 @@ -0,0 +1,576 @@
@@ -29786,7 +30356,7 @@ index 0000000..04336bc
 +#endif
 +#endif /* PPU_VMX_H */
 diff --git a/runtime/ppu/tests/boot_main.cpp b/runtime/ppu/tests/boot_main.cpp
-index a55afb0..3233e42 100644
+index a55afb05..3233e427 100644
 --- a/runtime/ppu/tests/boot_main.cpp
 +++ b/runtime/ppu/tests/boot_main.cpp
 @@ -71,9 +71,11 @@ void     ps3_load_prx_modules(void) {}
@@ -30005,7 +30575,7 @@ index a55afb0..3233e42 100644
      printf("\n[boot] dispatching entry OPD 0x%08X (stack top 0x%08X)\n\n", entry, stack_top);
  #ifdef _WIN32
 diff --git a/runtime/ppu/tests/smoke/smoke_recomp.c b/runtime/ppu/tests/smoke/smoke_recomp.c
-index 092654c..cd613a2 100644
+index 092654c3..cd613a26 100644
 --- a/runtime/ppu/tests/smoke/smoke_recomp.c
 +++ b/runtime/ppu/tests/smoke/smoke_recomp.c
 @@ -117,6 +117,7 @@ extern unsigned int cellGcm_flip_request_count(void);
@@ -30071,7 +30641,7 @@ index 092654c..cd613a2 100644
      ctx->gpr[4]  = SMOKE_SC_EXITSTAT;     /* s64* exit status (out) */
 diff --git a/runtime/ppu/tests/test_vmx_simd.c b/runtime/ppu/tests/test_vmx_simd.c
 new file mode 100644
-index 0000000..d4234cf
+index 00000000..d4234cfa
 --- /dev/null
 +++ b/runtime/ppu/tests/test_vmx_simd.c
 @@ -0,0 +1,165 @@
@@ -30242,7 +30812,7 @@ index 0000000..d4234cf
 +}
 diff --git a/runtime/ppu/tests/test_vmx_simd_impl.c b/runtime/ppu/tests/test_vmx_simd_impl.c
 new file mode 100644
-index 0000000..75d8e5b
+index 00000000..75d8e5b6
 --- /dev/null
 +++ b/runtime/ppu/tests/test_vmx_simd_impl.c
 @@ -0,0 +1,48 @@
@@ -30295,7 +30865,7 @@ index 0000000..75d8e5b
 +#endif
 +}
 diff --git a/runtime/prx/prx_loader.c b/runtime/prx/prx_loader.c
-index 9cc3670..278b998 100644
+index 9cc36701..278b9987 100644
 --- a/runtime/prx/prx_loader.c
 +++ b/runtime/prx/prx_loader.c
 @@ -15,6 +15,10 @@
@@ -30479,7 +31049,7 @@ index 9cc3670..278b998 100644
      fprintf(stderr,
              "[prx] loaded %-12s base=0x%08X size=%u (0x%X) funcs=%u/%llu exports=%u\n",
 diff --git a/runtime/prx/prx_loader.h b/runtime/prx/prx_loader.h
-index 0c19daa..97aad61 100644
+index 0c19daa0..97aad618 100644
 --- a/runtime/prx/prx_loader.h
 +++ b/runtime/prx/prx_loader.h
 @@ -114,6 +114,34 @@ uint32_t prx_resolve_export(uint32_t nid);
@@ -30518,7 +31088,7 @@ index 0c19daa..97aad61 100644
  }
  #endif
 diff --git a/runtime/ps3_log.h b/runtime/ps3_log.h
-index 4b7df8c..88a5f49 100644
+index 4b7df8c5..88a5f49e 100644
 --- a/runtime/ps3_log.h
 +++ b/runtime/ps3_log.h
 @@ -36,7 +36,7 @@ static __inline int ps3_log_verbose(void)
@@ -30532,7 +31102,7 @@ index 4b7df8c..88a5f49 100644
          if (e) v = (e[0] && e[0] != '0') ? 1 : 0;
 diff --git a/runtime/ps3_thread_name.h b/runtime/ps3_thread_name.h
 new file mode 100644
-index 0000000..71ae9b4
+index 00000000..71ae9b47
 --- /dev/null
 +++ b/runtime/ps3_thread_name.h
 @@ -0,0 +1,27 @@
@@ -30564,7 +31134,7 @@ index 0000000..71ae9b4
 +
 +#endif /* PS3_THREAD_NAME_H */
 diff --git a/runtime/spu/spu_channels.c b/runtime/spu/spu_channels.c
-index 0b235d0..aac208b 100644
+index 0b235d02..aac208bb 100644
 --- a/runtime/spu/spu_channels.c
 +++ b/runtime/spu/spu_channels.c
 @@ -12,18 +12,21 @@
@@ -33215,7 +33785,7 @@ index 0b235d0..aac208b 100644
 +}
 diff --git a/runtime/spu/spu_coh_inline.h b/runtime/spu/spu_coh_inline.h
 new file mode 100644
-index 0000000..9dee71d
+index 00000000..9dee71dc
 --- /dev/null
 +++ b/runtime/spu/spu_coh_inline.h
 @@ -0,0 +1,25 @@
@@ -33245,7 +33815,7 @@ index 0000000..9dee71d
 +}
 +#endif
 diff --git a/runtime/spu/spu_coherency.c b/runtime/spu/spu_coherency.c
-index 7ac619f..512202f 100644
+index 7ac619f3..512202fe 100644
 --- a/runtime/spu/spu_coherency.c
 +++ b/runtime/spu/spu_coherency.c
 @@ -12,6 +12,10 @@
@@ -33831,7 +34401,7 @@ index 7ac619f..512202f 100644
               * waiter re-polls its predicate on a timeout as well, so a
               * straggling store costs latency and not the wakeup itself. */
 diff --git a/runtime/spu/spu_coherency.h b/runtime/spu/spu_coherency.h
-index ca76ccd..a166531 100644
+index ca76ccd1..a166531d 100644
 --- a/runtime/spu/spu_coherency.h
 +++ b/runtime/spu/spu_coherency.h
 @@ -36,12 +36,36 @@ extern "C" {
@@ -33913,7 +34483,7 @@ index ca76ccd..a166531 100644
   * this at zero is a coherence miss; nonzero moves the question downstream. */
 diff --git a/runtime/spu/spu_cold.c b/runtime/spu/spu_cold.c
 new file mode 100644
-index 0000000..055cae6
+index 00000000..055cae6b
 --- /dev/null
 +++ b/runtime/spu/spu_cold.c
 @@ -0,0 +1,288 @@
@@ -34206,7 +34776,7 @@ index 0000000..055cae6
 +#endif
 +}
 diff --git a/runtime/spu/spu_context.h b/runtime/spu/spu_context.h
-index 8d8e4aa..58c1643 100644
+index 8d8e4aac..58c16431 100644
 --- a/runtime/spu/spu_context.h
 +++ b/runtime/spu/spu_context.h
 @@ -38,20 +38,30 @@ extern "C" {
@@ -35042,7 +35612,7 @@ index 8d8e4aa..58c1643 100644
              _tf(ctx);                                          \
          }                                                      \
 diff --git a/runtime/spu/spu_dispatch_mt.c b/runtime/spu/spu_dispatch_mt.c
-index d9f86bb..c610dad 100644
+index d9f86bb4..c610dad5 100644
 --- a/runtime/spu/spu_dispatch_mt.c
 +++ b/runtime/spu/spu_dispatch_mt.c
 @@ -28,7 +28,7 @@ void spu_indirect_branch_mt(spu_context* ctx)
@@ -35075,7 +35645,7 @@ index d9f86bb..c610dad 100644
              ctx->pc = pc;
              __attribute__((musttail)) return fn(ctx);
 diff --git a/runtime/spu/spu_dma.h b/runtime/spu/spu_dma.h
-index 90f3221..f5abe8d 100644
+index 90f3221e..f5abe8da 100644
 --- a/runtime/spu/spu_dma.h
 +++ b/runtime/spu/spu_dma.h
 @@ -16,6 +16,7 @@
@@ -36276,7 +36846,7 @@ index 90f3221..f5abe8d 100644
                        spu->image_id, value, spu->mfc_tag_mask, mfc->tag_completed,
                        spu->mfc_tag_status,
 diff --git a/runtime/spu/spu_drain.c b/runtime/spu/spu_drain.c
-index 931d3b3..0eeccdf 100644
+index 931d3b34..0eeccdfd 100644
 --- a/runtime/spu/spu_drain.c
 +++ b/runtime/spu/spu_drain.c
 @@ -5,6 +5,7 @@
@@ -36688,7 +37258,7 @@ index 931d3b3..0eeccdf 100644
                              (unsigned)(return_pc & SPU_LS_MASK), pc, ctx->image_id, ctx->host_depth,
                              (int)ctx->resident_ovl); }
 diff --git a/runtime/spu/spu_helpers.h b/runtime/spu/spu_helpers.h
-index 0fca7f5..6002456 100644
+index 0fca7f55..60024565 100644
 --- a/runtime/spu/spu_helpers.h
 +++ b/runtime/spu/spu_helpers.h
 @@ -21,6 +21,17 @@
@@ -39196,7 +39766,7 @@ index 0fca7f5..6002456 100644
 +
  #endif /* SPU_HELPERS_H */
 diff --git a/runtime/spu/spu_interp.c b/runtime/spu/spu_interp.c
-index e9f59de..788cf46 100644
+index e9f59deb..788cf46f 100644
 --- a/runtime/spu/spu_interp.c
 +++ b/runtime/spu/spu_interp.c
 @@ -5,6 +5,7 @@
@@ -39725,7 +40295,7 @@ index e9f59de..788cf46 100644
              return;
          if ((next & 0x3FFFC) == target) return;   /* no-progress guard */
 diff --git a/runtime/spu/spu_interp_tables.inc b/runtime/spu/spu_interp_tables.inc
-index b16834e..90f9dd8 100644
+index b16834e3..90f9dd8c 100644
 --- a/runtime/spu/spu_interp_tables.inc
 +++ b/runtime/spu/spu_interp_tables.inc
 @@ -142,6 +142,7 @@ typedef enum {
@@ -39780,7 +40350,7 @@ index b16834e..90f9dd8 100644
      case 0x4D: return SPU_cgthi;
      case 0x4E: return SPU_cgtbi;
 diff --git a/runtime/spu/spu_lifted_job.h b/runtime/spu/spu_lifted_job.h
-index 58c9082..25c445b 100644
+index 58c9082e..25c445b4 100644
 --- a/runtime/spu/spu_lifted_job.h
 +++ b/runtime/spu/spu_lifted_job.h
 @@ -27,7 +27,7 @@ extern uint8_t* vm_base;
@@ -39949,7 +40519,7 @@ index 58c9082..25c445b 100644
      if (opts && opts->spu_id) {
          extern void spu_thread_publish_ctx(uint32_t tid, void* c);
 diff --git a/runtime/spu/spu_lifted_thread.c b/runtime/spu/spu_lifted_thread.c
-index 945829d..fe7755e 100644
+index 945829dc..fe7755e6 100644
 --- a/runtime/spu/spu_lifted_thread.c
 +++ b/runtime/spu/spu_lifted_thread.c
 @@ -1,6 +1,7 @@
@@ -40057,7 +40627,7 @@ index 945829d..fe7755e 100644
  
      /* The SPU has stopped, so its MFC engine is idle and the slot it holds in
 diff --git a/runtime/spu/spu_lifted_thread.h b/runtime/spu/spu_lifted_thread.h
-index 5805cdb..f4e2053 100644
+index 5805cdb3..f4e20533 100644
 --- a/runtime/spu/spu_lifted_thread.h
 +++ b/runtime/spu/spu_lifted_thread.h
 @@ -32,8 +32,11 @@ typedef struct spu_lifted_thread_desc {
@@ -40074,7 +40644,7 @@ index 5805cdb..f4e2053 100644
  
  /* How the thread stopped, in the terms the group state machine needs. */
 diff --git a/runtime/spu/spu_lockstep.c b/runtime/spu/spu_lockstep.c
-index 22f2e29..a8df2d4 100644
+index 22f2e29d..a8df2d49 100644
 --- a/runtime/spu/spu_lockstep.c
 +++ b/runtime/spu/spu_lockstep.c
 @@ -81,7 +81,7 @@ static unsigned long long  s_pass_count = 0;
@@ -40140,7 +40710,7 @@ index 22f2e29..a8df2d4 100644
      int idx = ls_find_slot(ctx);
      if (idx >= 0) {
 diff --git a/runtime/spu/spu_raw.c b/runtime/spu/spu_raw.c
-index f6dc8be..fe74944 100644
+index f6dc8bef..fe74944d 100644
 --- a/runtime/spu/spu_raw.c
 +++ b/runtime/spu/spu_raw.c
 @@ -99,7 +99,7 @@ static raw_spu s_spu[SPU_RAW_COUNT];
@@ -40232,7 +40802,7 @@ index f6dc8be..fe74944 100644
                n, (unsigned long long)ctx->gpr[4], (unsigned long long)ctx->gpr[5]); }
      return CELL_OK;
 diff --git a/runtime/spu/spu_workload.c b/runtime/spu/spu_workload.c
-index 2a8dca1..a26fd9e 100644
+index 2a8dca10..a26fd9e8 100644
 --- a/runtime/spu/spu_workload.c
 +++ b/runtime/spu/spu_workload.c
 @@ -5,9 +5,11 @@
@@ -40875,7 +41445,7 @@ index 2a8dca1..a26fd9e 100644
 +    return spu_task_dispatch_claimed(taskset_ea, taskid, image, image_size, context_ea);
 +}
 diff --git a/runtime/spu/spu_workload.h b/runtime/spu/spu_workload.h
-index b0b913c..e6f546e 100644
+index b0b913c2..e6f546e3 100644
 --- a/runtime/spu/spu_workload.h
 +++ b/runtime/spu/spu_workload.h
 @@ -55,6 +55,9 @@ void spu_workload_register_img(uint64_t fingerprint, spu_lifted_entry_fn fn,
@@ -40986,7 +41556,7 @@ index b0b913c..e6f546e 100644
  }
  #endif
 diff --git a/runtime/spu/spurs_job.c b/runtime/spu/spurs_job.c
-index 9e58833..ed19a8f 100644
+index 9e588334..ed19a8f2 100644
 --- a/runtime/spu/spurs_job.c
 +++ b/runtime/spu/spurs_job.c
 @@ -146,21 +146,80 @@ SPURS_JOB_TLS uint32_t g_spurs_job_mbox, g_spurs_job_mbox_intr;
@@ -41413,7 +41983,7 @@ index 9e58833..ed19a8f 100644
      return 0;
  }
 diff --git a/runtime/spu/spurs_policy.c b/runtime/spu/spurs_policy.c
-index 4f82063..d07c13a 100644
+index 4f820630..d07c13ab 100644
 --- a/runtime/spu/spurs_policy.c
 +++ b/runtime/spu/spurs_policy.c
 @@ -1,26 +1,17 @@
@@ -42043,7 +42613,7 @@ index 4f82063..d07c13a 100644
  }
 diff --git a/runtime/spu/tests/build_diff_test.sh b/runtime/spu/tests/build_diff_test.sh
 new file mode 100755
-index 0000000..1770235
+index 00000000..17702353
 --- /dev/null
 +++ b/runtime/spu/tests/build_diff_test.sh
 @@ -0,0 +1,38 @@
@@ -42087,7 +42657,7 @@ index 0000000..1770235
 +fi
 diff --git a/runtime/spu/tests/build_selftest.sh b/runtime/spu/tests/build_selftest.sh
 new file mode 100755
-index 0000000..a3a3c03
+index 00000000..a3a3c033
 --- /dev/null
 +++ b/runtime/spu/tests/build_selftest.sh
 @@ -0,0 +1,11 @@
@@ -42104,7 +42674,7 @@ index 0000000..a3a3c03
 +"$HERE/spu_interp_selftest.exe"
 diff --git a/runtime/spu/tests/gen_lifted_cases.py b/runtime/spu/tests/gen_lifted_cases.py
 new file mode 100644
-index 0000000..a5a17b1
+index 00000000..a5a17b1a
 --- /dev/null
 +++ b/runtime/spu/tests/gen_lifted_cases.py
 @@ -0,0 +1,48 @@
@@ -42158,7 +42728,7 @@ index 0000000..a5a17b1
 +print(f"#define LC_NCASES {len(fns)}")
 diff --git a/runtime/spu/tests/gen_test_loop_bounds.py b/runtime/spu/tests/gen_test_loop_bounds.py
 new file mode 100644
-index 0000000..e4eab1d
+index 00000000..e4eab1d4
 --- /dev/null
 +++ b/runtime/spu/tests/gen_test_loop_bounds.py
 @@ -0,0 +1,119 @@
@@ -42282,7 +42852,7 @@ index 0000000..e4eab1d
 +open(os.path.join(HERE, "test_loop_bounds.elf"), "wb").write(elf)
 +print(f"Wrote test_loop_bounds.elf ({len(prog)} code, head@{HEAD:#x} body@{BODY:#x} exit@{EXIT:#x})")
 diff --git a/runtime/spu/tests/out_adapter/spu_recomp.h b/runtime/spu/tests/out_adapter/spu_recomp.h
-index c63d274..43e5270 100644
+index c63d2743..43e5270e 100644
 --- a/runtime/spu/tests/out_adapter/spu_recomp.h
 +++ b/runtime/spu/tests/out_adapter/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42295,7 +42865,7 @@ index c63d274..43e5270 100644
   * through SPU_IB_DISPATCH so the choice is a compile-time switch. */
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/out_bringup/spu_recomp.h b/runtime/spu/tests/out_bringup/spu_recomp.h
-index c63d274..43e5270 100644
+index c63d2743..43e5270e 100644
 --- a/runtime/spu/tests/out_bringup/spu_recomp.h
 +++ b/runtime/spu/tests/out_bringup/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42308,7 +42878,7 @@ index c63d274..43e5270 100644
   * through SPU_IB_DISPATCH so the choice is a compile-time switch. */
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/out_brsl_return/spu_recomp.c b/runtime/spu/tests/out_brsl_return/spu_recomp.c
-index 3b4fee4..a5d5dd2 100644
+index 3b4fee4c..a5d5dd22 100644
 --- a/runtime/spu/tests/out_brsl_return/spu_recomp.c
 +++ b/runtime/spu/tests/out_brsl_return/spu_recomp.c
 @@ -5,7 +5,7 @@
@@ -42330,7 +42900,7 @@ index 3b4fee4..a5d5dd2 100644
  
  /* Function table */
 diff --git a/runtime/spu/tests/out_brsl_return/spu_recomp.h b/runtime/spu/tests/out_brsl_return/spu_recomp.h
-index 040d1a6..1eb6360 100644
+index 040d1a63..1eb6360e 100644
 --- a/runtime/spu/tests/out_brsl_return/spu_recomp.h
 +++ b/runtime/spu/tests/out_brsl_return/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42343,7 +42913,7 @@ index 040d1a6..1eb6360 100644
   * through SPU_IB_DISPATCH so the choice is a compile-time switch. */
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/out_dma/spu_recomp.h b/runtime/spu/tests/out_dma/spu_recomp.h
-index c63d274..43e5270 100644
+index c63d2743..43e5270e 100644
 --- a/runtime/spu/tests/out_dma/spu_recomp.h
 +++ b/runtime/spu/tests/out_dma/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42356,7 +42926,7 @@ index c63d274..43e5270 100644
   * through SPU_IB_DISPATCH so the choice is a compile-time switch. */
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/out_event/spu_recomp.h b/runtime/spu/tests/out_event/spu_recomp.h
-index c63d274..43e5270 100644
+index c63d2743..43e5270e 100644
 --- a/runtime/spu/tests/out_event/spu_recomp.h
 +++ b/runtime/spu/tests/out_event/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42369,7 +42939,7 @@ index c63d274..43e5270 100644
   * through SPU_IB_DISPATCH so the choice is a compile-time switch. */
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/out_lfqueue/spu_recomp.h b/runtime/spu/tests/out_lfqueue/spu_recomp.h
-index c63d274..43e5270 100644
+index c63d2743..43e5270e 100644
 --- a/runtime/spu/tests/out_lfqueue/spu_recomp.h
 +++ b/runtime/spu/tests/out_lfqueue/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42383,7 +42953,7 @@ index c63d274..43e5270 100644
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/out_loop_bounds/spu_recomp.c b/runtime/spu/tests/out_loop_bounds/spu_recomp.c
 new file mode 100644
-index 0000000..881d22c
+index 00000000..881d22cb
 --- /dev/null
 +++ b/runtime/spu/tests/out_loop_bounds/spu_recomp.c
 @@ -0,0 +1,78 @@
@@ -42467,7 +43037,7 @@ index 0000000..881d22c
 +}
 diff --git a/runtime/spu/tests/out_loop_bounds/spu_recomp.h b/runtime/spu/tests/out_loop_bounds/spu_recomp.h
 new file mode 100644
-index 0000000..898dec8
+index 00000000..898dec87
 --- /dev/null
 +++ b/runtime/spu/tests/out_loop_bounds/spu_recomp.h
 @@ -0,0 +1,74 @@
@@ -42546,7 +43116,7 @@ index 0000000..898dec8
 + * indirect-branch dispatch (spu_indirect_branch). */
 +void spu_recomp_register(void);
 diff --git a/runtime/spu/tests/out_shufb/spu_recomp.h b/runtime/spu/tests/out_shufb/spu_recomp.h
-index c63d274..43e5270 100644
+index c63d2743..43e5270e 100644
 --- a/runtime/spu/tests/out_shufb/spu_recomp.h
 +++ b/runtime/spu/tests/out_shufb/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42559,7 +43129,7 @@ index c63d274..43e5270 100644
   * through SPU_IB_DISPATCH so the choice is a compile-time switch. */
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/out_sum/spu_recomp.h b/runtime/spu/tests/out_sum/spu_recomp.h
-index c63d274..43e5270 100644
+index c63d2743..43e5270e 100644
 --- a/runtime/spu/tests/out_sum/spu_recomp.h
 +++ b/runtime/spu/tests/out_sum/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42572,7 +43142,7 @@ index c63d274..43e5270 100644
   * through SPU_IB_DISPATCH so the choice is a compile-time switch. */
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/out_taskset/spu_recomp.h b/runtime/spu/tests/out_taskset/spu_recomp.h
-index c63d274..43e5270 100644
+index c63d2743..43e5270e 100644
 --- a/runtime/spu/tests/out_taskset/spu_recomp.h
 +++ b/runtime/spu/tests/out_taskset/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42585,7 +43155,7 @@ index c63d274..43e5270 100644
   * through SPU_IB_DISPATCH so the choice is a compile-time switch. */
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/out_workload/spu_recomp.h b/runtime/spu/tests/out_workload/spu_recomp.h
-index c63d274..43e5270 100644
+index c63d2743..43e5270e 100644
 --- a/runtime/spu/tests/out_workload/spu_recomp.h
 +++ b/runtime/spu/tests/out_workload/spu_recomp.h
 @@ -27,7 +27,7 @@ extern "C" {
@@ -42599,7 +43169,7 @@ index c63d274..43e5270 100644
  void spu_indirect_branch(spu_context* ctx);
 diff --git a/runtime/spu/tests/rpcs3_oracle/extract.py b/runtime/spu/tests/rpcs3_oracle/extract.py
 new file mode 100644
-index 0000000..3120366
+index 00000000..31203661
 --- /dev/null
 +++ b/runtime/spu/tests/rpcs3_oracle/extract.py
 @@ -0,0 +1,101 @@
@@ -42706,7 +43276,7 @@ index 0000000..3120366
 +open(out, "w", encoding="utf-8").write(hdr + luts + "\n" + imm + "\n" + src + "\n" + dispatch)
 diff --git a/runtime/spu/tests/rpcs3_oracle/oracle.h b/runtime/spu/tests/rpcs3_oracle/oracle.h
 new file mode 100644
-index 0000000..bdf6c50
+index 00000000..bdf6c50a
 --- /dev/null
 +++ b/runtime/spu/tests/rpcs3_oracle/oracle.h
 @@ -0,0 +1,24 @@
@@ -42736,7 +43306,7 @@ index 0000000..bdf6c50
 +#endif
 diff --git a/runtime/spu/tests/rpcs3_oracle/oracle_run.inc b/runtime/spu/tests/rpcs3_oracle/oracle_run.inc
 new file mode 100644
-index 0000000..f14ad6d
+index 00000000..f14ad6db
 --- /dev/null
 +++ b/runtime/spu/tests/rpcs3_oracle/oracle_run.inc
 @@ -0,0 +1,38 @@
@@ -42780,7 +43350,7 @@ index 0000000..f14ad6d
 +}
 diff --git a/runtime/spu/tests/rpcs3_oracle/shim/oracle_shim.h b/runtime/spu/tests/rpcs3_oracle/shim/oracle_shim.h
 new file mode 100644
-index 0000000..109d908
+index 00000000..109d9089
 --- /dev/null
 +++ b/runtime/spu/tests/rpcs3_oracle/shim/oracle_shim.h
 @@ -0,0 +1,94 @@
@@ -42879,7 +43449,7 @@ index 0000000..109d908
 +	return r;
 +}
 diff --git a/runtime/spu/tests/run_tests.sh b/runtime/spu/tests/run_tests.sh
-index ca9051b..71bc72b 100644
+index ca9051b7..71bc72be 100644
 --- a/runtime/spu/tests/run_tests.sh
 +++ b/runtime/spu/tests/run_tests.sh
 @@ -34,8 +34,8 @@ for gen in "$HERE"/gen_test_*.py; do
@@ -42895,7 +43465,7 @@ index ca9051b..71bc72b 100644
      # Optional per-test extra build args (extra sources / -I dirs). A
 diff --git a/runtime/spu/tests/spu_float_referee.py b/runtime/spu/tests/spu_float_referee.py
 new file mode 100644
-index 0000000..2159e11
+index 00000000..2159e117
 --- /dev/null
 +++ b/runtime/spu/tests/spu_float_referee.py
 @@ -0,0 +1,127 @@
@@ -43028,7 +43598,7 @@ index 0000000..2159e11
 +    main()
 diff --git a/runtime/spu/tests/spu_interp_diff_test.c b/runtime/spu/tests/spu_interp_diff_test.c
 new file mode 100644
-index 0000000..f98ec72
+index 00000000..f98ec72a
 --- /dev/null
 +++ b/runtime/spu/tests/spu_interp_diff_test.c
 @@ -0,0 +1,784 @@
@@ -43817,7 +44387,7 @@ index 0000000..f98ec72
 +    return okk ? 0 : 1;
 +}
 diff --git a/runtime/spu/tests/spu_interp_selftest.c b/runtime/spu/tests/spu_interp_selftest.c
-index 21bc39e..7b5912f 100644
+index 21bc39e7..7b5912f6 100644
 --- a/runtime/spu/tests/spu_interp_selftest.c
 +++ b/runtime/spu/tests/spu_interp_selftest.c
 @@ -1,3 +1,4 @@
@@ -44226,7 +44796,7 @@ index 21bc39e..7b5912f 100644
  }
 diff --git a/runtime/spu/tests/test_loop_bounds_main.c b/runtime/spu/tests/test_loop_bounds_main.c
 new file mode 100644
-index 0000000..0e3bd9b
+index 00000000..0e3bd9b9
 --- /dev/null
 +++ b/runtime/spu/tests/test_loop_bounds_main.c
 @@ -0,0 +1,260 @@
@@ -44491,7 +45061,7 @@ index 0000000..0e3bd9b
 +    return g_fail ? 1 : 0;
 +}
 diff --git a/runtime/spu/tests/test_spu_coherency.c b/runtime/spu/tests/test_spu_coherency.c
-index b28e28e..44b64db 100644
+index b28e28ea..44b64db8 100644
 --- a/runtime/spu/tests/test_spu_coherency.c
 +++ b/runtime/spu/tests/test_spu_coherency.c
 @@ -29,13 +29,17 @@
@@ -44727,7 +45297,7 @@ index b28e28e..44b64db 100644
             g_pass, g_fail);
 diff --git a/runtime/spu/tests/test_spu_float_neon.c b/runtime/spu/tests/test_spu_float_neon.c
 new file mode 100644
-index 0000000..b03c726
+index 00000000..b03c7260
 --- /dev/null
 +++ b/runtime/spu/tests/test_spu_float_neon.c
 @@ -0,0 +1,271 @@
@@ -45004,7 +45574,7 @@ index 0000000..b03c726
 +}
 diff --git a/runtime/spu/tests/test_spu_int_neon.c b/runtime/spu/tests/test_spu_int_neon.c
 new file mode 100644
-index 0000000..22ea98a
+index 00000000..22ea98aa
 --- /dev/null
 +++ b/runtime/spu/tests/test_spu_int_neon.c
 @@ -0,0 +1,107 @@
@@ -45116,7 +45686,7 @@ index 0000000..22ea98a
 +#endif
 +}
 diff --git a/runtime/spu/tests/test_spu_lifted_start.c b/runtime/spu/tests/test_spu_lifted_start.c
-index 649f28f..203cfe0 100644
+index 649f28f2..203cfe05 100644
 --- a/runtime/spu/tests/test_spu_lifted_start.c
 +++ b/runtime/spu/tests/test_spu_lifted_start.c
 @@ -599,7 +599,7 @@ static void test_user_event_ports(uint32_t gid, uint32_t tid)
@@ -45156,7 +45726,7 @@ index 649f28f..203cfe0 100644
  void sys_rsx_init(lv2_syscall_table* t) { (void)t; }
  void spu_raw_note_image(uint32_t ea, uint32_t src) { (void)ea; (void)src; }
 diff --git a/runtime/spu/tests/test_spu_lockline_peer.c b/runtime/spu/tests/test_spu_lockline_peer.c
-index 4bf0869..1105a83 100644
+index 4bf08693..1105a830 100644
 --- a/runtime/spu/tests/test_spu_lockline_peer.c
 +++ b/runtime/spu/tests/test_spu_lockline_peer.c
 @@ -53,7 +53,8 @@
@@ -45371,7 +45941,7 @@ index 4bf0869..1105a83 100644
  
  /* ===========================================================================
 diff --git a/runtime/spu/tests/test_spu_shufb.c b/runtime/spu/tests/test_spu_shufb.c
-index 98fa95f..195c75e 100644
+index 98fa95f7..195c75e3 100644
 --- a/runtime/spu/tests/test_spu_shufb.c
 +++ b/runtime/spu/tests/test_spu_shufb.c
 @@ -1,14 +1,15 @@
@@ -45396,7 +45966,7 @@ index 98fa95f..195c75e 100644
  #else
      srand(12345);
 diff --git a/runtime/spu/tests/test_workload_image.h b/runtime/spu/tests/test_workload_image.h
-index 1274c37..75198f8 100644
+index 1274c378..75198f86 100644
 --- a/runtime/spu/tests/test_workload_image.h
 +++ b/runtime/spu/tests/test_workload_image.h
 @@ -1,4 +1,4 @@
@@ -45407,7 +45977,7 @@ index 1274c37..75198f8 100644
  #define kWorkloadElfSize 512u
 diff --git a/runtime/syscalls/lv2_prx.c b/runtime/syscalls/lv2_prx.c
 new file mode 100644
-index 0000000..5bdf0f7
+index 00000000..5bdf0f7f
 --- /dev/null
 +++ b/runtime/syscalls/lv2_prx.c
 @@ -0,0 +1,447 @@
@@ -45859,7 +46429,7 @@ index 0000000..5bdf0f7
 +    lv2_syscall_register(tbl, 497, sys_prx_load_module_on_memcontainer);
 +}
 diff --git a/runtime/syscalls/lv2_register.c b/runtime/syscalls/lv2_register.c
-index bcb1df4..a6839f9 100644
+index bcb1df42..a6839f90 100644
 --- a/runtime/syscalls/lv2_register.c
 +++ b/runtime/syscalls/lv2_register.c
 @@ -10,6 +10,7 @@
@@ -48012,7 +48582,7 @@ index bcb1df4..a6839f9 100644
  }
 diff --git a/runtime/syscalls/lv2_spu_image.c b/runtime/syscalls/lv2_spu_image.c
 new file mode 100644
-index 0000000..51b1d0a
+index 00000000..51b1d0a6
 --- /dev/null
 +++ b/runtime/syscalls/lv2_spu_image.c
 @@ -0,0 +1,208 @@
@@ -48226,7 +48796,7 @@ index 0000000..51b1d0a
 +}
 diff --git a/runtime/syscalls/lv2_spu_image.h b/runtime/syscalls/lv2_spu_image.h
 new file mode 100644
-index 0000000..e4f3725
+index 00000000..e4f37253
 --- /dev/null
 +++ b/runtime/syscalls/lv2_spu_image.h
 @@ -0,0 +1,63 @@
@@ -48294,7 +48864,7 @@ index 0000000..e4f3725
 +
 +#endif
 diff --git a/runtime/syscalls/lv2_syscall_table.h b/runtime/syscalls/lv2_syscall_table.h
-index a274395..5dd69eb 100644
+index a274395b..5dd69eba 100644
 --- a/runtime/syscalls/lv2_syscall_table.h
 +++ b/runtime/syscalls/lv2_syscall_table.h
 @@ -46,8 +46,9 @@ extern "C" {
@@ -48327,7 +48897,7 @@ index a274395..5dd69eb 100644
  #define SYS_TIME_GET_TIMEBASE_FREQUENCY 147
  
 diff --git a/runtime/syscalls/sys_cond.c b/runtime/syscalls/sys_cond.c
-index 45235ea..3661d02 100644
+index 45235ea6..3661d023 100644
 --- a/runtime/syscalls/sys_cond.c
 +++ b/runtime/syscalls/sys_cond.c
 @@ -143,16 +143,16 @@ int64_t sys_cond_wait(ppu_context* ctx)
@@ -48363,7 +48933,7 @@ index 45235ea..3661d02 100644
  }
  
 diff --git a/runtime/syscalls/sys_event.c b/runtime/syscalls/sys_event.c
-index 4240edf..2d6be03 100644
+index 4240edf2..2d6be030 100644
 --- a/runtime/syscalls/sys_event.c
 +++ b/runtime/syscalls/sys_event.c
 @@ -283,9 +283,9 @@ void sys_event_queue_cancel_by_id(uint32_t queue_id)
@@ -48643,7 +49213,7 @@ index 4240edf..2d6be03 100644
  
      if (flag_id == 0 || flag_id > SYS_EVENT_FLAG_MAX)
 diff --git a/runtime/syscalls/sys_fs.c b/runtime/syscalls/sys_fs.c
-index 489f8a5..3e6fd76 100644
+index 489f8a5a..3e6fd76d 100644
 --- a/runtime/syscalls/sys_fs.c
 +++ b/runtime/syscalls/sys_fs.c
 @@ -2,6 +2,7 @@
@@ -48704,7 +49274,7 @@ index 489f8a5..3e6fd76 100644
        if (s_ft) { static unsigned long fn;
 diff --git a/runtime/syscalls/sys_lwsync.c b/runtime/syscalls/sys_lwsync.c
 new file mode 100644
-index 0000000..f55cfa5
+index 00000000..f55cfa50
 --- /dev/null
 +++ b/runtime/syscalls/sys_lwsync.c
 @@ -0,0 +1,425 @@
@@ -49134,7 +49704,7 @@ index 0000000..f55cfa5
 +    lv2_syscall_register(tbl, 116, sys_lwcond_signal_all);
 +}
 diff --git a/runtime/syscalls/sys_memory.c b/runtime/syscalls/sys_memory.c
-index bfbaac5..a5c0d35 100644
+index bfbaac50..a5c0d358 100644
 --- a/runtime/syscalls/sys_memory.c
 +++ b/runtime/syscalls/sys_memory.c
 @@ -1,3 +1,4 @@
@@ -49197,7 +49767,7 @@ index bfbaac5..a5c0d35 100644
                  size, addr); }
  
 diff --git a/runtime/syscalls/sys_mutex.c b/runtime/syscalls/sys_mutex.c
-index 2e760ea..a8906eb 100644
+index 2e760ea5..a8906eb1 100644
 --- a/runtime/syscalls/sys_mutex.c
 +++ b/runtime/syscalls/sys_mutex.c
 @@ -191,7 +191,7 @@ int64_t sys_mutex_lock(ppu_context* ctx)
@@ -49293,7 +49863,7 @@ index 2e760ea..a8906eb 100644
  
  #ifdef _WIN32
 diff --git a/runtime/syscalls/sys_ppu_thread.c b/runtime/syscalls/sys_ppu_thread.c
-index fb3906a..63ddace 100644
+index fb3906ae..63ddace1 100644
 --- a/runtime/syscalls/sys_ppu_thread.c
 +++ b/runtime/syscalls/sys_ppu_thread.c
 @@ -16,6 +16,11 @@
@@ -49791,7 +50361,7 @@ index fb3906a..63ddace 100644
      lv2_syscall_register(tbl, SYS_PPU_THREAD_YIELD,               sys_ppu_thread_yield);
      lv2_syscall_register(tbl, SYS_PPU_THREAD_JOIN,                sys_ppu_thread_join);
 diff --git a/runtime/syscalls/sys_ppu_thread.h b/runtime/syscalls/sys_ppu_thread.h
-index a297bf5..3de04e9 100644
+index a297bf5c..3de04e98 100644
 --- a/runtime/syscalls/sys_ppu_thread.h
 +++ b/runtime/syscalls/sys_ppu_thread.h
 @@ -51,7 +51,9 @@ typedef struct ppu_thread_info {
@@ -49806,7 +50376,7 @@ index a297bf5..3de04e9 100644
  #ifdef _WIN32
      HANDLE       host_thread;
 diff --git a/runtime/syscalls/sys_semaphore.c b/runtime/syscalls/sys_semaphore.c
-index 19ecafc..aa0e859 100644
+index 19ecafc8..aa0e8595 100644
 --- a/runtime/syscalls/sys_semaphore.c
 +++ b/runtime/syscalls/sys_semaphore.c
 @@ -196,10 +196,10 @@ void lbp_unstick_once(void)
@@ -49921,7 +50491,7 @@ index 19ecafc..aa0e859 100644
                      sem_id, s->value, count, s->max_value); }
          LeaveCriticalSection(&s->value_lock);
 diff --git a/runtime/syscalls/sys_timer.c b/runtime/syscalls/sys_timer.c
-index d8f4081..21f7eda 100644
+index d8f40814..21f7eda1 100644
 --- a/runtime/syscalls/sys_timer.c
 +++ b/runtime/syscalls/sys_timer.c
 @@ -2,12 +2,20 @@
@@ -50144,7 +50714,7 @@ index d8f4081..21f7eda 100644
      lv2_syscall_register(tbl, SYS_TIME_GET_CURRENT_TIME,   sys_time_get_current_time);
  }
 diff --git a/runtime/syscalls/sys_timer.h b/runtime/syscalls/sys_timer.h
-index 3588dce..39a0102 100644
+index 3588dcea..39a0102e 100644
 --- a/runtime/syscalls/sys_timer.h
 +++ b/runtime/syscalls/sys_timer.h
 @@ -72,6 +72,7 @@ extern sys_timer_info g_sys_timers[SYS_TIMER_MAX];
@@ -50156,7 +50726,7 @@ index 3588dce..39a0102 100644
  int64_t sys_timer_create(ppu_context* ctx);
  int64_t sys_timer_destroy(ppu_context* ctx);
 diff --git a/templates/project/CMakeLists.txt b/templates/project/CMakeLists.txt
-index 5fca857..2508a4e 100644
+index 5fca8570..2508a4e7 100644
 --- a/templates/project/CMakeLists.txt
 +++ b/templates/project/CMakeLists.txt
 @@ -90,6 +90,9 @@ if(EXISTS "${RECOMP_DIR}/ppu_hle_nids.cpp")
@@ -50219,7 +50789,7 @@ index 5fca857..2508a4e 100644
  elseif(MSVC)
      target_compile_options(${PROJECT_NAME} PRIVATE
 diff --git a/templates/project/main.cpp b/templates/project/main.cpp
-index 6632ac1..7111953 100644
+index 6632ac1f..7111953e 100644
 --- a/templates/project/main.cpp
 +++ b/templates/project/main.cpp
 @@ -38,6 +38,8 @@
@@ -50386,7 +50956,7 @@ index 6632ac1..7111953 100644
  
 diff --git a/tests/bench/spu/.gitignore b/tests/bench/spu/.gitignore
 new file mode 100644
-index 0000000..ea93687
+index 00000000..ea93687f
 --- /dev/null
 +++ b/tests/bench/spu/.gitignore
 @@ -0,0 +1,2 @@
@@ -50394,7 +50964,7 @@ index 0000000..ea93687
 +__pycache__/
 diff --git a/tests/bench/spu/README.md b/tests/bench/spu/README.md
 new file mode 100644
-index 0000000..ee84929
+index 00000000..ee849293
 --- /dev/null
 +++ b/tests/bench/spu/README.md
 @@ -0,0 +1,66 @@
@@ -50466,7 +51036,7 @@ index 0000000..ee84929
 +helper optimisation, on an M1 Pro with the machine otherwise loaded.
 diff --git a/tests/bench/spu/apply_barriers.py b/tests/bench/spu/apply_barriers.py
 new file mode 100755
-index 0000000..6a52f77
+index 00000000..6a52f773
 --- /dev/null
 +++ b/tests/bench/spu/apply_barriers.py
 @@ -0,0 +1,46 @@
@@ -50518,7 +51088,7 @@ index 0000000..6a52f77
 +main()
 diff --git a/tests/bench/spu/bench_barrier.h b/tests/bench/spu/bench_barrier.h
 new file mode 100644
-index 0000000..fd9af94
+index 00000000..fd9af946
 --- /dev/null
 +++ b/tests/bench/spu/bench_barrier.h
 @@ -0,0 +1,47 @@
@@ -50571,7 +51141,7 @@ index 0000000..fd9af94
 +#endif
 diff --git a/tests/bench/spu/gen_spu_bench.py b/tests/bench/spu/gen_spu_bench.py
 new file mode 100755
-index 0000000..9f4b5c2
+index 00000000..9f4b5c28
 --- /dev/null
 +++ b/tests/bench/spu/gen_spu_bench.py
 @@ -0,0 +1,495 @@
@@ -51072,7 +51642,7 @@ index 0000000..9f4b5c2
 +    main()
 diff --git a/tests/bench/spu/results/2026-10-06-m1pro-baseline.csv b/tests/bench/spu/results/2026-10-06-m1pro-baseline.csv
 new file mode 100644
-index 0000000..7e18762
+index 00000000..7e187622
 --- /dev/null
 +++ b/tests/bench/spu/results/2026-10-06-m1pro-baseline.csv
 @@ -0,0 +1,412 @@
@@ -51490,7 +52060,7 @@ index 0000000..7e18762
 +atomic,issue,"PUTLLUC + atomic stat",2.11191e+07,47.3506,9.89505e+06,101.061
 diff --git a/tests/bench/spu/results/2026-10-06-m1pro-baseline.txt b/tests/bench/spu/results/2026-10-06-m1pro-baseline.txt
 new file mode 100644
-index 0000000..8f5212a
+index 00000000..8f5212aa
 --- /dev/null
 +++ b/tests/bench/spu/results/2026-10-06-m1pro-baseline.txt
 @@ -0,0 +1,415 @@
@@ -51911,7 +52481,7 @@ index 0000000..8f5212a
 +atomic    issue         PUTLLUC + atomic stat              21.12 M    47.351        9.90 M    101.06       2x
 diff --git a/tests/bench/spu/run_spu_bench.sh b/tests/bench/spu/run_spu_bench.sh
 new file mode 100755
-index 0000000..37545ec
+index 00000000..37545ecc
 --- /dev/null
 +++ b/tests/bench/spu/run_spu_bench.sh
 @@ -0,0 +1,36 @@
@@ -51953,7 +52523,7 @@ index 0000000..37545ec
 +"$OUT/spu_bench" "$@"
 diff --git a/tests/bench/spu/spu_bench_main.c b/tests/bench/spu/spu_bench_main.c
 new file mode 100644
-index 0000000..b2d353d
+index 00000000..b2d353dd
 --- /dev/null
 +++ b/tests/bench/spu/spu_bench_main.c
 @@ -0,0 +1,220 @@
@@ -52178,7 +52748,7 @@ index 0000000..b2d353d
 +    return halted ? 1 : 0;
 +}
 diff --git a/tests/fiber_switch/CMakeLists.txt b/tests/fiber_switch/CMakeLists.txt
-index 8041c95..dd810aa 100644
+index 8041c955..dd810aa1 100644
 --- a/tests/fiber_switch/CMakeLists.txt
 +++ b/tests/fiber_switch/CMakeLists.txt
 @@ -27,6 +27,7 @@ endif()
@@ -52191,7 +52761,7 @@ index 8041c95..dd810aa 100644
  
 diff --git a/tests/fiber_switch/test_shims.c b/tests/fiber_switch/test_shims.c
 new file mode 100644
-index 0000000..64ae1e8
+index 00000000..64ae1e87
 --- /dev/null
 +++ b/tests/fiber_switch/test_shims.c
 @@ -0,0 +1,12 @@
@@ -52208,7 +52778,7 @@ index 0000000..64ae1e8
 +void     spu_lockline_unlock_mask(uint64_t mask)            { (void)mask; }
 +void     spu_coh_notify_write_from_ppu(uint32_t ea)         { (void)ea; }
 diff --git a/tests/sync_stress/test_shims.c b/tests/sync_stress/test_shims.c
-index 0638d9b..9128ae9 100644
+index 0638d9be..9128ae93 100644
 --- a/tests/sync_stress/test_shims.c
 +++ b/tests/sync_stress/test_shims.c
 @@ -53,5 +53,5 @@ int spu_dispatch_frame_by_queue(uint32_t comp_queue, uint32_t work_ea)
@@ -52220,7 +52790,7 @@ index 0638d9b..9128ae9 100644
 +__thread uint32_t g_spu_pending_evt[3];
 +__thread int      g_spu_pending_evt_valid;
 diff --git a/tools/build_spu_workloads.py b/tools/build_spu_workloads.py
-index c4b34d1..5940ea2 100644
+index c4b34d15..5940ea2e 100644
 --- a/tools/build_spu_workloads.py
 +++ b/tools/build_spu_workloads.py
 @@ -54,6 +54,40 @@ def img_size(b):
@@ -52350,7 +52920,7 @@ index c4b34d1..5940ea2 100644
      L.append("}")
      if args.constructor:
 diff --git a/tools/callgraph.py b/tools/callgraph.py
-index 995f742..37b195b 100644
+index 995f7422..37b195ba 100644
 --- a/tools/callgraph.py
 +++ b/tools/callgraph.py
 @@ -16,7 +16,7 @@ indirect call the runtime is not making. This tells the two apart.
@@ -52363,7 +52933,7 @@ index 995f742..37b195b 100644
  TRAMP = re.compile(r'g_trampoline_fn\s*=\s*\(void\(\*\)\(void\*\)\)(func_[0-9A-Fa-f]+)')
  
 diff --git a/tools/extract_jobmods.py b/tools/extract_jobmods.py
-index 8be8dc2..8e2e77a 100644
+index 8be8dc27..8e2e77a4 100644
 --- a/tools/extract_jobmods.py
 +++ b/tools/extract_jobmods.py
 @@ -1,6 +1,7 @@
@@ -52453,7 +53023,7 @@ index 8be8dc2..8e2e77a 100644
          if not os.path.exists(path):
              print(f"  MISSING {path}", file=sys.stderr); continue
 diff --git a/tools/find_spu_functions.py b/tools/find_spu_functions.py
-index 6c1b361..1af4fad 100644
+index 6c1b361c..1af4fadc 100644
 --- a/tools/find_spu_functions.py
 +++ b/tools/find_spu_functions.py
 @@ -546,6 +546,18 @@ _TERMINATORS_NO_FALLTHROUGH = {
@@ -52486,7 +53056,7 @@ index 6c1b361..1af4fad 100644
              return pc + 4
 diff --git a/tools/gen_prx_module.py b/tools/gen_prx_module.py
 new file mode 100644
-index 0000000..5b62556
+index 00000000..5b625560
 --- /dev/null
 +++ b/tools/gen_prx_module.py
 @@ -0,0 +1,104 @@
@@ -52596,7 +53166,7 @@ index 0000000..5b62556
 +    main()
 diff --git a/tools/lift_firmware_module.py b/tools/lift_firmware_module.py
 new file mode 100644
-index 0000000..26e3960
+index 00000000..26e39608
 --- /dev/null
 +++ b/tools/lift_firmware_module.py
 @@ -0,0 +1,81 @@
@@ -52683,7 +53253,7 @@ index 0000000..26e3960
 +    main()
 diff --git a/tools/lift_firmware_spu.py b/tools/lift_firmware_spu.py
 new file mode 100644
-index 0000000..00fe68b
+index 00000000..00fe68b7
 --- /dev/null
 +++ b/tools/lift_firmware_spu.py
 @@ -0,0 +1,226 @@
@@ -52914,7 +53484,7 @@ index 0000000..00fe68b
 +if __name__ == "__main__":
 +    main()
 diff --git a/tools/lift_jobmods.py b/tools/lift_jobmods.py
-index d2e6b07..729cf62 100644
+index d2e6b07e..729cf624 100644
 --- a/tools/lift_jobmods.py
 +++ b/tools/lift_jobmods.py
 @@ -46,7 +46,8 @@ CODE_END = {
@@ -52962,7 +53532,7 @@ index d2e6b07..729cf62 100644
          inside = [a for a in EXTRA_FUNCS if BASE <= int(a, 0) < BASE + len(raw)]
          # The module's first function starts right after the 0x30-byte header
 diff --git a/tools/nid_database.py b/tools/nid_database.py
-index 794abe7..b36b09b 100644
+index 794abe77..b36b09b1 100644
 --- a/tools/nid_database.py
 +++ b/tools/nid_database.py
 @@ -291,6 +291,7 @@ _BUILTIN_FUNCTIONS: list[tuple[str, str]] = [
@@ -52974,7 +53544,7 @@ index 794abe7..b36b09b 100644
      # Sync utilities used with SPURS
      ("cellSpurs", "_cellSpursTasksetAttributeInitialize"),
 diff --git a/tools/ppu_disasm.py b/tools/ppu_disasm.py
-index 67dfd3f..3c68616 100644
+index 67dfd3fd..3c686166 100644
 --- a/tools/ppu_disasm.py
 +++ b/tools/ppu_disasm.py
 @@ -798,6 +798,34 @@ def decode(insn: int, addr: int = 0) -> Instruction:
@@ -53028,7 +53598,7 @@ index 67dfd3f..3c68616 100644
          # Fallback for opcode 4
          result.mnemonic = f"vmx_x{xo_full}"
 diff --git a/tools/ppu_lifter.py b/tools/ppu_lifter.py
-index b19e240..0923d6c 100644
+index b19e2408..0923d6c7 100644
 --- a/tools/ppu_lifter.py
 +++ b/tools/ppu_lifter.py
 @@ -12,6 +12,7 @@ Usage:
@@ -54908,7 +55478,7 @@ index b19e240..0923d6c 100644
  
  if __name__ == "__main__":
 diff --git a/tools/spu_disasm.py b/tools/spu_disasm.py
-index 2630352..9380de3 100644
+index 26303525..9380de35 100644
 --- a/tools/spu_disasm.py
 +++ b/tools/spu_disasm.py
 @@ -146,7 +146,10 @@ RI10_TABLE: dict[int, str] = {
@@ -54923,7 +55493,7 @@ index 2630352..9380de3 100644
      0b01111101: "ceqhi",  # compare equal halfword immediate
      0b01111110: "ceqbi",  # compare equal byte immediate
 diff --git a/tools/spu_lifter.py b/tools/spu_lifter.py
-index bfc9af4..f061179 100644
+index bfc9af4f..f0611790 100644
 --- a/tools/spu_lifter.py
 +++ b/tools/spu_lifter.py
 @@ -193,6 +193,171 @@ def _chan(token: str) -> str:
@@ -55511,7 +56081,7 @@ index bfc9af4..f061179 100644
      os.makedirs(args.output, exist_ok=True)
      hp = os.path.join(args.output, args.header_name)
 diff --git a/tools/test_ppu_branches.py b/tools/test_ppu_branches.py
-index dee03d1..278077d 100644
+index dee03d14..278077dc 100644
 --- a/tools/test_ppu_branches.py
 +++ b/tools/test_ppu_branches.py
 @@ -46,10 +46,13 @@ def main() -> int:
@@ -55531,7 +56101,7 @@ index dee03d1..278077d 100644
      # A chunk that ends on a conditional branch falls through when it is not
      # taken, so it needs the fall-through tail; an unconditional one does not.
 diff --git a/tools/test_ppu_jumptables.py b/tools/test_ppu_jumptables.py
-index 4eef694..5527d6b 100644
+index 4eef6940..5527d6bb 100644
 --- a/tools/test_ppu_jumptables.py
 +++ b/tools/test_ppu_jumptables.py
 @@ -52,6 +52,9 @@ def w_li(rt, si):          return (14 << 26) | (rt << 21) | (si & 0xFFFF)
@@ -55660,7 +56230,7 @@ index 4eef694..5527d6b 100644
      test_const_base_no_table()
      test_const_base_needs_constant()
 diff --git a/tools/test_ppu_lift.py b/tools/test_ppu_lift.py
-index 096fc3a..2c785a4 100644
+index 096fc3a0..2c785a4f 100644
 --- a/tools/test_ppu_lift.py
 +++ b/tools/test_ppu_lift.py
 @@ -929,6 +929,12 @@ extern "C" uint32_t vm_read32(uint64_t a) { uint32_t v; memcpy(&v, g_vm_stub + V
@@ -55678,7 +56248,7 @@ index 096fc3a..2c785a4 100644
      out.append("    ppu_context* ctx = &g_ctx;")
 diff --git a/tools/test_ppu_local_regs.py b/tools/test_ppu_local_regs.py
 new file mode 100755
-index 0000000..0e85d92
+index 00000000..0e85d920
 --- /dev/null
 +++ b/tools/test_ppu_local_regs.py
 @@ -0,0 +1,235 @@
