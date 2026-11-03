@@ -17,7 +17,16 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="${PS3RECOMP_DIR:-$ROOT/ps3recomp}"
 PORT="$ROOT/work/port"
 if [ -n "${PORT_PPU_GCC:-}" ]; then JOBS="${JOBS:-2}"; else JOBS="${JOBS:-4}"; fi
-MARCH="${PORT_SPU_MARCH:-x86-64-v4}"
+# The SPU code's -march: AVX-512 (x86-64-v4) when this CPU has it, else
+# x86-64-v3 (AVX2). PORT_SPU_MARCH overrides, e.g. to build for another machine.
+if [ -z "${PORT_SPU_MARCH:-}" ]; then
+    if grep -qw avx512bw /proc/cpuinfo 2>/dev/null && grep -qw avx512vl /proc/cpuinfo; then
+        PORT_SPU_MARCH=x86-64-v4
+    else
+        PORT_SPU_MARCH=x86-64-v3
+    fi
+fi
+MARCH="$PORT_SPU_MARCH"
 
 [ -f "$ROOT/work/src/recomp/ppu_recomp.h" ] || { echo "nothing lifted yet -- run scripts/lift.sh" >&2; exit 1; }
 
