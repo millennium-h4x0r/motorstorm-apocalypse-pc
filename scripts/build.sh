@@ -8,7 +8,8 @@
 # chunks of about 2 GB each, so the default is four jobs, and on systemd hosts
 # the build runs in a 14 GB memory scope with no swap: a wide parallel build
 # can exhaust RAM and take the desktop down. PORT_PPU_GCC=1 compiles them with
-# GCC instead, ~5 GB a chunk, and two jobs. JOBS=<n> and PORT_SPU_MARCH=<march>
+# GCC instead, ~5 GB a chunk, and two jobs. PORT_BUILD_MEM=<size> raises the
+# memory scope on a bigger machine. JOBS=<n> and PORT_SPU_MARCH=<march>
 # override (x86-64-v3 for a CPU without AVX-512; the port checks at start-up
 # that the CPU has what it was built for).
 set -euo pipefail
@@ -23,16 +24,16 @@ MARCH="${PORT_SPU_MARCH:-x86-64-v4}"
 configure() {   # <build dir> <vulkan ON|OFF>
     cmake -S "$PORT" -B "$1" -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DPS3RECOMP_DIR="$DIR" -DRECOMP_DIR="$ROOT/work/src/recomp" -DSPU_DIR="$PORT/spu" \
-        -DPS3RECOMP_RSX_VULKAN="$2" -DPORT_SPU_MARCH="$MARCH" \
+        -DPS3RECOMP_RSX_VULKAN="$2" -DPython3_EXECUTABLE="${PYTHON:-$ROOT/.venv/bin/python}" -DPORT_SPU_MARCH="$MARCH" \
         -DCMAKE_C_COMPILER_LAUNCHER="$PORT/tools/spu_cc.sh" \
         -DCMAKE_CXX_COMPILER_LAUNCHER="$PORT/tools/ppu_cxx.sh"
 }
 build() {
     if command -v systemd-run >/dev/null && systemd-run --user --scope -q true 2>/dev/null; then
-        systemd-run --user --scope -q -p MemoryMax=14G -p MemorySwapMax=0 nice -n 10 \
-            cmake --build "$1" -j "$JOBS"
+        systemd-run --user --scope -q -p MemoryMax="${PORT_BUILD_MEM:-14G}" -p MemorySwapMax=0 nice -n 10 \
+            cmake --build "$1" -j "$JOBS" -- -k 0
     else
-        nice -n 10 cmake --build "$1" -j "$JOBS"
+        nice -n 10 cmake --build "$1" -j "$JOBS" -- -k 0
     fi
 }
 
