@@ -6,8 +6,8 @@ simulation). Design: [superpowers/specs/2026-11-03-motorstorm-recomp-design.md](
 
 | # | Milestone | Done when | State |
 |---|---|---|---|
-| 1 | Lift and link | a binary that starts and reaches the game's entry | 🔧 |
-| 2 | First pixels | boot logos / first intro video on screen | ⬜ |
+| 1 | Lift and link | a binary that starts and reaches the game's entry | ✅ 2026-11-03 |
+| 2 | First pixels | boot logos / first intro video on screen | 🔧 |
 | 3 | Menus | the game's main menu navigated with a (virtual) pad | ⬜ |
 | 4 | First race | one race finished start to end | ⬜ |
 | 5 | Full feature set | a Festival event and a 4-player split-screen race complete; every track loads | ⬜ |
