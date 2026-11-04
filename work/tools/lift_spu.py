@@ -83,6 +83,26 @@ MS_DSP_LSAS = []
 # inFAMOUS 2 port.
 LIFT_ARGS = ["--local-regs", "--merge-chunks", "--const-bi"] + os.environ.get("SPU_LIFT_EXTRA", "").split()
 
+# Extra function entries for taskset tasks, found at run time (SPU_MISS_LOG=1
+# and the "[spu] img=N branched into unlifted LS ..." lines): the targets of
+# Havok's function-pointer tables, which the PPU builds in main memory so no
+# static scan sees them, and the call-return points that interpreted callees
+# return into. Without them those paths ran on the interpreter, and a
+# collide step took 20-200 ms.
+TASK_EXTRA_ENTRIES = {
+    "task_hkp_collide_01246700": [
+        0x032B8, 0x080F0, 0x086D8, 0x08968, 0x08AB0, 0x08C10, 0x08FE0, 0x090F8, 0x091F0,
+        0x09298, 0x092B0, 0x09370, 0x09A40, 0x0CD28, 0x0EA88, 0x0EB1C, 0x10FD0, 0x110A4,
+        0x110F4, 0x11218, 0x113A4, 0x11F3C, 0x126C8, 0x13D08, 0x14724, 0x14D34, 0x15808,
+        0x1592C, 0x15930, 0x15A28, 0x15A68, 0x15D10, 0x1CB80, 0x3BD58, 0x3BDA0, 0x3BDE8],
+    "task_hkp_collision_query_0126C600": [
+        0x03148, 0x046E0, 0x04720, 0x048D0, 0x05190, 0x06558, 0x068E8, 0x0AF58, 0x0BBF0,
+        0x0C628, 0x0C630, 0x0C6C0, 0x0C720, 0x0C798, 0x0C7A0, 0x0C7F8, 0x0C8A8, 0x0C918,
+        0x0C9D8, 0x0CA48, 0x0CBA8, 0x0CD08, 0x0CE08, 0x0CE78, 0x0CF70, 0x0D018, 0x0D030,
+        0x0D0E0, 0x0D480, 0x0D6E0, 0x0D7C8, 0x0D8B0, 0x0DA88, 0x0DCA0, 0x0DD38, 0x0DF60,
+        0x105A0, 0x105F8, 0x10668, 0x10838, 0x111F8],
+}
+
 # Lifted functions a native replacement may take over (keyed by lifted
 # directory name -> LS addresses). None yet for this title.
 NATIVE_ENTRIES = {}
@@ -611,7 +631,8 @@ def main():
     run([py, os.path.join(tools, "build_spu_workloads.py"), "--images", elf_dir, "--lifted", spu,
          "--out", os.path.join(spu, "spu_elf_workloads.c"), "--register-fn", "port_spu_elf_register_all",
          "--constructor", "--title", "MotorStorm Apocalypse", "--first-image-id", str(TASK_IMAGE_BASE),
-         "--eboot", args.eboot, "--relift"] + [f"--lift-arg={a}" for a in LIFT_ARGS])
+         "--eboot", args.eboot, "--relift"] + [f"--lift-arg={a}" for a in LIFT_ARGS]
+        + [f"--extra-funcs={k}=" + ",".join(hex(a) for a in v) for k, v in TASK_EXTRA_ENTRIES.items()])
     # build_spu_workloads.py numbers images in sorted file-name order.
     for i, t in enumerate(sorted(tasks, key=lambda t: t["dir"])):
         prefix = re.sub(r"[^0-9A-Za-z_]", "_", t["dir"]) + "_"

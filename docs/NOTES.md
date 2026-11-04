@@ -922,6 +922,25 @@ copy, so `MS_DSP_LSAS` cannot name them.
   result the SPU then reads from its inbound mailbox, so the task blocked in
   `rdch SPU_RdInMbox` for good (the race, and later the whole game, froze a
   few seconds after GO). It now answers CELL_ENOTCONN, as lv2 does.
+- **Taskset2 slot states.** SPU libspurs keeps a state in byte 15 of each
+  `task_exit_code[id]` record (Taskset2 +0x1980 + 16*id): low nibble 1 =
+  free (joined), 2 = exited, plus 0x10 once created. Its cellSpursCreateTask
+  halts (`heqi`, hkp_integrate LS 0x126D8, hkp_collide LS 0x194C0) unless the
+  slot it claims holds 0x01 or 0x12, and its TryJoin reads the state. We
+  zeroed the records, so creates into recycled slots halted (`[spu] HALT-ASSERT
+  heqi`, ~100 per race start) and the step lost its jobs. CreateTaskset2 now
+  marks every slot free; a PPU create into a Taskset2 (CreateTask2, and plain
+  CreateTask, which Havok also uses) marks it created (0x11) before the task
+  can run; a task's exit marks it exited (state 2, under the line's stripe
+  with a notify, before the enabled bit is cleared); a PPU join frees it.
+  This cut the halts from ~80 to a handful per race start, but some remain:
+  `SPU_HALT_LSDUMP=80,100` shows the checked exit-code line at the halt with
+  the claimed slot apparently in state 0x11. SPU libspurs' TryJoin writes
+  state 4 into a slot it joins (hkp_integrate LS 0x128C0..0x12978), which the
+  create refuses too; turning 4 into 1 on commit made the halts more
+  frequent, and so did claiming the PPU's slot by an atomic test-and-set of
+  the enabled bit before writing the record; both were taken out. The state
+  machine is not fully understood yet -- see "Next blocker".
 - **Every task ran on "SPU 0".** The SpursTasksetContext the runtime builds
   for a task said spuNum 0 for all of them, and SPURS code indexes per-SPU
   areas by it, so concurrent tasks shared one. After a few thousand raycast
@@ -943,16 +962,58 @@ copy, so `MS_DSP_LSAS` cannot name them.
 
 ### What the race looks like now
 
+The boot-to-race path: health warning, movies (real frames since the FFmpeg
+decoder landed), title, SET SCREEN SIZE, Choose A Control Method (the
+default accelerates on R2), the first autosave, r01_60.avi, "LOADING" (the
+Havok chain above), the intro cutscene with the opening credits drawn over
+it, 3-2-1-GO, and the race with its HUD (the boost/heat gauge, bottom right).
+On this machine, shared with other runs, that is about 25-35 minutes of wall
+time from boot to GO.
+
 Rendering: the G-buffer and lit passes draw (PS3RECOMP_ENG_DUMP_SURFACES shows
 the bridge, the docks and the ship in the 1280x1080 targets), the UI draws
-(credits, the countdown), but the presented frame has a black 3D scene. The
-composite to the display buffer is not found yet (the pipelines drawing into
-0x003B0000 sample only UI textures and the movie planes; no SPU reads VRAM,
-no NV3089/NV0039 copy happens).
+(credits, countdown, HUD), but the presented frame has a black 3D scene. The
+composite of the scene into the display buffer (0x003B0000 / 0x00734000) has
+not been found: the pipelines drawing into it sample only UI textures and the
+movie planes, no SPU reads VRAM, and no NV3089/NV0039 copy happens.
 
-Speed: about 30 fps on the menus, 5-6 fps once the world draws. The main
+Speed: about 30 fps on the menus, 4-9 fps once the world draws. The main
 thread waits in Havok's step-completion loops (fn 0x8BC4B8, 0x8BDA0C,
 0x8BE498, usleep(1) polls on the job queue): the Havok tasks are slow
 (collide median 30 ms, p90 200 ms per run) and busy-wait on lock lines
 (GETLLAR spins, e.g. hkp_collide LS 0x18AAC). The MultiStream task runs its
-DSP plugins on the interpreter at 100% of one core.
+DSP plugins on the interpreter at 100% of one core. RSS grows to ~11 GB
+over 30 minutes (not investigated).
+
+### Next blocker
+
+The race does not reach its end yet. A few seconds to a minute after GO the
+physics step stops: every Havok task has exited and the main thread waits in
+fn 0x8C20D8 (from fn 0x7820C0) on a lock-line semaphore (16-byte object at
+0x436F90A0, port 0x20, one waiter, count 0) that a raycast/collide task should
+have released. What comes before it differs between runs:
+
+- SPU-side cellSpursCreateTask halts (`[spu] HALT-ASSERT heqi pc=0x126D8
+  img=35`, `pc=0x194C0 img=33`) -- the Taskset2 slot state above;
+- a raycast or collide task DMAs to/from a bogus EA (`[mfc] REJECTED
+  malformed transfer: img=36 ... ea=0xFFFFFFFF`, `img=33 ... ea=0x00000000`),
+  i.e. a job pointer it read was never written.
+
+Both point at the HLE's model of the Havok taskset (who owns a slot when,
+what an exited/joined task leaves behind, how many run at once) rather than
+at the lifted code. The next step is to trace one slot through
+create/exit/join with `SPU_ATOM_EA=<taskset+0x1980>` and compare against the
+SPU libspurs create/TryJoin code (hkp_integrate LS 0x11F28 and 0x127E8).
+
+### first_race.sh
+
+`work/tests/first_race.sh` (run_all.sh runs it only with `SLOW=1`): one first
+boot on a fresh save root, CROSS every 2 s until the first `[cellSaveData]
+SAVE complete`, CROSS for another 60 s (the movie), then `R2=255` held. PASS
+when the game autosaves a second time (it does after the event), with the
+physics still running and no unresolved NID; it saves the last frame as
+`work/runs/first_race.png` and one from three minutes before the end as
+`work/runs/first_race_inrace.png`. It fails after `LIMIT_S` (3600 s) or as
+soon as no Havok task has returned for 120 s (the stall above). That the
+second autosave marks the end of the race is an assumption: no run has got
+that far yet.
