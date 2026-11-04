@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Every MotorStorm Apocalypse boot regression, one after the other: each
 # work/tests/*.sh other than this one. Each prints its verdict as its last
-# line, starting with PASS for a pass. None exist yet (the inFAMOUS 2 ones
-# were dropped with the move to MotorStorm); add them as work/tests/<name>.sh.
+# line, starting with PASS for a pass: reach_entry, boot_past_fios,
+# first_draw, first_frame, main_menu (milestone 3). Add new ones as
+# work/tests/<name>.sh.
 # Usage: tests/run_all.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"

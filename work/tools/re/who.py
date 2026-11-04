@@ -143,7 +143,10 @@ def disasm(db, a, args):
     if f is None:
         print('0x%08X: not inside a known function' % a)
         return
-    img = G.Image(os.path.join(WORK, 'EBOOT.elf'))
+    elf = os.path.join(WORK, 'EBOOT.elf')
+    if not os.path.exists(elf):
+        elf = os.path.join(WORK, '..', 'disc', 'PS3_GAME', 'USRDIR', 'EBOOT.elf')
+    img = G.Image(elf)
     end = db.funcs[f]['end']
     ptr_ok = set(db.strings) | {int(k) for k in db.ix.get('opd', {})}
     r = G.analyze_one(img, f, end, db.ix['toc'], ptr_ok)

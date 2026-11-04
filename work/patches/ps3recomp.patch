@@ -465,7 +465,7 @@ index b51fb7c4..d2f8c671 100644
                  portNum, port->running ? "RUN" : "READY",
                  (u32)port->port_addr, (u32)port->read_idx_addr); }
 diff --git a/libs/codec/cellAdec.c b/libs/codec/cellAdec.c
-index 3da70179..9484872d 100644
+index 3da70179..226ee0ec 100644
 --- a/libs/codec/cellAdec.c
 +++ b/libs/codec/cellAdec.c
 @@ -97,7 +97,7 @@ static void adec_notify(CellAdecHandle handle, u32 msg_type, s32 msg_data)
@@ -477,7 +477,26 @@ index 3da70179..9484872d 100644
            printf("[cellAdec] notify h=%u msg=%u data=0x%X cb=0x%08X arg=0x%08X caller=%d\n",
                   handle, msg_type, (unsigned)msg_data, a->cbFunc, a->cbArg,
                   g_ps3_guest_caller ? 1 : 0); }
-@@ -285,7 +285,7 @@ s32 cellAdecDecodeAu(CellAdecHandle handle, const CellAdecAuInfo* auInfo)
+@@ -172,6 +172,18 @@ s32 cellAdecOpen(const CellAdecType* type, const CellAdecResource* res,
+     return (s32)CELL_ADEC_ERROR_BUSY;
+ }
+ 
++/* cellAdecOpenEx(type, resEx, cb, handle): CellAdecResourceEx adds SPURS
++ * placement to the resource; decoding is host-side, so it is ignored and the
++ * call is cellAdecOpen. Unimplemented, MotorStorm Apocalypse's movie player
++ * got handle 0 without an Open and its audio stream never started
++ * (RPCS3 cellAdec.cpp has the same four-argument shape). */
++s32 cellAdecOpenEx(const CellAdecType* type, const void* resEx,
++                   const CellAdecCb* cb, CellAdecHandle* handle)
++{
++    (void)resEx;
++    return cellAdecOpen(type, NULL, cb, handle);
++}
++
+ s32 cellAdecClose(CellAdecHandle handle)
+ {
+     printf("[cellAdec] Close(handle=%u)\n", handle);
+@@ -285,7 +297,7 @@ s32 cellAdecDecodeAu(CellAdecHandle handle, const CellAdecAuInfo* auInfo)
  
  s32 cellAdecGetPcm(CellAdecHandle handle, void* outBuffer)
  {
@@ -486,7 +505,7 @@ index 3da70179..9484872d 100644
          printf("[cellAdec] GetPcm(handle=%u out=0x%08X)\n",
                 handle, GUEST_EA(outBuffer)); }
      if (handle >= MAX_ADEC || !s_adec[handle].in_use)
-@@ -305,7 +305,7 @@ s32 cellAdecGetPcm(CellAdecHandle handle, void* outBuffer)
+@@ -305,7 +317,7 @@ s32 cellAdecGetPcm(CellAdecHandle handle, void* outBuffer)
  
  s32 cellAdecGetPcmItem(CellAdecHandle handle, const CellAdecPcmItem** pcmItem)
  {
@@ -495,6 +514,516 @@ index 3da70179..9484872d 100644
          printf("[cellAdec] GetPcmItem(handle=%u out=0x%08X hasPcm=%d)\n",
                 handle, GUEST_EA(pcmItem),
                 handle < MAX_ADEC ? s_adec[handle].hasPcm : -1); }
+diff --git a/libs/codec/cellAdec.h b/libs/codec/cellAdec.h
+index 2282b242..145c7bfb 100644
+--- a/libs/codec/cellAdec.h
++++ b/libs/codec/cellAdec.h
+@@ -123,6 +123,8 @@ typedef struct CellAdecCb {
+ s32 cellAdecQueryAttr(const CellAdecType* type, void* attr);
+ s32 cellAdecOpen(const CellAdecType* type, const CellAdecResource* res,
+                  const CellAdecCb* cb, CellAdecHandle* handle);
++s32 cellAdecOpenEx(const CellAdecType* type, const void* resEx,
++                   const CellAdecCb* cb, CellAdecHandle* handle);
+ s32 cellAdecClose(CellAdecHandle handle);
+ 
+ s32 cellAdecStartSeq(CellAdecHandle handle, void* param);
+diff --git a/libs/codec/cellVdec.c b/libs/codec/cellVdec.c
+index 7adbb3e0..fc819296 100644
+--- a/libs/codec/cellVdec.c
++++ b/libs/codec/cellVdec.c
+@@ -9,6 +9,7 @@
+ #include "cellVdec.h"
+ #include <stdio.h>
+ #include <string.h>
++#include <stdatomic.h>
+ #include "../guest_struct.h"   /* GUEST_EA, vm_read/vm_write: guest EA -> host */
+ #include "ps3emu/guest_call.h" /* g_ps3_guest_caller -- cbFunc is a GUEST OPD */
+ #include "../../runtime/memory/vm.h"     /* VM_HLE_INJECT_BASE */
+@@ -17,6 +18,7 @@
+  * Internal state
+  * -----------------------------------------------------------------------*/
+ #define MAX_VDEC 4
++#define VDEC_PICQ 16    /* decoded pictures waiting for cellVdecGetPicture */
+ 
+ typedef struct {
+     int in_use;
+@@ -24,8 +26,8 @@ typedef struct {
+     u32 cbFunc;         /* guest EA of the callback's OPD */
+     u32 cbArg;          /* guest EA handed back to it     */
+     int seqStarted;
+-    CellVdecPicItem lastPic;
+-    int hasPic;
++    CellVdecPicItem pics[VDEC_PICQ];
++    u32 picHead, picCount;
+     u32 auCount;        /* total AUs decoded */
+     u16 width;          /* configured resolution (0 = use default) */
+     u16 height;
+@@ -33,6 +35,27 @@ typedef struct {
+ 
+ static VdecSlot s_vdec[MAX_VDEC];
+ 
++/* The picture queue is filled on the DecodeAu caller's thread and drained on
++ * whichever thread calls GetPicItem/GetPicture (MotorStorm Apocalypse: its
++ * "videoStream" and "VideoDisplayPS3" threads). */
++static atomic_flag s_vdec_lock = ATOMIC_FLAG_INIT;
++static void vdec_lock(void)   { while (atomic_flag_test_and_set_explicit(&s_vdec_lock, memory_order_acquire)) ; }
++static void vdec_unlock(void) { atomic_flag_clear_explicit(&s_vdec_lock, memory_order_release); }
++
++/* Handles are slot + 1: a real handle is a pointer into the decoder's work
++ * memory and never 0, and titles use 0 as "no decoder". MotorStorm
++ * Apocalypse's movie player keeps the handle at +0xC0 of its decoder object
++ * and its DecodeAu wrapper (fn 0x9F0990) returns an error while it is 0, so a
++ * slot-0 handle never decoded a single AU and the intro movie hung. */
++#define VDEC_HANDLE(i)  ((CellVdecHandle)(i) + 1u)
++
++static VdecSlot* vdec_get(CellVdecHandle handle)
++{
++    if (handle == 0 || handle > MAX_VDEC) return NULL;
++    VdecSlot* v = &s_vdec[handle - 1];
++    return v->in_use ? v : NULL;
++}
++
+ /* Deliver a vdec message to the guest callback (handle, msgType, msgData,
+  * cbArg). It is a guest OPD, so it goes through g_ps3_guest_caller; this used
+  * to call it as a host function pointer, which crashes the first time a
+@@ -41,9 +64,8 @@ static VdecSlot s_vdec[MAX_VDEC];
+  * decoder thread if a title's callback ever blocks on the DecodeAu caller. */
+ static void vdec_notify(CellVdecHandle handle, u32 msg_type, s32 msg_data)
+ {
+-    if (handle >= MAX_VDEC || !s_vdec[handle].in_use) return;
+-    const VdecSlot* v = &s_vdec[handle];
+-    if (!v->cbFunc || !g_ps3_guest_caller) return;
++    const VdecSlot* v = vdec_get(handle);
++    if (!v || !v->cbFunc || !g_ps3_guest_caller) return;
+     g_ps3_guest_caller(v->cbFunc, (u64)handle, (u64)msg_type,
+                        (u64)(s64)msg_data, (u64)v->cbArg, 0, 0, 0, 0);
+ }
+@@ -96,22 +118,40 @@ s32 cellVdecOpen(const CellVdecType* type, const CellVdecResource* res,
+             s_vdec[i].codecType = codec_type;
+             s_vdec[i].cbFunc = cb_ea ? vm_read32(cb_ea + 0) : 0;
+             s_vdec[i].cbArg  = cb_ea ? vm_read32(cb_ea + 4) : 0;
+-            vm_write32((u32)(uintptr_t)handle, (u32)i);
+-            printf("[cellVdec] Open -> handle=%u\n", i);
++            vm_write32((u32)(uintptr_t)handle, VDEC_HANDLE(i));
++            printf("[cellVdec] Open -> handle=%u\n", VDEC_HANDLE(i));
+             return CELL_OK;
+         }
+     }
+     return (s32)CELL_VDEC_ERROR_BUSY;
+ }
+ 
++/* QueryAttrEx / OpenEx (MotorStorm Apocalypse's XviD movie player uses
++ * these). CellVdecTypeEx begins { u32 codecType; u32 profileLevel; } like
++ * CellVdecType, then a codecSpecificInfo pointer that host-side decoding does
++ * not need; CellVdecResourceEx only adds SPURS placement. Same argument
++ * shapes as RPCS3's cellVdec.cpp. */
++s32 cellVdecQueryAttrEx(const void* typeEx, void* attr)
++{
++    return cellVdecQueryAttr((const CellVdecType*)typeEx, attr);
++}
++
++s32 cellVdecOpenEx(const void* typeEx, const void* resEx,
++                   const CellVdecCb* cb, CellVdecHandle* handle)
++{
++    (void)resEx;
++    return cellVdecOpen((const CellVdecType*)typeEx, NULL, cb, handle);
++}
++
+ s32 cellVdecClose(CellVdecHandle handle)
+ {
+     printf("[cellVdec] Close(handle=%u)\n", handle);
+ 
+-    if (handle >= MAX_VDEC || !s_vdec[handle].in_use)
++    VdecSlot* v = vdec_get(handle);
++    if (!v)
+         return (s32)CELL_VDEC_ERROR_ARG;
+ 
+-    s_vdec[handle].in_use = 0;
++    v->in_use = 0;
+     return CELL_OK;
+ }
+ 
+@@ -119,10 +159,11 @@ s32 cellVdecStartSeq(CellVdecHandle handle)
+ {
+     printf("[cellVdec] StartSeq(handle=%u)\n", handle);
+ 
+-    if (handle >= MAX_VDEC || !s_vdec[handle].in_use)
++    VdecSlot* v = vdec_get(handle);
++    if (!v)
+         return (s32)CELL_VDEC_ERROR_ARG;
+ 
+-    s_vdec[handle].seqStarted = 1;
++    v->seqStarted = 1;
+     return CELL_OK;
+ }
+ 
+@@ -130,10 +171,11 @@ s32 cellVdecEndSeq(CellVdecHandle handle)
+ {
+     printf("[cellVdec] EndSeq(handle=%u)\n", handle);
+ 
+-    if (handle >= MAX_VDEC || !s_vdec[handle].in_use)
++    VdecSlot* v = vdec_get(handle);
++    if (!v)
+         return (s32)CELL_VDEC_ERROR_ARG;
+ 
+-    s_vdec[handle].seqStarted = 0;
++    v->seqStarted = 0;
+ 
+     /* Notify sequence done */
+     vdec_notify(handle, CELL_VDEC_MSG_TYPE_SEQDONE, CELL_OK);
+@@ -145,13 +187,10 @@ s32 cellVdecDecodeAu(CellVdecHandle handle, s32 mode, const CellVdecAuInfo* auIn
+ {
+     (void)mode;
+ 
+-    if (handle >= MAX_VDEC || !s_vdec[handle].in_use)
+-        return (s32)CELL_VDEC_ERROR_ARG;
+-    if (!auInfo)
++    VdecSlot* v = vdec_get(handle);
++    if (!v || !auInfo)
+         return (s32)CELL_VDEC_ERROR_ARG;
+ 
+-    VdecSlot* v = &s_vdec[handle];
+-
+     /* CellVdecAuInfo mixes u32 and u64, so it comes across field by field: a
+      * big-endian u64 is high word first, and a word-at-a-time copy would put
+      * the two halves the wrong way round on a little-endian host. */
+@@ -163,33 +202,41 @@ s32 cellVdecDecodeAu(CellVdecHandle handle, s32 mode, const CellVdecAuInfo* auIn
+     au.dts       = vm_read64(au_ea + (u32)offsetof(CellVdecAuInfo, dts));
+     au.userData  = vm_read64(au_ea + (u32)offsetof(CellVdecAuInfo, userData));
+ 
+-    printf("[cellVdec] DecodeAu(handle=%u, addr=0x%X, size=%u, pts=%llu)\n",
+-           handle, au.startAddr, au.size,
+-           (unsigned long long)au.pts);
+-
+-    /* Step 1: Report AU consumed */
+-    vdec_notify(handle, CELL_VDEC_MSG_TYPE_AUDONE, CELL_OK);
+-
+-    /* Step 2: Generate a dummy PICOUT callback.
+-     * Without FFmpeg, we can't actually decode video. But games expect the
+-     * PICOUT callback to fire for each AU, so we generate a placeholder
+-     * picture. Games that only check for completion (not pixel data) will
+-     * proceed correctly. */
++    if (v->auCount < 4 || (v->auCount % 1000) == 0)
++        printf("[cellVdec] DecodeAu(handle=%u, addr=0x%X, size=%u, pts=%llu) #%u\n",
++               handle, au.startAddr, au.size,
++               (unsigned long long)au.pts, v->auCount);
++
++    /* A full picture queue is BUSY: the title drains with GetPicture and
++     * retries (MotorStorm's fn 0x9F0818 waits and loops on 0x80610103). */
++    vdec_lock();
++    if (v->picCount >= VDEC_PICQ) {
++        vdec_unlock();
++        return (s32)CELL_VDEC_ERROR_BUSY;
++    }
++    /* ponytail: no decoder behind this yet, so every AU is one black picture
++     * at the configured size (1280x720 unless set). Titles that pace
++     * playback on PICOUT/GetPicture run through their movies as they
++     * should. */
+     v->auCount++;
+-    memset(&v->lastPic, 0, sizeof(v->lastPic));
+-    v->lastPic.codecType = v->codecType;
+-    v->lastPic.startAddr = au.startAddr;
+-    v->lastPic.size      = au.size;
+-    v->lastPic.auNum     = v->auCount;
+-    v->lastPic.pts       = au.pts;
+-    v->lastPic.dts       = au.dts;
+-    v->lastPic.userData  = au.userData;
+-    v->lastPic.status    = 0; /* OK */
+-    v->lastPic.picFmt    = CELL_VDEC_PIC_FMT_YUV420P;
+-    v->lastPic.width     = v->width ? v->width : 1280;
+-    v->lastPic.height    = v->height ? v->height : 720;
+-    v->hasPic = 1;
+-
++    CellVdecPicItem* p = &v->pics[(v->picHead + v->picCount) % VDEC_PICQ];
++    memset(p, 0, sizeof(*p));
++    p->codecType = v->codecType;
++    p->startAddr = au.startAddr;
++    p->size      = au.size;
++    p->auNum     = v->auCount;
++    p->pts       = au.pts;
++    p->dts       = au.dts;
++    p->userData  = au.userData;
++    p->status    = 0; /* OK */
++    p->picFmt    = CELL_VDEC_PIC_FMT_YUV420P;
++    p->width     = v->width ? v->width : 1280;
++    p->height    = v->height ? v->height : 720;
++    v->picCount++;
++    vdec_unlock();
++
++    /* The AU is consumed, then the picture is out. */
++    vdec_notify(handle, CELL_VDEC_MSG_TYPE_AUDONE, CELL_OK);
+     vdec_notify(handle, CELL_VDEC_MSG_TYPE_PICOUT, CELL_OK);
+ 
+     return CELL_OK;
+@@ -207,13 +254,12 @@ s32 cellVdecDecodeAu(CellVdecHandle handle, s32 mode, const CellVdecAuInfo* auIn
+  * +0x30 u64 auUserData[2], +0x40 status, +0x44 attr (0 normal, 1 skipped),
+  * +0x48 picInfo. CellVdecAvcInfo and CellVdecMpeg2Info both begin with
+  * u16 horizontalSize, u16 verticalSize; the rest of the info block is zero. */
+-#define VDEC_ITEM_EA(h)  (VM_HLE_INJECT_BASE + 0x50000u + (u32)(h) * 0x100u)
++#define VDEC_ITEM_EA(h)  (VM_HLE_INJECT_BASE + 0x50000u + ((u32)(h) - 1u) * 0x100u)
+ #define VDEC_INFO_EA(h)  (VDEC_ITEM_EA(h) + 0x80u)
+ 
+-static void vdec_write_item(CellVdecHandle handle)
++static void vdec_write_item(CellVdecHandle handle, const VdecSlot* v,
++                            const CellVdecPicItem* p)
+ {
+-    const VdecSlot* v = &s_vdec[handle];
+-    const CellVdecPicItem* p = &v->lastPic;
+     u32 it = VDEC_ITEM_EA(handle), info = VDEC_INFO_EA(handle);
+     for (u32 o = 0; o < 0x100; o += 4) vm_write32(it + o, 0);
+     vm_write32(it + 0x00, v->codecType);
+@@ -241,11 +287,17 @@ static void vdec_write_item(CellVdecHandle handle)
+ s32 cellVdecGetPicItem(CellVdecHandle handle, const CellVdecPicItem** picItem)
+ {
+     u32 out = (u32)(uintptr_t)picItem;
+-    if (handle >= MAX_VDEC || !s_vdec[handle].in_use || !out)
++    VdecSlot* v = vdec_get(handle);
++    if (!v || !out)
+         return (s32)CELL_VDEC_ERROR_ARG;
+-    if (!s_vdec[handle].hasPic)
++    vdec_lock();
++    if (!v->picCount) {
++        vdec_unlock();
+         return (s32)CELL_VDEC_ERROR_EMPTY;
+-    vdec_write_item(handle);
++    }
++    CellVdecPicItem p = v->pics[v->picHead];
++    vdec_unlock();
++    vdec_write_item(handle, v, &p);
+     vm_write32(out, VDEC_ITEM_EA(handle));
+     return CELL_OK;
+ }
+@@ -260,18 +312,27 @@ s32 cellVdecGetPicItem(CellVdecHandle handle, const CellVdecPicItem** picItem)
+ s32 cellVdecGetPicture(CellVdecHandle handle, const void* format, void* outBuff)
+ {
+     u32 fmt_ea = (u32)(uintptr_t)format, dst = (u32)(uintptr_t)outBuff;
+-    if (handle >= MAX_VDEC || !s_vdec[handle].in_use || !fmt_ea)
++    VdecSlot* v = vdec_get(handle);
++    if (!v || !fmt_ea)
+         return (s32)CELL_VDEC_ERROR_ARG;
+-    VdecSlot* v = &s_vdec[handle];
+-    if (!v->hasPic)
++    vdec_lock();
++    if (!v->picCount) {
++        vdec_unlock();
+         return (s32)CELL_VDEC_ERROR_EMPTY;
+-    v->hasPic = 0;
++    }
++    CellVdecPicItem pic = v->pics[v->picHead];
++    v->picHead = (v->picHead + 1) % VDEC_PICQ;
++    v->picCount--;
++    vdec_unlock();
+     if (!dst)
+         return CELL_OK;                                /* a skip: consume only */
+ 
+     u32 type  = vm_read32(fmt_ea + 0);
+     u8  alpha = vm_read8(fmt_ea + 8);
+-    u32 w = v->lastPic.width, h = v->lastPic.height;
++    { static int once;
++      if (!once++) printf("[cellVdec] GetPicture(handle=%u) format=%u %ux%u -> 0x%08X\n",
++                          handle, type, pic.width, pic.height, dst); }
++    u32 w = pic.width, h = pic.height;
+     u8 row[4096 * 4];
+     u32 rowlen;
+     switch (type) {
+@@ -300,7 +361,7 @@ s32 cellVdecSetFrameRate(CellVdecHandle handle, u32 frameRateCode)
+     printf("[cellVdec] SetFrameRate(handle=%u, code=%u)\n",
+            handle, frameRateCode);
+ 
+-    if (handle >= MAX_VDEC || !s_vdec[handle].in_use)
++    if (!vdec_get(handle))
+         return (s32)CELL_VDEC_ERROR_ARG;
+ 
+     return CELL_OK;
+diff --git a/libs/codec/cellVdec.h b/libs/codec/cellVdec.h
+index e3d1a6a9..72838acd 100644
+--- a/libs/codec/cellVdec.h
++++ b/libs/codec/cellVdec.h
+@@ -24,7 +24,7 @@ extern "C" {
+ #define CELL_VDEC_ERROR_EMPTY          0x80610104
+ #define CELL_VDEC_ERROR_AU             0x80610105
+ #define CELL_VDEC_ERROR_PIC            0x80610106
+-#define CELL_VDEC_ERROR_FATAL          0x80610107
++#define CELL_VDEC_ERROR_FATAL          0x80610180   /* not ...07: RPCS3 cellVdec.h, and MotorStorm fn 0x9F0818 compares 0x80610180 */
+ 
+ /* ---------------------------------------------------------------------------
+  * Codec types
+@@ -100,6 +100,12 @@ typedef struct CellVdecCb {
+ 
+ s32 cellVdecOpen(const CellVdecType* type, const CellVdecResource* res,
+                   const CellVdecCb* cb, CellVdecHandle* handle);
++/* The Ex forms take a CellVdecTypeEx { codecType, profileLevel,
++ * codecSpecificInfo } and a CellVdecResourceEx; the first two words match
++ * CellVdecType, so they share the plain forms' code. */
++s32 cellVdecQueryAttrEx(const void* typeEx, void* attr);
++s32 cellVdecOpenEx(const void* typeEx, const void* resEx,
++                   const CellVdecCb* cb, CellVdecHandle* handle);
+ s32 cellVdecClose(CellVdecHandle handle);
+ 
+ s32 cellVdecStartSeq(CellVdecHandle handle);
+diff --git a/libs/codec/tests/test_vdec_handles.c b/libs/codec/tests/test_vdec_handles.c
+new file mode 100644
+index 00000000..a1e5f460
+--- /dev/null
++++ b/libs/codec/tests/test_vdec_handles.c
+@@ -0,0 +1,157 @@
++/*
++ * ps3recomp -- cellVdec handles, Ex entry points and the picture queue
++ *
++ * MotorStorm Apocalypse plays its intro movies (XviD in AVI) through
++ * cellVdecQueryAttrEx/cellVdecOpenEx and its own statically linked movie
++ * player. Three things kept the first movie from ever advancing:
++ *
++ *   * the Ex entry points were missing, so the title's handle was never set;
++ *   * once they existed, Open handed out handle 0, and the player's DecodeAu
++ *     wrapper (fn 0x9F0990) treats a 0 handle as "no decoder" and returns
++ *     an error without calling cellVdecDecodeAu;
++ *   * one AU decoded before the previous picture was taken overwrote it.
++ *
++ * Checked here: Ex works like the plain forms; handles are never 0 and
++ * round-trip through every call; pictures queue in order, a full queue is
++ * BUSY, an empty one is EMPTY; the callback gets AUDONE then PICOUT with the
++ * handle it was opened with; the error codes are the firmware's.
++ *
++ * Build (from ps3recomp/):
++ *   cc -std=gnu17 -O1 -Iinclude libs/codec/tests/test_vdec_handles.c \
++ *      -o /tmp/test_vdec_handles && /tmp/test_vdec_handles
++ */
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <string.h>
++
++uint8_t* vm_base;
++uint32_t ppu_hle_inject_base = 0x00F00000u;
++#include "../cellVdec.c"
++
++int g_resv_store_active;
++uint32_t g_ww_lo, g_ww_hi;
++void ppu_resv_break_store(uint64_t ea) { (void)ea; }
++void ps3_ww_report_inline(uint32_t a, uint64_t v, int w) { (void)a; (void)v; (void)w; }
++int spu_coh_is_reserved(uint32_t a) { (void)a; return 0; }
++unsigned char g_spu_coh_bitmap[1];
++int g_spu_coh_armed;   /* 0: no SPU reservations, so the coherency paths stay cold */
++void spu_coh_notify_write(uint32_t a) { (void)a; }
++void spu_coh_notify_write_from_ppu(uint32_t a) { (void)a; }
++void spu_lockline_lock(void) {}
++void spu_lockline_unlock(void) {}
++uint64_t spu_lockline_mask_range(uint32_t ea, uint32_t len) { (void)ea; (void)len; return 0; }
++void spu_lockline_lock_mask(uint64_t m) { (void)m; }
++void spu_lockline_unlock_mask(uint64_t m) { (void)m; }
++
++ps3_guest_caller_fn g_ps3_guest_caller;
++
++enum { MEM = 32u << 20, TYPE = 0x1000, ATTR = 0x1100, CB = 0x1200, HOUT = 0x1300,
++       AU = 0x1400, FMT = 0x1500, ITEMP = 0x1600, PIC = 0x100000 };
++
++static u32 msgs[64][3];   /* handle, type, data */
++static unsigned nmsg;
++static void guest_cb(u32 opd, u64 h, u64 type, u64 data, u64 arg,
++                     u64 a, u64 b, u64 c, u64 d)
++{
++    (void)a; (void)b; (void)c; (void)d;
++    assert(opd == 0xC0DE && arg == 0xA5A5);
++    assert(nmsg < 64);
++    msgs[nmsg][0] = (u32)h; msgs[nmsg][1] = (u32)type; msgs[nmsg][2] = (u32)data;
++    nmsg++;
++}
++
++static void au(u32 addr, u64 pts)
++{
++    vm_write32(AU + (u32)offsetof(CellVdecAuInfo, startAddr), addr);
++    vm_write32(AU + (u32)offsetof(CellVdecAuInfo, size), 100);
++    vm_write64(AU + (u32)offsetof(CellVdecAuInfo, pts), pts);
++    vm_write64(AU + (u32)offsetof(CellVdecAuInfo, dts), pts);
++    vm_write64(AU + (u32)offsetof(CellVdecAuInfo, userData), 0);
++}
++
++int main(void)
++{
++    vm_base = calloc(1, MEM);
++    assert(vm_base);
++    g_ps3_guest_caller = guest_cb;
++
++    /* Firmware error codes (RPCS3 cellVdec.h; MotorStorm compares these). */
++    assert(CELL_VDEC_ERROR_BUSY  == 0x80610103u);
++    assert(CELL_VDEC_ERROR_EMPTY == 0x80610104u);
++    assert(CELL_VDEC_ERROR_FATAL == 0x80610180u);
++
++    /* CellVdecTypeEx { codecType = DIVX, profileLevel, codecSpecificInfo }. */
++    vm_write32(TYPE + 0, CELL_VDEC_CODEC_TYPE_DIVX);
++    vm_write32(TYPE + 4, 0);
++    vm_write32(TYPE + 8, 0x2000);
++    assert(cellVdecQueryAttrEx((void*)(uintptr_t)TYPE, (void*)(uintptr_t)ATTR) == CELL_OK);
++    assert(vm_read32(ATTR) != 0 && vm_read8(ATTR + 4) != 0);
++
++    vm_write32(CB + 0, 0xC0DE);
++    vm_write32(CB + 4, 0xA5A5);
++    vm_write32(HOUT, 0xFFFFFFFFu);
++    assert(cellVdecOpenEx((void*)(uintptr_t)TYPE, NULL, (void*)(uintptr_t)CB,
++                          (CellVdecHandle*)(uintptr_t)HOUT) == CELL_OK);
++    const CellVdecHandle h = vm_read32(HOUT);
++    assert(h != 0 && h != 0xFFFFFFFFu);
++    assert(cellVdecStartSeq(0) == (s32)CELL_VDEC_ERROR_ARG);   /* 0 is no handle */
++    assert(cellVdecStartSeq(h) == CELL_OK);
++
++    /* Queue VDEC_PICQ pictures; the next AU is BUSY and fires nothing. */
++    for (u32 i = 0; i < VDEC_PICQ; i++) {
++        au(0x2000 + i, 1000 + i);
++        assert(cellVdecDecodeAu(h, 0, (void*)(uintptr_t)AU) == CELL_OK);
++    }
++    assert(nmsg == 2 * VDEC_PICQ);
++    for (u32 i = 0; i < nmsg; i++) {
++        assert(msgs[i][0] == h);
++        assert(msgs[i][1] == (i & 1 ? CELL_VDEC_MSG_TYPE_PICOUT : CELL_VDEC_MSG_TYPE_AUDONE));
++    }
++    au(0x3000, 5000);
++    assert(cellVdecDecodeAu(h, 0, (void*)(uintptr_t)AU) == (s32)CELL_VDEC_ERROR_BUSY);
++    assert(nmsg == 2 * VDEC_PICQ);
++
++    /* Drain in order: GetPicItem peeks, GetPicture consumes. */
++    vm_write32(FMT + 0, 3);   /* YUV420 planar */
++    vm_write32(FMT + 4, 0);
++    vm_write8 (FMT + 8, 0xFF);
++    for (u32 i = 0; i < VDEC_PICQ; i++) {
++        assert(cellVdecGetPicItem(h, (const CellVdecPicItem**)(uintptr_t)ITEMP) == CELL_OK);
++        const u32 it = vm_read32(ITEMP);
++        assert(vm_read32(it + 0x04) == 0x2000 + i);              /* startAddr */
++        assert(vm_read32(it + 0x14) == 1000 + i);                /* auPts[0].lower */
++        assert(cellVdecGetPicItem(h, (const CellVdecPicItem**)(uintptr_t)ITEMP) == CELL_OK);
++        assert(vm_read32(vm_read32(ITEMP) + 0x04) == 0x2000 + i);   /* not consumed */
++        assert(cellVdecGetPicture(h, (void*)(uintptr_t)FMT, (void*)(uintptr_t)PIC) == CELL_OK);
++    }
++    assert(vm_read8(PIC) == 0x10 && vm_read8(PIC + 1280 * 720) == 0x80);   /* black */
++    assert(cellVdecGetPicture(h, (void*)(uintptr_t)FMT, (void*)(uintptr_t)PIC)
++           == (s32)CELL_VDEC_ERROR_EMPTY);
++    assert(cellVdecGetPicItem(h, (const CellVdecPicItem**)(uintptr_t)ITEMP)
++           == (s32)CELL_VDEC_ERROR_EMPTY);
++
++    /* Room again. */
++    au(0x3000, 5000);
++    assert(cellVdecDecodeAu(h, 0, (void*)(uintptr_t)AU) == CELL_OK);
++
++    nmsg = 0;
++    assert(cellVdecEndSeq(h) == CELL_OK);
++    assert(nmsg == 1 && msgs[0][1] == CELL_VDEC_MSG_TYPE_SEQDONE);
++    assert(cellVdecClose(h) == CELL_OK);
++    assert(cellVdecStartSeq(h) == (s32)CELL_VDEC_ERROR_ARG);
++
++    /* A second decoder gets a different, still non-zero handle. */
++    assert(cellVdecOpenEx((void*)(uintptr_t)TYPE, NULL, (void*)(uintptr_t)CB,
++                          (CellVdecHandle*)(uintptr_t)HOUT) == CELL_OK);
++    const CellVdecHandle h1 = vm_read32(HOUT);
++    assert(cellVdecOpenEx((void*)(uintptr_t)TYPE, NULL, (void*)(uintptr_t)CB,
++                          (CellVdecHandle*)(uintptr_t)HOUT) == CELL_OK);
++    const CellVdecHandle h2 = vm_read32(HOUT);
++    assert(h1 != 0 && h2 != 0 && h1 != h2);
++
++    free(vm_base);
++    puts("test_vdec_handles: ok");
++    return 0;
++}
 diff --git a/libs/filesystem/cellFs.c b/libs/filesystem/cellFs.c
 index 5166a47d..daf0bfaf 100644
 --- a/libs/filesystem/cellFs.c
@@ -9415,7 +9944,7 @@ index 00000000..3bb484a3
 +
 +#endif
 diff --git a/libs/system/cellSaveData.c b/libs/system/cellSaveData.c
-index 79ea8cab..4a8d4303 100644
+index 79ea8cab..2db92582 100644
 --- a/libs/system/cellSaveData.c
 +++ b/libs/system/cellSaveData.c
 @@ -15,6 +15,7 @@
@@ -9653,6 +10182,56 @@ index 79ea8cab..4a8d4303 100644
  }
  
  s32 cellSaveDataAutoSave2(u32 version, const char* dirName,
+@@ -1495,12 +1555,46 @@ void ps3_savedata_list_auto_load(ppu_context* ctx)
+         (u32)ctx->gpr[10], (void*)(uintptr_t)savedata_arg9(ctx));
+ }
+ 
+-void cellSaveData_register_ctx_handlers(void)
++/* cellSaveDataUserAutoSave: the same nine-argument shape as UserAutoLoad.
++ * MotorStorm Apocalypse's funcFile reads the file to write from its own
++ * object at cbResult->userdata; on the 8-arg path that was NULL, so every
++ * file callback came back with an empty name and a NULL buffer and the save
++ * failed with ERROR_PARAM on every autosave. */
++static void hle_cellSaveDataUserAutoSave(ppu_context* ctx)
++{
++    u32   version   = (u32)ctx->gpr[3];
++    u32   userId    = (u32)ctx->gpr[4];
++    const char* dir = (const char*)(uintptr_t)(u32)ctx->gpr[5];
++    u32   errDialog = (u32)ctx->gpr[6];
++    void* setBuf    = (void*)(uintptr_t)(u32)ctx->gpr[7];
++    void* funcStat  = (void*)(uintptr_t)(u32)ctx->gpr[8];
++    void* funcFile  = (void*)(uintptr_t)(u32)ctx->gpr[9];
++    u32   container = (u32)ctx->gpr[10];
++    uint32_t userdata = savedata_arg9(ctx);
++
++    printf("[cellSaveData] UserAutoSave(user=%u, userdata=0x%08X)\n", userId, userdata);
++    ctx->gpr[3] = (uint64_t)(int64_t)(s32)
++        cellSaveDataAutoSave2(version, dir, errDialog,
++                              (CellSaveDataSetBuf*)setBuf,
++                              (CellSaveDataStatCallback)funcStat,
++                              (CellSaveDataFileCallback)funcFile,
++                              container, (void*)(uintptr_t)userdata);
++}
++
++/* Registers the nine-argument entry points as ctx handlers, which the HLE
++ * dispatcher consults before the generated 8-GPR table. Called from
++ * ppu_hle_init (runtime/ppu/ppu_hle.cpp). It used to be named
++ * cellSaveData_register_ctx_handlers and nothing called it -- the generator
++ * even registered it as a fake guest import because of its cell* prefix --
++ * so every User* call took the 8-arg path with userdata = NULL. */
++void ps3_savedata_register_ctx(void)
+ {
+-    /* Overrides the generated 8-arg registration: ctx handlers are dispatched
+-     * before the generic table. */
+     ps3_hle_register_ctx(0xCDC6AEFDu, "cellSaveDataUserAutoLoad",
+                          hle_cellSaveDataUserAutoLoad);
++    ps3_hle_register_ctx(0x52AAC4FAu, "cellSaveDataUserAutoSave",
++                         hle_cellSaveDataUserAutoSave);
++    ps3_hle_register_ctx(0x21425307u, "cellSaveDataListAutoLoad",
++                         ps3_savedata_list_auto_load);
+ }
+ 
+ s32 cellSaveDataUserAutoLoad(u32 version, u32 userId, const char* dirName,
 diff --git a/libs/system/cellSysutil.c b/libs/system/cellSysutil.c
 index 252c3e8c..4825fafb 100644
 --- a/libs/system/cellSysutil.c
@@ -9952,6 +10531,77 @@ index 1cb09add..f473cc3b 100644
  
  static unsigned calls;
  static int waiting;
+diff --git a/libs/system/tests/test_savedata_fixed.c b/libs/system/tests/test_savedata_fixed.c
+index c6bdb67d..0503c137 100644
+--- a/libs/system/tests/test_savedata_fixed.c
++++ b/libs/system/tests/test_savedata_fixed.c
+@@ -1,5 +1,5 @@
+ /* clang -std=gnu17 -I include libs/system/tests/test_savedata_fixed.c
+- * -Wl,-dead_strip -o /tmp/test_savedata_fixed && /tmp/test_savedata_fixed */
++ * -o /tmp/test_savedata_fixed && /tmp/test_savedata_fixed */
+ #include "../cellSaveData.c"
+ #include <assert.h>
+ uint8_t* vm_base;
+@@ -12,6 +12,28 @@ int spu_coh_is_reserved(uint32_t a) { (void)a; return 0; }
+ void spu_coh_notify_write(uint32_t a) { (void)a; }
+ void spu_lockline_lock(void) {}
+ void spu_lockline_unlock(void) {}
++unsigned char g_spu_coh_bitmap[1];
++int g_spu_coh_armed;
++void spu_coh_notify_write_from_ppu(uint32_t a) { (void)a; }
++uint64_t spu_lockline_mask_range(uint32_t ea, uint32_t len) { (void)ea; (void)len; return 0; }
++void spu_lockline_lock_mask(uint64_t m) { (void)m; }
++void spu_lockline_unlock_mask(uint64_t m) { (void)m; }
++int  gwt_host_write_begin(void* p, size_t n) { (void)p; (void)n; return 0; }
++void gwt_host_write_end(int t) { (void)t; }
++
++/* ps3_savedata_register_ctx's registrations, by NID. */
++static struct { uint32_t nid; void (*fn)(ppu_context*); } s_ctx[8];
++static unsigned s_nctx;
++void ps3_hle_register_ctx(uint32_t nid, const char* name, void (*fn)(ppu_context*))
++{
++    (void)name; assert(s_nctx < 8);
++    s_ctx[s_nctx].nid = nid; s_ctx[s_nctx].fn = fn; s_nctx++;
++}
++static void (*ctx_handler(uint32_t nid))(ppu_context*)
++{
++    for (unsigned i = 0; i < s_nctx; i++) if (s_ctx[i].nid == nid) return s_ctx[i].fn;
++    return NULL;
++}
+ 
+ ps3_guest_caller_fn g_ps3_guest_caller;
+ 
+@@ -112,10 +134,30 @@ int main(void)
+     assert(ctx.gpr[3] == CELL_OK && fixed_calls == 7 && stat_calls == 2);
+     assert(cellSaveDataListAutoLoad(0, 3, (void*)0x100, (void*)0x200,
+            (void*)0x800, (void*)0x900, NULL, 0, (void*)0xCAFE) == CELL_SAVEDATA_ERROR_PARAM);
++    /* The nine-argument User* entry points are ctx handlers that take the
++     * ninth argument (userdata) from the caller's parameter save area. They
++     * were never registered, so MotorStorm Apocalypse's funcFile saw
++     * userdata = NULL and every autosave failed. UserAutoSave on the existing
++     * TEST00001 must reach funcStat with cbResult->userdata = 0xCAFE (checked
++     * in guest_callback). */
++    ps3_savedata_register_ctx();
++    assert(ctx_handler(0xCDC6AEFDu) && ctx_handler(0x52AAC4FAu) && ctx_handler(0x21425307u));
++    memset(&ctx, 0, sizeof ctx);
++    ctx.gpr[1] = 0x400;  vm_write64(0x400 + 112, 0xCAFE);
++    strcpy((char*)vm_base + 0x320, "TEST00001");
++    ctx.gpr[3] = 0; ctx.gpr[4] = 1; ctx.gpr[5] = 0x320; ctx.gpr[6] = 0;
++    ctx.gpr[7] = 0x200; ctx.gpr[8] = 0x900; ctx.gpr[9] = 0; ctx.gpr[10] = 0;
++    unsigned before = stat_calls;
++    ctx_handler(0x52AAC4FAu)(&ctx);                       /* UserAutoSave */
++    assert((s32)ctx.gpr[3] == CELL_OK && stat_calls == before + 1);
++    ctx.gpr[3] = 0; ctx.gpr[4] = 1; ctx.gpr[5] = 0x320;
++    ctx_handler(0xCDC6AEFDu)(&ctx);                       /* UserAutoLoad */
++    assert((s32)ctx.gpr[3] == CELL_OK && stat_calls == before + 2);
+     snprintf(path, sizeof(path), "%s/TEST00001/PARAM.SFO", root); remove(path);
+     snprintf(path, sizeof(path), "%s/TEST00002/PARAM.SFO", root); remove(path);
+     snprintf(path, sizeof(path), "%s/TEST00001", root); assert(rmdir(path) == 0);
+     snprintf(path, sizeof(path), "%s/TEST00002", root); assert(rmdir(path) == 0);
+     assert(rmdir(root) == 0); free(vm_base);
++
+     puts("Fixed save/load guest callback ABI and completion checks passed");
+ }
 diff --git a/libs/video/cellGcmSys.c b/libs/video/cellGcmSys.c
 index cdb04646..7adbdffc 100644
 --- a/libs/video/cellGcmSys.c
@@ -30757,7 +31407,7 @@ index e8f6c2bd..a9ac939a 100644
      }
      if (getenv("PS3_FSLOG"))
 diff --git a/runtime/ppu/ppu_hle.cpp b/runtime/ppu/ppu_hle.cpp
-index acbaf126..93e317e9 100644
+index acbaf126..a4293a10 100644
 --- a/runtime/ppu/ppu_hle.cpp
 +++ b/runtime/ppu/ppu_hle.cpp
 @@ -39,13 +39,59 @@ extern "C" void ps3_hle_register(uint32_t nid, const char* name, void* handler)
@@ -31324,18 +31974,22 @@ index acbaf126..93e317e9 100644
              nid, e->name?e->name:"?", rv); } } }
  }
  
-@@ -741,9 +492,14 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -741,9 +492,18 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
  extern "C" void ppu_hle_register_all(void) __attribute__((weak));
  extern "C" void ppu_hle_register_all(void) {}
  
 +/* cellFont's float-argument entry points (f1/f2, which the generic 8-GPR
 + * adapter does not pass). Weak: harnesses without libs/font still link. */
 +extern "C" void ps3_font_register_ctx(void) __attribute__((weak));
++/* cellSaveData's nine-argument UserAutoLoad/UserAutoSave/ListAutoLoad entry points (the ninth,
++ * userdata, is on the guest stack). Weak for the same reason. */
++extern "C" void ps3_savedata_register_ctx(void) __attribute__((weak));
 +
  extern "C" void ppu_hle_init(void)
  {
      ppu_hle_register_all();
 +    if (ps3_font_register_ctx) ps3_font_register_ctx();
++    if (ps3_savedata_register_ctx) ps3_savedata_register_ctx();
  
      /* The generated registration unit is per-game and easy to leave out: the
       * weak stub above means a build without it links and starts, then fails

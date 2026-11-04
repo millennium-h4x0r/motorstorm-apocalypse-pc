@@ -630,3 +630,126 @@ Related fix: when a button's digital bit was set, `cellPadGetData` used to
 force its pressure to 255 whenever the value was below 255. It now does that
 only when the pressure is 0. The old rule turned any part-pulled trigger,
 real or scripted, into full throttle.
+
+## Boot to menu
+
+What MotorStorm Apocalypse does from the first frame to the main menu, and
+what had to be fixed on the way (milestone 3). `work/tests/main_menu.sh`
+covers all of it.
+
+### The flow
+
+1. HEALTH WARNING, then "This game saves data automatically..." with the
+   spinner, then **PLAY / PLAY IN 3D** (stereo select). It waits there for
+   CROSS.
+2. "Sony Computer Entertainment presents", then `ui/video/evologo_60.avi` and
+   `ui/video/maintitles_60.avi`. Each can be skipped with CROSS.
+3. Title, "Press Any Button To Continue". Before this the game runs
+   `cellSaveDataUserAutoLoad` (dir `BCES00484`) and registers trophies
+   (`sceNpTrophy`, `NPWR00899`).
+4. **First boot (no save):** SET SCREEN SIZE, then Choose A Control Method,
+   then the first `cellSaveDataUserAutoSave` (AUTOSAVE.DAT, about 49 KB, plus
+   ICON0.PNG), then *straight into the Prologue race* ("Mash's Prologue",
+   `r01_60.avi`). A first boot never shows the main menu.
+5. **With a save:** the title goes to the main menu (FESTIVAL / WRECKREATION /
+   MY MOTORSTORM / OPTIONS). UP and DOWN move the highlight and the panel on
+   the right.
+
+Not used on this path: `cellMsgDialog`, `cellOskDialog` and NpEula (no call
+logged in either boot). NP is "signed out": `sceNpInit` is fine, and
+`cellNetCtlGetState` answers NOT_INITIALIZED (offline mode), about 7000 times
+a boot, even after `cellNetCtlInit`. The game accepts that.
+
+Pads: the game does not import `cellPadSetPressMode`. It turns pressure and
+sensors on with `cellPadSetPortSetting(port, 0x6)` (PRESS_ON | SENSOR_ON) on
+all ports, so scripted `R2=200` reaches it as analog.
+
+### Movies (cellVdec / cellAdec)
+
+The movies are AVI: XviD video (cellVdec codec type 5, DIVX, 1280x720) and AC3
+audio (cellAdec type 2). The demuxer and player are the game's own
+statically linked "MoviePlayer" threads (MoviePlayerSourceFile, Demuxer,
+videoStream, audioStream, VideoDisplayPS3, AudioDisplayPS3). Three fixes:
+
+- `cellVdecQueryAttrEx`, `cellVdecOpenEx` and `cellAdecOpenEx` were
+  unresolved NIDs (0xC982A84A, 0x0053E2D8, 0x8B5551A4). They are now the plain
+  forms: TypeEx starts with the same two words as CellVdecType, and ResourceEx
+  only adds SPURS placement.
+- **Handle 0.** cellVdec handed out slot indices, so the first decoder was
+  handle 0. The player keeps the handle at +0xC0 of its decoder object (vtable
+  0x1216F30), and its DecodeAu wrapper (fn 0x9F0990, slot 5) returns 155
+  without calling `cellVdecDecodeAu` while that is 0. videoStream then waited
+  on its decoder event forever, and AudioDisplay waited for the video clock.
+  Handles are now slot + 1, as a real handle (a work-memory pointer) is never
+  0.
+- The single "last picture" became a 16-entry queue. A full queue returns
+  BUSY, which fn 0x9F0818 waits on and retries. `CELL_VDEC_ERROR_FATAL` is
+  0x80610180 (it was ...0107), the value fn 0x9F0818 compares.
+
+There is still no real decoder: every AU is one black picture, so the movies
+play their full length in black (or are skipped with CROSS). libavcodec 60 is
+on the build host if real frames are wanted. Test:
+`libs/codec/tests/test_vdec_handles.c` (build line in the file).
+
+### Save data
+
+`cellSaveData_register_ctx_handlers()` was never called. Its name begins with
+`cell`, so `gen_hle_nids.py` even registered it as a (never imported) guest
+function. Without it, `cellSaveDataUserAutoLoad`/`UserAutoSave` took the
+8-GPR path, which cannot see the ninth argument (userdata, at caller SP+112),
+and passed NULL. The load "worked" (its funcStat ignores userdata on a new
+profile), but the game's funcFile reads the file to write from its object at
+`cbResult->userdata`: every autosave asked for `name='' buf=0` and failed with
+ERROR_PARAM, so no save ever existed and every boot was a first boot.
+
+Now `ps3_savedata_register_ctx()` (libs/system/cellSaveData.c) registers
+UserAutoLoad, a new UserAutoSave ctx handler and ListAutoLoad. It is called
+weakly from `ppu_hle_init` (runtime/ppu/ppu_hle.cpp), like
+`ps3_font_register_ctx`. The first autosave writes `PARAM.SFO`, `PARAM.PFD`,
+`AUTOSAVE.DAT` and `ICON0.PNG`, and the second boot loads AUTOSAVE.DAT and goes
+to the main menu. Test: `libs/system/tests/test_savedata_fixed.c` now calls
+both User* handlers through the registered NIDs and checks userdata. It also
+got the stubs it needed to link again (spu_lockline_* masks, gwt_*).
+
+`PS3_SAVEDATA_ROOT` moves the save root. The tests use their own, under
+`work/runs/`, so they never touch a player's `gamedata/` saves.
+
+### main_menu.sh
+
+`work/tests/main_menu.sh` runs about 2 minutes and does two boots, each with a
+fresh save root. It drives the pad through a `PS3_PAD_FILE` held-state file
+from a small controller (Python inside the script), not a timed
+`PS3_PAD_SCRIPT`. The movie and load times vary, and a CROSS that lands on the
+menu starts the Festival (and the Prologue load).
+
+- Boot 1 taps CROSS every 2 s until `SAVE complete`.
+- Boot 2 taps CROSS until the second `[cellVdec] Close` (maintitles). Then
+  it looks at the dumped frames: CROSS while the title logo is on screen (mean
+  red over x 300..700, y 130..270 is about 90 on the title and 0 on the
+  menu), until the menu panel shows. The title ignores the D-pad, and the
+  CROSS that skipped maintitles sometimes passes the title already (it reads
+  the held button), so a blind CROSS can land on the menu and start the
+  Festival. Then DOWN, DOWN, UP: each must change the
+  right-hand panel (the highlighted item's picture and text, x 770..1160,
+  y 120..490) by at least 5 and by more than 4x its idle change (mean abs
+  difference, 0..255). A press measures about 20-45 and idle about 0.1-1.5.
+  The item column is not used because the highlighted item pulses between
+  white and grey by itself (idle up to about 11).
+
+PASS also requires no `unresolved NID` in either log. The menu frame is
+written to `work/runs/main_menu.png`.
+
+### Next blocker: the Prologue race load
+
+FESTIVAL (or the first boot's automatic Prologue) loads the race and stops
+flipping on "LOADING". The five Havok `hkp_integrate` tasks (image 35, created
+with plain `cellSpursCreateTask` on taskset 0x43841100) start, and one sits in
+`rdch SPU_RdEventStat` with mask 0x400 (lock-line reservation lost) on EA
+0x436F9080 for as long as the run lasts. Some other task or the PPU has to
+write that line and does not, or the write never raises the LLR event. Start
+there for milestone 4.
+
+Side note: the game opens `/dev_hdd1/<hash>` cache files directly, and
+`ppu_fs` maps `/dev_hdd1/` onto the disc root. They are only read and miss,
+so nothing is written, but `/dev_hdd1` should get a host directory of its own
+before anything writes there.
