@@ -62,9 +62,11 @@
 
 /work/tests/*
 !/work/tests/*.sh
+!/work/tests/codec/
 
 /work/patches/*
 !/work/patches/ps3recomp.patch
+!/work/patches/pending/
 
 __pycache__/
 
