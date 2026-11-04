@@ -27,7 +27,7 @@ Vulkan. The runtime started as a copy of the
 | Area | State |
 |---|---|
 | Lift (PPU + SPU) and link | ✅ 76,372 PPU functions, 58 SPU images; reaches the entry point |
-| Boot, videos, menus | 🔧 Boot runs into FIOS/psarc loading |
+| Boot, videos, menus | 🔧 Boots through the health warning to the PLAY / PLAY IN 3D screen |
 | Races, all single-player modes | ⬜ |
 | Split-screen (2–4 players) | ⬜ |
 | Audio, saves, controllers | ⬜ |

@@ -401,6 +401,71 @@ multistream_mp3 1201/728.
   `SPU_JOBDRAIN` and `SPU_JOBTRACE` diagnostics. With this PM those
   diagnostics point at the wrong instructions.
 
+### EDGE MLAA barrier hang (frame 2) -- fixed
+
+Symptom: boot drew the first frame and the PPU then spun in fn 0x857EF8 on
+the MLAA completion word (context 0x40367804 + 0x2C), with the 5 MLAA tasks
+of taskset 0x40AD5D00 parked in WAIT_SIGNAL inside the barrier wait.
+
+How the task-side barrier works (image 30, read from the disassembly; the
+CellSpursBarrier layout is RPCS3's: +0x00 s32 count, +0x04 total, +0x34
+taskset): notify = LS 0xA618, wait = LS 0xA910, both GETLLAR/PUTLLC on the
+barrier line (LS 0x80). +0x10 is the 128-bit mask of tasks waiting in the
+current phase, +0x20 the mask of tasks that notified during the drain phase.
+While count >= 0 notifies count up; the one that makes count == total sets
+count = popcount(+0x10) - total and releases every +0x10 task. While count < 0
+waits count up to 0 (the -1 -> 0 waiter releases +0x20). A release is the
+SPU send-signal routine at LS 0xABF0: GETLLAR on the taskset, refuse
+(0x80410905) unless running|ready|pending|signalled|waiting are all inside
+`enabled` and running&waiting == ready&pending == 0, then set the task's
+`signalled` bit with PUTLLC. Our cellSpursBarrierInitialize was right.
+
+Three bugs, all fixed:
+
+1. `cellSpursCreateTask` did `taskset->taskCount++` on the native
+   `CellSpursTaskset` struct, which aliases the guest's BE layout: +0x04 is
+   word 1 of `running`. After 5 tasks, running = `00000000 05000000 ...`
+   (tasks 37, 39 "running", not enabled), so every SPU-side signal was
+   refused and the barrier's waiters never woke. Destroy/Shutdown had the
+   same kind of native stores (+0x00, +0x08). All removed (cellSpurs.c).
+2. Once signals got through, one task in four still slept: the HLE cleared
+   its own `signalled` bit with a plain read-modify-write while the releasing
+   task PUTLLC'd the next waiter's bit into the same word, and the stale word
+   won. `spurs_bitset_set/clear` (spurs_taskset.h) now run under the line's
+   lock-line stripe and call `spu_coh_notify_write` (so a racing PUTLLC
+   fails and retries, as against a PPU stwcx.); the task-exit path in
+   spu_workload.c uses them too.
+3. A guest PUTLLC that sets `signalled` never touched the WAIT_SIGNAL
+   condvar, so a parked task only saw it on its 1 s poll. A committed
+   PUTLLC/PUTLLUC on a line with a parked taskset now broadcasts it
+   (`spu_taskset_line_committed`, called from spu_channels.c).
+
+Test: `libs/spurs/tests/test_spurs_taskset_signal.c` (build line in the file):
+5 CreateTasks leave `running` clean and the bitsets consistent, and a
+signalled bit set in memory plus the commit hook wakes a parked waiter in
+~1 ms.
+
+`SPU_ATOM_EA=<ea>` verdict lines now also print the task id and words
++0x00/+0x10/+0x20 of the committed line, which is what showed bug 2.
+
+After the fix the game flips every frame: the health warning, then the
+"PLAY / PLAY IN 3D" menu (engine path, `PS3RECOMP_VK_GUEST_PROGRAMS=1`).
+The flip is `_cellGcmSetFlipCommand` on one of four 4 KB per-frame contexts
+(0x40B10000..0x40B13000); `gcm_flip_into_fifo` declines them (its 4 KB
+RECYCLE_SLACK is the whole segment), so the immediate-flip fallback is what
+runs. Fine for now; a FIFO-ordered flip for small contexts is a follow-up.
+
+`LD_FRAME_DUMP` used to be honoured only by the live-draw (D3D12) path, so
+`first_frame.sh` found no frames on the Vulkan build even once the game was
+flipping. The Vulkan backend now takes it too (`<dir>/frame_<n>.ppm`, the
+same `[frame-dump]` line).
+
+Performance note: without `PS3RECOMP_VK_GUEST_PROGRAMS=1` (the tests' default)
+the vtable path uploads every bound texture with a blocking submit, ~600 ms
+per frame, and draws the frame flipped and offset; with guest programs the
+engine runs ~30 fps. The engine path logs `colour target format 10/12 ...
+not supported yet` for the post-process chain (1280x1080, 320x180, ...).
+
 ## Virtual pads
 
 Unattended runs drive the game with up to four virtual pads instead of a

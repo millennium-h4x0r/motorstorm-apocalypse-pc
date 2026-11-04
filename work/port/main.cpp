@@ -656,6 +656,13 @@ int main(int argc, char** argv)
      * notes say why they were set there. Each is to be measured on MotorStorm
      * and kept, changed or dropped. */
 
+    /* MotorStorm: the title's own RSX programs, translated to SPIR-V. The
+     * fixed fallback path re-uploads every texture with a blocking submit
+     * (~600 ms a frame) and draws the boot screens flipped and shifted; with
+     * the guest programs the health warning is upright at ~30 fps. Default
+     * on so that the tests see what a player sees. */
+    env_default("PS3RECOMP_VK_GUEST_PROGRAMS", "1");
+
     /* inFAMOUS 2: the audio sync the main thread waited on came from its Wwise
      * jobs' own throw_event, so a job must not also get a synthetic "job done"
      * from the chain -- lifted (SPURS_JOB_LIFTED_RAN) or, for one with no lift,
