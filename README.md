@@ -27,8 +27,8 @@ Vulkan. The runtime started as a copy of the
 | Area | State |
 |---|---|
 | Lift (PPU + SPU) and link | ✅ 76,372 PPU functions, 61 SPU images; reaches the entry point |
-| Boot, videos, menus | ✅ Boots to the main menu, navigable with a pad (movies play black: no video decoder yet) |
-| Races, all single-player modes | 🔧 The Prologue race runs start to finish (~20 fps; the 3D scene is not presented correctly yet) |
+| Boot, videos, menus | ✅ Boots to the main menu, navigable with a pad (intro movies decode and play) |
+| Races, all single-player modes | 🔧 The Prologue race runs start to finish (~20 fps; 3D scene shows, still overbright with edge artefacts) |
 | Split-screen (2–4 players) | ⬜ |
 | Audio, saves, controllers | ⬜ |
 | Port menu, options (F1), up to 4K, unlocked 60+ fps simulation | ⬜ |

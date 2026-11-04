@@ -9,7 +9,7 @@ simulation). Design: [superpowers/specs/2026-11-03-motorstorm-recomp-design.md](
 | 1 | Lift and link | a binary that starts and reaches the game's entry | ✅ 2026-11-03 |
 | 2 | First pixels | boot logos / first intro video on screen | ✅ 2026-11-04 |
 | 3 | Menus | the game's main menu navigated with a (virtual) pad | ✅ 2026-11-04 |
-| 4 | First race | one race finished start to end | ✅ 2026-11-04 (race logic; the 3D picture is still being fixed) |
+| 4 | First race | one race finished start to end | ✅ 2026-11-04 (picture shows; brightness/edges still off) |
 | 5 | Full feature set | a Festival event and a 4-player split-screen race complete; every track loads | ⬜ |
 | 6 | Polish | port menu, F1 options, resolution scale, fullscreen/letterbox, hang dumps, README screenshots | ⬜ |
 | 7 | Performance | steady 60+ fps simulation at 1440p in single-player races | ⬜ |
