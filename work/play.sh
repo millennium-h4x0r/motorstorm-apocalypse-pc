@@ -88,7 +88,7 @@ watch_stall() {
     set +e                             # a failing probe must not end the watcher
     local gpid="" off=0 same=0 seen=0 size chunk fps slow=0 profiles=0 last_prof=0
     for _ in $(seq 1 100); do
-        gpid=$(pgrep -P $$ -x MotorStormRecomp | head -1); [ -n "$gpid" ] && break; sleep 0.2
+        gpid=$(pgrep -P $$ -f "build-vk/MotorStormRecomp " | head -1); [ -n "$gpid" ] && break; sleep 0.2
     done
     [ -n "$gpid" ] || return 0
     # Each thread's CPU share every 10 s, beside the fps in the log, into
