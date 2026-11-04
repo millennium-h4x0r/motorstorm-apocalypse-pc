@@ -636,6 +636,20 @@ void draw_start()
     /* the controls, bottom left */
     const char* keys = g_page == MENU_MAIN ? "X / Enter  select" : "X / Enter  select      O / Esc  back";
     bg->AddText(ImVec2(tp.x, d.y - fs * 2.2f), IM_COL32(200, 205, 214, 200), keys);
+    /* PS3_UI_AUTOPLAY_MS=<ms>: press Play by itself that long after the start
+     * screen first draws -- a scripted run through the start screen, the way
+     * work/play.sh boots, without a hand on the pad. */
+    static long autoplay_ms = -2;
+    static double autoplay_at = 0;
+    if (autoplay_ms == -2) {
+        const char* e = getenv("PS3_UI_AUTOPLAY_MS");
+        autoplay_ms = (e && *e) ? atol(e) : -1;
+        autoplay_at = ImGui::GetTime() + (double)autoplay_ms / 1000.0;
+    }
+    if (autoplay_ms >= 0 && g_page == MENU_MAIN && ImGui::GetTime() >= autoplay_at) {
+        autoplay_ms = -1;
+        go = true;
+    }
     if (go) play();
 }
 

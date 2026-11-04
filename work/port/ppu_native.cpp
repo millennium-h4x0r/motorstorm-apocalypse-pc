@@ -1,7 +1,7 @@
 /* MotorStorm Apocalypse (BCES-00484): native stand-ins for lifted PPU functions.
  *
- * No MotorStorm functions are registered yet (s_funcs and s_probes below are
- * empty); the mechanism is game-independent.
+ * One MotorStorm function is registered: the game's event Set (0xFF5B40, see
+ * nat_event_set). s_probes is empty; the mechanism is game-independent.
  *
  * The lift calls PPU_NATIVE_HOOK at the entry of each function listed in
  * tools/ppu_native_entries.py (a post-pass over the lifter's output). The
@@ -101,10 +101,98 @@ static inline void range_wr_done(uint64_t ea, uint64_t n)
     return 1;
 }
 
+/* The game's event, 0xFF5B40: Set(this r3, bool r4), vtable 0x1201500 slot 3.
+ *
+ * The event is two of the game's spinlocks (func_00675D3C: lwarx/stwcx. of 0
+ * to 1, 500 spins, then sys_timer_usleep(250); func_00675E00: lwsync, store
+ * 0): +8 guards the event, +12 is the event itself, held while it is reset.
+ * Wait (0xFF5AD8) takes and drops +12. Set(true) is lock +8, unlock +12,
+ * unlock +8. Set(false), the reset, is lock +8, lock +12, unlock +8 -- and so
+ * it spins on +12 *while holding +8* when the event is already reset.
+ *
+ * Its user is the job batches (0x6737E0 resets a batch's event, then queues
+ * it; JobBatchHandler, PPU thread 3, sets it from 0x673BFC when the batch's
+ * SPU work is done). Several batches a frame are queued and never waited on;
+ * the game counts on each finishing before the next frame queues it again.
+ * When one has not -- its completion still on the way when the main thread
+ * queues it again -- the main thread spins in the reset on +12 holding +8,
+ * and JobBatchHandler, coming to set that same event, spins on +8: neither
+ * ever moves (main thread poll site 0xFF5B90, thread 3 at 0xFF5B6C). That
+ * froze the end of the logo movie once: AsyncVidRender (thread 40) kept
+ * drawing the last picture, and the main thread, which stops it and opens
+ * maintitles_60.avi, never came back.
+ *
+ * So the reset here waits for +12 with +8 let go between tries: the late Set
+ * gets in, and the reset then takes the event as it would have had the Set
+ * come first. With the event set (every other time), it is the guest's
+ * sequence exactly. Set(true) stays lifted. */
+static inline int nat_trylock(ppu_context* c, uint32_t ea)
+{
+    /* lwarx / cmpwi 0 / stwcx. 1, as func_00675D3C does it: a stwcx. that
+     * fails with the word still 0 (the reservation was lost) goes round
+     * again; only a held lock (nonzero) is a failure */
+    for (;;) {
+        const uint32_t v = vm_read32(ea);
+        PPU_RESV_ADDR(c) = ea;
+        c->reserve_value = v;
+        ppu_resv_line_note(ea);
+        const int ok = v == 0 && ppu_stwcx32(ea, v, 1u);
+        PPU_RESV_ADDR(c) = 0;
+        if (ok) { PPU_FENCE(acquire); return 1; }
+        if (v != 0) return 0;
+    }
+}
+static inline void nat_unlock(uint32_t ea)
+{
+    PPU_FENCE(release);   /* lwsync */
+    vm_write32(ea, 0u);
+}
+static void nat_usleep250(ppu_context* c)
+{
+    /* sys_timer_usleep(250), the guest's own back-off -- through lv2, so
+     * PS3_POLLTOP still names the caller (lr) as the poll site */
+    const uint64_t r3 = c->gpr[3], r11 = c->gpr[11];
+    c->gpr[3] = 250;
+    c->gpr[11] = 141;
+    lv2_syscall(c);
+    c->gpr[3] = r3;
+    c->gpr[11] = r11;
+}
+static int nat_event_set(ppu_context* c)
+{
+    if ((uint8_t)c->gpr[4]) return 0;               /* Set(true): lifted */
+    /* The out-of-line accessors (vm_read32/vm_write32/ppu_stwcx32) take any
+     * guest address and tell SPU reservations themselves, so no range test:
+     * the job batches' events live at 0x4A8xxxxx, where range_wr_ok declined. */
+    const uint32_t obj = (uint32_t)c->gpr[3];
+    if (obj < 0x10000u) return 0;
+    const uint32_t guard = obj + 8, ev = obj + 12;
+    uint32_t tries = 0;
+    for (;;) {
+        while (!nat_trylock(c, guard)) nat_usleep250(c);
+        const int got = nat_trylock(c, ev);
+        nat_unlock(guard);
+        if (got) break;
+        tries++;
+        nat_usleep250(c);
+    }
+    if (tries) {
+        /* the reset the lifted code would have deadlocked in */
+        static std::atomic<int> told;
+        if (told.fetch_add(1, std::memory_order_relaxed) < 8)
+            fprintf(stderr, "[ppu-native] event 0x%08X reset while still reset (caller 0x%08X): "
+                    "waited %u x 250 us for its Set\n", obj, (uint32_t)c->lr, tries);
+    }
+    c->gpr[3] = guard;    /* what the guest's last call (unlock +8) leaves */
+    return 1;
+}
+
 /* Add MotorStorm entries here (and their addresses to
  * tools/ppu_native_entries.py NATIVE_ENTRIES). The last row is an end marker
  * that keeps the array non-empty; the registry skips it (no fn). */
 static const ppu_native_desc s_funcs[] = {
+    /* no compare (lifted = null): the lifted reset is the deadlock */
+    { 0x00FF5B40u, "event_set", nat_event_set, nullptr, nullptr, 0u },
     { 0u, nullptr, nullptr, nullptr, nullptr, 0u },
 };
 

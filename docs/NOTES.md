@@ -691,6 +691,55 @@ play their full length in black (or are skipped with CROSS). libavcodec 60 is
 on the build host if real frames are wanted. Test:
 `libs/codec/tests/test_vdec_handles.c` (build line in the file).
 
+### The logo that never ends (job-batch event deadlock)
+
+Seen once in a play.sh run (play-20261104-130612.log): evologo_60.avi played,
+then black, and maintitles_60.avi never opened. AsyncVidRender (thread 40,
+fn 0x4F16DC) went on drawing the last picture, because the main thread, which
+sets its stop flag (+0x15C) and joins it, was stuck. The poll sites said how:
+thread 1 at 0xFF5B90, thread 3 (JobBatchHandler) at 0xFF5B6C.
+
+The game's event (vtable 0x1201500) is two of its own spinlocks (fn 0x675D3C,
+lwarx/stwcx., then sys_timer_usleep(250)): +8 guards it, +12 is the event.
+Wait (fn 0xFF5AD8) takes and drops +12. Set(bool) (fn 0xFF5B40) takes +8,
+then for true drops +12 and for false (reset) *takes* +12, and only then
+drops +8. A reset of an event that is already reset therefore spins on +12
+while holding +8, and the Set that would end it spins on +8.
+
+The job batches use it: submit (fn 0x6737E0) resets the batch's event and
+queues the batch; JobBatchHandler sets it (fn 0x673BFC) when the batch's SPU
+work is done. About ten batches a frame are never waited on (for example the
+one queued from 0x61C1C4); the game counts on each being done before the next
+frame queues it again. When one is not, the main thread resets it while its
+completion is still on the way, and both threads stop for good. It comes down
+to timing (a busy host, an SPU job that runs late). Nothing in the window,
+present or decoder path is wrong: about a dozen runs (headless, windowed,
+through the start screen or not, verbose or quiet) all reached maintitles.
+
+It is reproducible on demand: `work/scratch/movfreeze/forcerun.sh <dir>`
+attaches gdb (non-stop) 4 s into the logo and makes that one batch's isDone
+(fn 0xFF56E4) say no for 150 ms. Before the fix: the same freeze, same poll
+sites. After: the main thread's reset waits out the late Set and the logo ends
+into maintitles.
+
+Fix: a native stand-in for fn 0xFF5B40 (`nat_event_set`, work/port/ppu_native.cpp,
+listed in work/tools/ppu_native_entries.py). Set(true) stays lifted. The reset
+takes +8, tries +12 once, and drops +8 again before backing off, so a late Set
+can get in. When the event is set, as it nearly always is, it does what the
+guest code does. Each time it has to wait, it logs `[ppu-native] event 0x...
+reset while still reset (caller 0x0067382C): waited N x 250 us` (the first
+eight): every such line is a freeze the lifted code would not have come out of.
+Normal runs print none. `PS3RECOMP_NATIVE_PPU=0` turns it off. The hook is put
+in by the post-pass (`ppu_native_entries.py`, which lift.sh runs), so a relift
+keeps it.
+
+Two side notes. The window build waits on the port's start screen, and
+movrun.sh did not skip it, so the "windowed run is stuck" bisect was a run
+that never booted (19 lines of log): movrun.sh now sets PS3_SKIP_LAUNCHER=1.
+`PS3_UI_AUTOPLAY_MS=<ms>` (work/port/ui.cpp) presses Play on the start screen
+by itself, for a scripted run through it the way play.sh boots
+(`work/scratch/movfreeze/arun.sh`).
+
 ### Save data
 
 `cellSaveData_register_ctx_handlers()` was never called. Its name begins with
@@ -739,17 +788,171 @@ menu starts the Festival (and the Prologue load).
 PASS also requires no `unresolved NID` in either log. The menu frame is
 written to `work/runs/main_menu.png`.
 
-### Next blocker: the Prologue race load
+### The Prologue race load (was the next blocker)
 
-FESTIVAL (or the first boot's automatic Prologue) loads the race and stops
-flipping on "LOADING". The five Havok `hkp_integrate` tasks (image 35, created
-with plain `cellSpursCreateTask` on taskset 0x43841100) start, and one sits in
-`rdch SPU_RdEventStat` with mask 0x400 (lock-line reservation lost) on EA
-0x436F9080 for as long as the run lasts. Some other task or the PPU has to
-write that line and does not, or the write never raises the LLR event. Start
-there for milestone 4.
+Fixed in milestone 4; see "Race" below.
 
 Side note: the game opens `/dev_hdd1/<hash>` cache files directly, and
 `ppu_fs` maps `/dev_hdd1/` onto the disc root. They are only read and miss,
 so nothing is written, but `/dev_hdd1` should get a host directory of its own
 before anything writes there.
+
+## Race
+
+Milestone 4: from "LOADING" into the Prologue race ("Mash's Prologue", a
+first boot's automatic first event) and through it. `work/tests/first_race.sh`
+drives it (see the end of this section).
+
+### The Havok SPU tasks (the LOADING hang)
+
+Havok's physics runs as SPURS tasks on the `HavokSpursTaskset` Taskset2
+(maxContention 5): the PPU (hkSpuUtil, fn 0x8C06FC) creates five
+`hkp_integrate` tasks (image 35) per step; each integrate task, when the
+next job in the queue belongs to another ELF, creates a task for that ELF
+**from the SPU** (SPU libspurs cellSpursCreateTask: hkp_collide, image 33;
+hkp_collision_query, image 34; hkp_raycast, image 36) and exits; those in
+turn create integrate tasks again. The PPU and the tasks hand work over
+through lock-line semaphores (16-byte objects at 0x436F9040.., word = port
+byte | waiters byte | count halfword; the PPU half is fn 0x8C20D8 / 0x8C219C,
+the SPU half LS 0x4F00 / 0x4DC0 in hkp_integrate), released to the PPU with
+`sys_spu_thread_send_event` on the SPURS ports cellSpursAttachLv2EventQueue
+bound.
+
+The reported symptom -- one integrate task in `rdch SPU_RdEventStat`, mask
+0x400, on line 0x436F9080 -- was not a lost lock-line event: that line holds
+the step's semaphores, all at count 0, and the task was correctly waiting for
+work that never came. Nothing was wrong with the LR event delivery (the
+registry, PPU stwcx./plain stores, PUTLLC/PUTLLUC and DMA PUT all notify).
+The chain that should have produced the work was broken in six places:
+
+1. **SPU-side task creation refused (ERROR_PERM).** SPU libspurs'
+   cellSpursCreateTask GETLLARs the taskset's 0x1880 line and returns
+   0x80410909 unless `size` (+0x1890) >= 0x2900 **and** one of the two event
+   flag ids at +0x1898/+0x189C is non-zero (hkp_integrate LS 0x12010..0x12038).
+   Our cellSpursCreateTaskset2 left both ids 0, so every create failed and the
+   tasks looped TryJoin over 128 ids and retried, forever. CreateTaskset2 now
+   creates two real lv2 event flags (`sys_event_flag_create_direct`, new in
+   runtime/syscalls/sys_event.c) and stores their ids; DestroyTaskset2 frees
+   them. Test: `libs/spurs/tests/test_spurs_taskset2.c`.
+2. **SPU-created tasks never started.** The HLE only started tasks it created
+   on the PPU, or ready tasks when a sibling exited. A committed SPU atomic on
+   a tracked taskset's header line now starts every enabled, ready/pending,
+   not-running task (`spu_taskset_header_committed`, runtime/spu/spu_workload.c),
+   as the policy module would. Not limited to the taskset's max contention by
+   default (`SPU_TASKSET_CONTENTION=1` turns the limit on; `cellSpursCreateTaskset`
+   records it): PPU-created tasks start at once whatever the contention, and
+   holding back an SPU-created one deadlocked a later step -- the next step's
+   five PPU-created integrate tasks sat on a semaphore that the held-back
+   collide task would have released.
+3. **A task ran under another task's id.** `spu_workload_dispatch_async` read
+   the taskset/task id from the single-slot globals the PPU's CreateTask sets;
+   a start from another thread in between ran collide task 0 as task 3, with
+   task 3's TaskInfo, and left task 0's bits set. The id is now passed down
+   (`spu_workload_dispatch_async_task`).
+4. **sys_event_flag_set_bit from SPURS dropped.** `spu_deliver_user_event`
+   (runtime/syscalls/lv2_register.c) dropped every interrupt-mailbox code >=
+   128 from an SPU without an lv2 group. 128/192 (event flag set bit,
+   flag id in the out mailbox) route by flag id, so they are handled for SPURS
+   too. `SPU_EVT_TRACE=1` logs every SPU user event.
+5. **Second code segments were never lifted.** The Havok task ELFs have a
+   second PT_LOAD linked high in local store (hkp_collide: 0x9B0 bytes at LS
+   0x3BA80; integrate 0x32C00, collision_query 0x38F00, raycast 0x3B900,
+   hka_sample_anim 0x3C380). `tools/spu_lifter.py --auto-functions` lifted only
+   the first; calls into the rest went to the interpreter. It now detects and
+   lifts every executable segment, seeding each with the branch targets the
+   other segments reach (and the `--extra-funcs` that fall in it).
+6. **Interpreted code returning into lifted code ran the caller twice.** For a
+   target in high LS (>= 0x15000) `spu_indirect_branch` ran the interpreter
+   with no stop address and returned with pc wherever it stopped: the
+   interpreter had meanwhile run on through the lifted caller's own code, and
+   the lifted frame then ran it again (collide left its job loop early and the
+   step's last jobs were never done). It now stops at the link register the
+   branch left (a call's return point; for a return landing in interpreted
+   code, the waiting drain's), and dispatches a lifted entry it stops at, as
+   the microstep hand-off already did.
+
+With those the load completes: r01_60.avi, the intro cutscene (the opening
+credits are drawn over it), the 3-2-1-GO countdown, and the race.
+
+Two runtime-discovered lists live in `work/tools/lift_spu.py`
+`TASK_EXTRA_ENTRIES`: entries in hkp_collide and hkp_collision_query that are
+only reached through function-pointer tables the PPU builds in main memory, and
+call-return points interpreted callees return to (from `SPU_MISS_LOG=1` and the
+`[spu] img=N branched into unlifted LS` lines). The MultiStream DSP plugins
+stay on the interpreter: the core copies them to LS addresses it allocates at
+run time (0x37010, 0x37480, 0x37C20, 0x38230, 0x39810, ... seen), from a heap
+copy, so `MS_DSP_LSAS` cannot name them.
+
+### Other fixes on the way
+
+- **MFC engine slots leaked.** `spu_run_lifted_job_abi` runs each task on a
+  stack context and unregistered it from the lock-line set but never gave its
+  MFC engine slot back. With ~100 Havok task runs a second the 128-slot table
+  was full within seconds; every later context then shared the one fallback
+  engine (tag state mixed across SPUs) and took the claim lock on every
+  channel access. Released now (and in the interpreted task runner). Test:
+  `runtime/spu/tests/test_spu_mfc_slots.c` (now builds with gcc; build line in
+  the file) runs 384 task runs at fresh stack addresses and checks no slot is
+  left behind.
+- **Lost wakeup in the channel wait.** `spu_ch_wake` broadcast without the
+  waiter's lock, so a producer firing between the waiter's predicate check
+  and its sleep woke nobody and the SPU slept the 10 ms re-poll. It takes the
+  lock first, and the waiter's check under that lock no longer runs the
+  reservation poll (`spu_ch_ready_nopoll`): the poll spins on a lock-line
+  stripe's seqlock, and a notifier holding that stripe now takes the waiter's
+  lock -- a deadlock (first try froze the race load). `SPU_CHWAIT_STATS=1` counts waits ended by a wake vs the poll
+  (about 1.4% by the poll afterwards: a raise with no wake, e.g.
+  `spu_resv_lost_poll`'s own).
+- **SPURS event flags had no event port.** `cellSpursEventFlagAttachLv2EventQueue`
+  was a stub, so an SPU-to-PPU flag's spuPort (+0x0C) named no port. The SPU
+  side of cellSpursEventFlagSet sends an event there when a PPU thread waits
+  and reads the reply from its inbound mailbox. Attach now creates an lv2
+  queue on a free dynamic SPURS port and records port and queue in the flag
+  (RPCS3's event_flag_attach_lv2_event_queue is the reference for the
+  fields); the delivery path answers CELL_OK for a flag port and wakes the
+  flag's PPU waiters (our PPU wait polls the flag word, so nothing is
+  queued). Dynamic ports are kept unique across SPURS instances, since the
+  port table is global. A flag `_cellSpursEventFlagInitialize` creates with
+  no taskset is an IWL flag (isIwl = 1, addr = the instance). Both of the
+  game's SPU-to-PPU flags (zlib 0x452F8980, MultiStream 0x0153E700) attach.
+  Test: `libs/spurs/tests/test_spurs_taskset2.c`.
+- **send_event on an unconnected SPURS port never answered.** MultiStream's
+  mixer (image 37) sends `sys_spu_thread_send_event` on SPU port 1, which
+  nothing attaches; `spu_deliver_user_event` dropped it without writing the
+  result the SPU then reads from its inbound mailbox, so the task blocked in
+  `rdch SPU_RdInMbox` for good (the race, and later the whole game, froze a
+  few seconds after GO). It now answers CELL_ENOTCONN, as lv2 does.
+- **Every task ran on "SPU 0".** The SpursTasksetContext the runtime builds
+  for a task said spuNum 0 for all of them, and SPURS code indexes per-SPU
+  areas by it, so concurrent tasks shared one. After a few thousand raycast
+  runs one DMA'd from EA 0xFFFFFFFF (`[mfc] REJECTED malformed transfer`) and
+  the physics step never finished. Each running task now gets the lowest
+  number no other running task of its taskset holds, modulo the instance's
+  SPU count (`spu_num_claim`, spu_workload.c). (A first, process-wide
+  numbering went past the SPU count -- the parked MLAA tasks held the low
+  numbers -- and Havok's PPU side then called through a NULL entry of its
+  per-SPU table.)
+- **HDR colour targets on Vulkan.** The engine path refused every colour
+  target but RGBA8 ("colour target format 10/12 ... not supported yet").
+  `rsx_vulkan_backend.c` now creates float targets (FP16 RGBA = format 10, and
+  any format the device can render to and sample), keeps a render pass per
+  (format, count), builds each pipeline for its target format and disables
+  blending where the format cannot blend.
+- `spu_workload` RETURNED lines now say how the task ended (halted, status,
+  stop, pc) and how long it ran.
+
+### What the race looks like now
+
+Rendering: the G-buffer and lit passes draw (PS3RECOMP_ENG_DUMP_SURFACES shows
+the bridge, the docks and the ship in the 1280x1080 targets), the UI draws
+(credits, the countdown), but the presented frame has a black 3D scene. The
+composite to the display buffer is not found yet (the pipelines drawing into
+0x003B0000 sample only UI textures and the movie planes; no SPU reads VRAM,
+no NV3089/NV0039 copy happens).
+
+Speed: about 30 fps on the menus, 5-6 fps once the world draws. The main
+thread waits in Havok's step-completion loops (fn 0x8BC4B8, 0x8BDA0C,
+0x8BE498, usleep(1) polls on the job queue): the Havok tasks are slow
+(collide median 30 ms, p90 200 ms per run) and busy-wait on lock lines
+(GETLLAR spins, e.g. hkp_collide LS 0x18AAC). The MultiStream task runs its
+DSP plugins on the interpreter at 100% of one core.

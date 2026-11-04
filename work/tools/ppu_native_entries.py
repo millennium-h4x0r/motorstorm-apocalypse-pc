@@ -54,6 +54,7 @@ WORK = os.path.dirname(HERE)
 # Add MotorStorm entries here, e.g. (example address):
 #     0x00123456,     # memcpy(dst, src, n)
 NATIVE_ENTRIES = [
+    0x00FF5B40,     # the game's event Set(bool): its reset deadlocks against a late Set
 ]
 
 # Hooks for port/ppu_native.cpp's call-count probes (PS3RECOMP_PPU_PROBE=1):
