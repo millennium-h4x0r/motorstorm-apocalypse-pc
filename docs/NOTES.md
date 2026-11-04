@@ -400,3 +400,168 @@ multistream_mp3 1201/728.
   ...) are inFAMOUS/LBP PM offsets, but they appear only in the
   `SPU_JOBDRAIN` and `SPU_JOBTRACE` diagnostics. With this PM those
   diagnostics point at the wrong instructions.
+
+## Virtual pads
+
+Unattended runs drive the game with up to four virtual pads instead of a
+person (see "Working mode"). The code is in `ps3recomp/libs/input/cellPad.c`.
+The older port-0 knobs (`PAD_SCRIPT`, `PAD_FILE`, `PAD_AUTOPRESS`,
+`PAD_STICK`) still work as before.
+
+### Environment
+
+| Variable | Effect |
+|---|---|
+| `PS3_PAD_FILE_<n>=<path>` (n = 0..3) | Held-state file for port n. `PS3_PAD_FILE` is an alias for port 0. |
+| `PS3_PAD_SCRIPT=<path>` | Timeline file covering any of ports 0..3. |
+
+Both can be used together. On a port that has both, the file state is
+applied first and the script's state on top.
+
+### Which ports are connected
+
+- A port is **virtual** if it has a `PS3_PAD_FILE_<n>` or the script names
+  it. A virtual port is pinned to its number and shows as connected in
+  `cellPadGetInfo`, `cellPadGetInfo2` and `cellPadPeriphGetInfo` from
+  `cellPadInit` on, with or without an SDL pad. The script's `disconnect`
+  and `connect` events are the only things that change that.
+- **Real pads** (SDL device slots 0, 1, ...) go on the ports that are not
+  virtual, lowest port first: slot 0 takes the lowest free port, slot 1 the
+  next, and so on. The mapping depends on the slot number, not on which
+  slots are plugged in, so unplugging one pad never moves another. If no port
+  is virtual, slot n is port n, as before. Rumble goes to the real pad that
+  feeds the port.
+- Port 0 is still always reported connected, even when it is neither virtual
+  nor fed by a real pad: it is the keyboard pad with nothing pressed. Any
+  other port with neither is disconnected and returns `len = 0`.
+
+### Held-state file format
+
+The file is re-read on every host poll (every 4 ms). Tokens are separated by
+whitespace, `,` or `+`, and names are not case-sensitive.
+
+- `NAME`: the button is held at full pressure. NAME is one of `UP DOWN LEFT
+  RIGHT CROSS CIRCLE SQUARE TRIANGLE L1 R1 L2 R2 L3 R3 START SELECT`.
+- `NAME=v`: pressure v (0-255). The digital bit is set when v > 0. Use this
+  for the analog triggers: `R2=200` is part throttle.
+- `LX=v LY=v RX=v RY=v`: stick positions, 0-255, centre 128. 0 is left or
+  up.
+
+A missing or empty file means nothing is held. On port 0 the file adds to
+the keyboard pad, and a file stick at exactly 128 leaves the keyboard's stick
+alone. The game only receives pressure values if it turned press mode on
+(`cellPadSetPressMode` or `cellPadSetPortSetting` with `PRESS_ON`).
+Otherwise `R2=200` arrives as a digital R2 press.
+
+### Script format
+
+One event per line. `#` starts a comment.
+
+```
+t=<seconds> port=<n | n,m,... | all> <verb> [arguments]
+```
+
+| Verb | Arguments | Effect |
+|---|---|---|
+| `hold` (or `press`) | controls, `[<seconds>]`, `[polls=N]` | Press the controls, then release them. The press lasts at least `<seconds>` (default 0.1) **and** at least N packets the game received on that port (default 4). |
+| `set` | controls | Persistent until changed. `NAME=0` releases that button. |
+| `release` | names, or `all` | Removes the named controls from the `set` state and from any hold that is still active. `all` clears everything and centres the sticks. |
+| `connect`, `disconnect` | none | Plug or unplug the virtual port. If a port's first event is `connect`, the port starts unplugged. |
+
+Controls use the same tokens as the file. `+` joins several names into one
+token: `hold CROSS+START 0.2`. If `port=` is left out, the event goes to
+port 0. A line with an error is logged as `[pad] script <path>:<line>:
+<reason> -- line ignored` and skipped.
+
+**Clock:** `t` is in seconds since the game's **first `cellPadGetData`
+call**, not since process start. The time to boot and load the ELF varies
+from run to run, and the first pad poll is the first point where the game is
+known to be running. Ending and re-initialising the pad library does not
+restart the timeline.
+
+**Latching:** each event fires on the first host poll at or after its `t`,
+so an event cannot be missed while the game is not polling, such as during a
+loading screen. A hold counts only the packets the game actually read on that
+port (`cellPadGetData` returning `len > 0`). If the game stops reading,
+the press is still active when it starts reading again.
+
+Events on one port fire in file order. A hold whose controls overlap a hold
+that is still active, or one that ended less than 2 packets ago, waits until
+that one is done. Later events on the same port wait behind it. This keeps
+two scripted taps of DOWN from merging into one long press, which a menu
+would read as a single input.
+
+### Log lines
+
+Tests can grep stdout for these lines to check that input reached the game:
+
+```
+[pad] PS3_PAD_SCRIPT race4.pad: 16 event(s)
+[pad] virtual ports: 0(script) 1(script) 2(script) 3(script); real pads fill the other ports in slot order
+[pad] t=0.512 port=1 hold CROSS 0.2 [0.200s, >=4 packets]
+[pad] t=0.780 port=1 hold CROSS 0.2 [0.200s, >=4 packets] (due t=0.500)
+[pad] t=0.731 port=1 end hold CROSS 0.2 (6 packets)
+[pad] t=90.004 port=3 set R2=255
+```
+
+There is one line for each event fired, and one line when each hold ends,
+with the number of packets the game received during the hold. `(due t=...)`
+appears when an event fired more than 50 ms after its scheduled time. The
+file pads also log `[cellPad] file pad <n>: buttons 0x....` whenever their
+buttons change (port 0 keeps the old wording, without the port number).
+
+### Sample: four-player split-screen race start
+
+```
+# race4.pad   run with PS3_PAD_SCRIPT=race4.pad
+# Ports 0-3 are all named below, so all four are virtual and connected
+# from boot. The menu timings are placeholders until the menu flow
+# has been mapped.
+t=40    port=0      hold START 0.2           # title screen
+t=45    port=0      hold CROSS 0.2           # main menu -> split-screen
+t=50    port=1,2,3  hold CROSS 0.2           # players 2-4 join
+t=55    port=0      hold CROSS 0.2           # confirm and start the race
+t=90    port=all    set R2=255               # full throttle on all four pads
+t=95    port=2      set R2=180 LX=100        # player 3: part throttle, slight left
+t=96    port=3      hold L2 0.5              # player 4: tap the brake
+t=150   port=all    release all
+```
+
+To check that throttle reached every port:
+`grep -c '^\[pad\] t=.* port=[0-3] set R2=255' run.log` should print 4.
+
+### Unit test
+
+`ps3recomp/libs/input/tests/test_pad_virtual.c` (with `test_pad_stubs.c`)
+compiles `cellPad.c` with `-DPS3RECOMP_PAD_TEST_HOOKS`. That build has no
+SDL or XInput backend, uses a simulated clock, and can fake real pads in
+backend slots. The test runs a 4-port script with a file on port 0 and
+checks the following:
+
+- every port's `cellPadGetData` packets for each simulated frame;
+- part pressure (R2 = 200);
+- two back-to-back taps that do not merge;
+- a hold that is due while the port is not being polled and still arrives
+  as at least 4 packets;
+- hot-plugging with `connect`;
+- `release all`;
+- the connected bits in GetInfo, GetInfo2 and PeriphGetInfo;
+- the `[pad]` log lines;
+- the port-assignment rule (virtual port 2 pinned, real slots 0, 1, 2
+  going to ports 0, 1, 3);
+- the defaults when nothing is configured.
+
+Build and run it from `ps3recomp/`:
+
+```bash
+cc -std=gnu17 -O1 -D_GNU_SOURCE -DPS3RECOMP_PAD_TEST_HOOKS -Iinclude \
+   -Ilibs/input -Iruntime/ppu -Iruntime/spu -Iruntime/memory \
+   libs/input/cellPad.c libs/input/tests/test_pad_virtual.c \
+   libs/input/tests/test_pad_stubs.c -lm -o /tmp/test_pad_virtual \
+&& /tmp/test_pad_virtual
+```
+
+Related fix: when a button's digital bit was set, `cellPadGetData` used to
+force its pressure to 255 whenever the value was below 255. It now does that
+only when the pressure is 0. The old rule turned any part-pulled trigger,
+real or scripted, into full throttle.
