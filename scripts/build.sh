@@ -14,6 +14,12 @@
 # that the CPU has what it was built for).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# One build at a time: several agents share this tree, and two builds in the
+# same build directory corrupt each other. A second build waits here.
+if [ -z "${PORT_BUILD_LOCKED:-}" ] && command -v flock >/dev/null; then
+    export PORT_BUILD_LOCKED=1
+    exec flock "$ROOT/work/.build.lock" "$0" "$@"
+fi
 DIR="${PS3RECOMP_DIR:-$ROOT/ps3recomp}"
 PORT="$ROOT/work/port"
 if [ -n "${PORT_PPU_GCC:-}" ]; then JOBS="${JOBS:-2}"; else JOBS="${JOBS:-4}"; fi
