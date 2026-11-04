@@ -775,6 +775,24 @@ int main(int argc, char** argv)
         setenv("PS3_HDD0_ROOT", hdd0, 1);
 #endif
     }
+    /* /dev_hdd1, the scratch cache the title reads and writes, beside hdd0:
+     * never inside the disc tree. */
+    if (!getenv("PS3_HDD1_ROOT")) {
+        static char hdd1[1024];
+        snprintf(hdd1, sizeof hdd1, "%s", ppu_vfs_root);
+        char* slash = strrchr(hdd1, '/');
+        if (slash && slash != hdd1) *slash = 0; else snprintf(hdd1, sizeof hdd1, ".");
+        strncat(hdd1, "/hdd1", sizeof hdd1 - strlen(hdd1) - 1);
+#ifdef _WIN32
+        if (_mkdir(hdd1) != 0 && errno != EEXIST)
+            fprintf(stderr, "[boot] WARNING: cannot create %s (%s)\n", hdd1, strerror(errno));
+        _putenv_s("PS3_HDD1_ROOT", hdd1);
+#else
+        if (mkdir(hdd1, 0755) != 0 && errno != EEXIST)
+            fprintf(stderr, "[boot] WARNING: cannot create %s (%s)\n", hdd1, strerror(errno));
+        setenv("PS3_HDD1_ROOT", hdd1, 1);
+#endif
+    }
 #ifdef _WIN32
     if (!getenv("PS3_DEV_FLASH")) {
         static char flash[1024];
