@@ -684,11 +684,16 @@ int main(int argc, char** argv)
      * (libs/spurs/spurs_kernel.c, SPURS_PRIO). MotorStorm's workload layout
      * may differ. */
     env_default("SPURS_PRIO", "0:1");           /* inherited from inFAMOUS 2; revisit for MotorStorm */
-    /* The main PPU thread, rsx, rsx-record and the five SPURS SPUs each on a
-     * physical core of their own, everything else on the other siblings
-     * (runtime/platform/ps3_hot_pin.c; needs SMT and 8+ cores). inFAMOUS 2,
-     * heavy area: 87.6 -> 90.4 fps. PS3_HOT_PIN=0 turns it off. */
-    env_default("PS3_HOT_PIN", "1");            /* inherited from inFAMOUS 2; revisit for MotorStorm */
+    /* Off for MotorStorm (inFAMOUS 2 had it on: the main PPU thread, rsx,
+     * rsx-record and the five SPURS SPUs each pinned to a core of their own,
+     * runtime/platform/ps3_hot_pin.c). Here the frame waits on Havok's SPURS
+     * TASKS, which run on short-lived threads outside the hot set, so the pin
+     * confined them, and everything else, to the remaining CPUs: a Havok task
+     * run took 30-150 ms of wall time for 6-14 ms of CPU, mostly waiting in
+     * the run queue (/proc/<pid>/task/<tid>/schedstat) or spinning on a
+     * ticket lock whose holder was, and the intro and race ran at 2-9 fps.
+     * Unpinned: 1-2 ms a run, ~20 fps (docs/NOTES.md "Race"). */
+    env_default("PS3_HOT_PIN", "0");
     /* inFAMOUS 2: a Wwise job that ran and did not finish (the title had
      * already refilled its descriptor) got no synthetic completion either: the
      * WWS handlers read one as a message and called through NULL. */

@@ -30,7 +30,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(cd "$HERE/.." && pwd)"
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
 ELF="$WORK/../disc/PS3_GAME/USRDIR/EBOOT.elf"
-OUT="$WORK/runs/first_race"
+OUT="${OUT:-$WORK/runs/first_race}"
 [ -x "$BIN" ] || { echo "FAIL: no binary at $BIN (scripts/build.sh)"; exit 2; }
 rm -rf "$OUT"; mkdir -p "$OUT"
 
@@ -53,7 +53,7 @@ def setp(held):
 setp("")
 env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy",
            SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_PAD_FILE_0=str(pad),
-           LD_FRAME_DUMP=str(OUT / "d"), LD_FRAME_DUMP_EVERY="150")
+           LD_FRAME_DUMP=str(OUT / "d"), LD_FRAME_DUMP_EVERY="60")
 f = open(log, "wb")
 p = subprocess.Popen([BIN, ELF], cwd=ROOT, env=env, stdout=f, stderr=subprocess.STDOUT,
                      start_new_session=True)
@@ -100,31 +100,6 @@ while True:
 while time.time() - t_save < SKIP:
     setp("CROSS"); time.sleep(0.25); setp(""); time.sleep(1.75)
 
-# -- 2. full throttle until the race is over -----------------------------------
-setp("R2=255")
-hist = []                          # (time, frames dumped so far)
-last_h, last_h_t = havok_runs(), time.time()
-while True:
-    if p.poll() is not None: stop(); fail(f"the game exited during the race ({log})")
-    el = time.time() - t_save
-    if saves() >= 2: break
-    if el > LIMIT: stop(); fail(f"the race did not end within {LIMIT:.0f} s ({log})")
-    h = havok_runs()
-    if h != last_h: last_h, last_h_t = h, time.time()
-    elif h > 0 and time.time() - last_h_t > 120:
-        stop(); fail(f"the physics stopped (no Havok task for 120 s) at {el:.0f} s ({log})")
-    fr = frames()
-    hist.append((time.time(), len(fr)))
-    time.sleep(2)
-t_end = time.time()
-time.sleep(10)                    # let the result screen settle
-fr = frames()
-alive = p.poll() is None
-stop()
-# The in-race picture: the frame dumped about three minutes before the end.
-n_then = [n for t, n in hist if t <= t_end - 180]
-inrace = fr[n_then[-1] - 1] if n_then and n_then[-1] > 0 else None
-
 def read_ppm(p):
     d = Path(p).read_bytes(); i, fl = 0, []
     while len(fl) < 4:
@@ -140,6 +115,94 @@ def write_png(dst, src):
     ch = lambda t, b: struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b))
     dst.write_bytes(b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
                     + ch(b"IDAT", zlib.compress(rows, 6)) + ch(b"IEND", b""))
+
+# -- 2. full throttle until the race is over -----------------------------------
+# The Prologue stops for button prompts: a glyph in a dark ring at the top
+# centre of the screen (CROSS, then TRIANGLE). The game waits there, physics
+# paused, until the button is pressed. Each frame dump is checked for one, by
+# the ring and the glyph's colour inside it.
+GLYPHS = (("TRIANGLE", lambda r, g, b: r < 40 and g > 140 and b > 140 and abs(g - b) < 40),  # ~(5,165,180)
+          ("CROSS",    lambda r, g, b: 40 < r < 110 and b > 160 and b - g > 40),              # ~(70,135,200)
+          ("CIRCLE",   lambda r, g, b: r > 150 and g < 90 and b < 90),
+          ("SQUARE",   lambda r, g, b: r > 170 and g < 120 and b > 140))
+def prompt(path, cx=640, cy=170):
+    """The glyph in the prompt ring (dark annulus r 44..54 px around (640,170)
+    at 1280x720, glyph inside r 36), or None."""
+    try: w, h, px = read_ppm(path)
+    except Exception: return None
+    if (w, h) != (1280, 720): return None
+    ann = dark = 0; cnt = [0] * len(GLYPHS)
+    for y in range(cy - 56, cy + 56, 2):
+        for x in range(cx - 56, cx + 56, 2):
+            d2 = (x - cx) ** 2 + (y - cy) ** 2
+            o = (y * w + x) * 3; r, g, b = px[o], px[o + 1], px[o + 2]
+            if 44 * 44 < d2 < 54 * 54:
+                ann += 1; dark += r < 50 and g < 50 and b < 50
+            elif d2 < 36 * 36:
+                for i, (_, f) in enumerate(GLYPHS):
+                    if f(r, g, b): cnt[i] += 1
+    i = max(range(len(GLYPHS)), key=lambda k: cnt[k])
+    return GLYPHS[i][0] if dark > 0.7 * ann and cnt[i] > 100 else None
+# The race ends on a "CONTINUE" screen (white text, bottom right) that waits
+# for CROSS; the progress autosave follows it. Seen by the text itself, or,
+# when it cannot be (a bright frame), by the HUD's boost gauge (green, bottom
+# right) having been gone for 20 dumps in a row: in-race cutscenes hide it
+# for about 8.
+def box(px, w, x0, x1, y0, y1, f, step=2):
+    return sum(1 for y in range(y0, y1, step) for x in range(x0, x1, step)
+               if f(px[(y * w + x) * 3], px[(y * w + x) * 3 + 1], px[(y * w + x) * 3 + 2]))
+def screen(path):
+    try: w, h, px = read_ppm(path)
+    except Exception: return None, False
+    if (w, h) != (1280, 720): return None, False
+    white = lambda r, g, b: r > 200 and g > 200 and b > 200
+    cont = (box(px, w, 1075, 1172, 640, 665, white) > 20 and
+            box(px, w, 1075, 1172, 640, 665, lambda r, g, b: r < 40 and g < 40 and b < 40) > 100 and
+            box(px, w, 1040, 1210, 560, 632, lambda r, g, b: max(r, g, b) > 60, 3) == 0)
+    gauge = box(px, w, 1080, 1160, 560, 640, lambda r, g, b: r < 120 and g > 150 and b < 90) > 10
+    return ("CONTINUE" if cont else None), gauge
+setp("R2=255")
+hist = []                          # (time, frames dumped so far)
+prompts = []                       # (seconds after the first save, button)
+hud_seen, no_hud = False, 0
+last_h, last_h_t = havok_runs(), time.time()
+checked = None
+while True:
+    if p.poll() is not None: stop(); fail(f"the game exited during the race ({log})")
+    el = time.time() - t_save
+    if saves() >= 2: break
+    if el > LIMIT: stop(); fail(f"the race did not end within {LIMIT:.0f} s ({log})")
+    fr = frames()
+    hist.append((time.time(), len(fr)))
+    if fr and fr[-1] != checked:
+        checked = fr[-1]
+        b = prompt(fr[-1])
+        cont, gauge = screen(fr[-1])
+        if gauge: hud_seen, no_hud = True, 0
+        elif hud_seen: no_hud += 1
+        if not b and (cont or (hud_seen and no_hud >= 20 and no_hud % 5 == 0)):
+            b = "CROSS"
+            print(f"{'CONTINUE' if cont else 'no HUD for %d dumps' % no_hud}: CROSS at {el:.0f} s "
+                  f"({Path(fr[-1]).name})", flush=True)
+        if b:
+            prompts.append((round(el), b))
+            print(f"prompt {b} at {el:.0f} s ({Path(fr[-1]).name})", flush=True)
+            setp("R2=255 " + b); time.sleep(0.3); setp("R2=255")
+            last_h_t = time.time()     # physics is paused while a prompt waits
+    h = havok_runs()
+    if h != last_h: last_h, last_h_t = h, time.time()
+    elif h > 0 and time.time() - last_h_t > 120:
+        stop(); fail(f"the physics stopped (no Havok task for 120 s) at {el:.0f} s ({log})")
+    time.sleep(2)
+t_end = time.time()
+time.sleep(10)                    # let the result screen settle
+fr = frames()
+alive = p.poll() is None
+stop()
+# The in-race picture: the frame dumped about three minutes before the end.
+n_then = [n for t, n in hist if t <= t_end - 180]
+inrace = fr[n_then[-1] - 1] if n_then and n_then[-1] > 0 else None
+
 if fr: write_png(RUNS / "first_race.png", fr[-1])
 if inrace: write_png(RUNS / "first_race_inrace.png", inrace)
 
@@ -147,5 +210,5 @@ u = sorted(tail.poll().nids)
 if u: fail(f"unresolved NIDs {u}")
 if not alive: fail(f"the game exited on the result screen ({log})")
 print(f"PASS: race finished {t_end - t_save:.0f} s after the first save "
-      f"({havok_runs()} Havok task runs) -> {RUNS / 'first_race.png'}")
+      f"({havok_runs()} Havok task runs, prompts {prompts}) -> {RUNS / 'first_race.png'}")
 EOF

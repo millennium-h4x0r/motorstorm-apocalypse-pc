@@ -248,9 +248,9 @@ the inFAMOUS port does, and `SPU_LIFT_EXTRA` adds more arguments.
   30 to 37, by ELF fingerprint and by `.text` fingerprint. Each code segment
   is registered as a region at its link LS address (13 regions; with the 49
   signatures that is 62 of the runtime's 128 overlay slots).
-- **DSP plugins.** Found and checked only. Set `MS_DSP_LSAS` in the script to
-  lift each at given LS addresses, as images 260 and up with
-  `spu_overlay_register_region_at`.
+- **DSP plugins.** `MS_DSP_LIFTS` in the script names the plugins to lift
+  and the LS address each runs at (images 260 and up, registered with
+  `spu_overlay_register_region_at`); the rest stay on the interpreter.
 - `NATIVE_ENTRIES` is empty.
 
 **Compile check.** Each of the 58 lifted TUs and the 3 registration TUs was
@@ -376,13 +376,17 @@ multistream_mp3 1201/728.
   `cellSpursCreateTask2` has to reach `spu_task_dispatch` with the ELF, as
   `cellSpursCreateTask` does, or the lifted Havok tasks never run.
 - **MultiStream DSP plugins.** They are position-independent and loaded at an
-  LS address the MultiStream core picks at run time. A lift has absolute
-  branch targets, so the toolkit cannot dispatch one without knowing that
-  address. Until `MS_DSP_LSAS` is filled in from a run (`SPU_MISS_LOG=1` or
-  `SPU_DUMP_OVL=<dir>,<lsa>`), they run on the interpreter inside the lifted
-  MultiStream task. If the core uses more than one slot, each plugin needs a
-  lift per slot. libmstream itself is statically linked PPU code with no HLE,
-  so it runs lifted.
+  LS address the MultiStream core picks at run time from its own heap, so a
+  lift (absolute branch targets) is only valid at one address. In practice
+  every run loads the same three at the same places: i3dl2 at LS 0x37000,
+  multi_compressor_TD at 0x37480, filter at 0x39800 (found by matching the
+  words the `[spu] img=37 branched into unlifted LS` lines print against the
+  plugins' .text; 42 logs agree). Those three are lifted there
+  (`MS_DSP_LIFTS`); the runtime makes a lift resident when a GET puts its
+  bytes at its address and evicts it when a GET overwrites them (the core
+  rewrites the first 48 bytes at 0x37000, so i3dl2 is evicted often and runs
+  partly interpreted). libmstream itself is statically linked PPU code with
+  no HLE, so it runs lifted.
 - **Job-code buffer at LS 0x4000?** `lift_jobmods.py` lifts every module at
   0x4000, inFAMOUS's buffer. The PM's data layout matches, but the base it
   stores at LS[0x1320] for this game is unconfirmed. The runtime logs
@@ -922,25 +926,41 @@ copy, so `MS_DSP_LSAS` cannot name them.
   result the SPU then reads from its inbound mailbox, so the task blocked in
   `rdch SPU_RdInMbox` for good (the race, and later the whole game, froze a
   few seconds after GO). It now answers CELL_ENOTCONN, as lv2 does.
-- **Taskset2 slot states.** SPU libspurs keeps a state in byte 15 of each
-  `task_exit_code[id]` record (Taskset2 +0x1980 + 16*id): low nibble 1 =
-  free (joined), 2 = exited, plus 0x10 once created. Its cellSpursCreateTask
-  halts (`heqi`, hkp_integrate LS 0x126D8, hkp_collide LS 0x194C0) unless the
-  slot it claims holds 0x01 or 0x12, and its TryJoin reads the state. We
-  zeroed the records, so creates into recycled slots halted (`[spu] HALT-ASSERT
-  heqi`, ~100 per race start) and the step lost its jobs. CreateTaskset2 now
-  marks every slot free; a PPU create into a Taskset2 (CreateTask2, and plain
-  CreateTask, which Havok also uses) marks it created (0x11) before the task
-  can run; a task's exit marks it exited (state 2, under the line's stripe
-  with a notify, before the enabled bit is cleared); a PPU join frees it.
-  This cut the halts from ~80 to a handful per race start, but some remain:
-  `SPU_HALT_LSDUMP=80,100` shows the checked exit-code line at the halt with
-  the claimed slot apparently in state 0x11. SPU libspurs' TryJoin writes
-  state 4 into a slot it joins (hkp_integrate LS 0x128C0..0x12978), which the
-  create refuses too; turning 4 into 1 on commit made the halts more
-  frequent, and so did claiming the PPU's slot by an atomic test-and-set of
-  the enabled bit before writing the record; both were taken out. The state
-  machine is not fully understood yet -- see "Next blocker".
+- **Taskset2 task ids and slot states** (the "physics stopped after GO"
+  blocker: SPU create halts, bogus-EA DMAs, then a step that never ends).
+  Read from SPU libspurs in hkp_integrate (create LS 0x11F28, TryJoin
+  LS 0x127E8; hkp_collide has the same code): the SPU create claims the first
+  *clear* `enabled` bit with GETLLAR/PUTLLC on the header line (++u8 +0x71),
+  writes TaskInfo, sets pending_ready, and only then GETLLARs
+  task_exit_code[id] (Taskset2 +0x1980 + 16*id) and halts (`heqi`, LS 0x126D8)
+  unless byte 15 is 0x01 or 0x12; it ORs in 0x10. TryJoin: byte 14 != 0 ->
+  ESRCH; low nibble 2 -> exit code = word +8, byte 15 = 0x04, OK; 0x11 ->
+  EAGAIN; nibble 3 -> 0x04 and 0x80410920; else ESRCH; on OK it clears the
+  id's enabled/running/signalled bits and --u8 +0x71. So an id is owned from
+  create to *join*: `enabled` stays set while the task is exited-but-unjoined.
+  States: 0x01 free, 0x11 live, 0x12 exited, 0x04 joined-by-SPU.
+  The HLE broke this three ways, and each produced the symptoms:
+  1. our task exit cleared `enabled`, so creates reused unjoined ids, and a
+     later join of the old task freed the new one's id (two tasks per id);
+  2. the PPU create's free-id search was a plain scan, racing the SPU's
+     PUTLLC claim: both took the same id, and the SPU then found the 0x11 the
+     PPU had written and halted;
+  3. the SPU create lets the new task start (pending bit) before it marks
+     the record, and a 0.5 ms collide task could exit first: 0x01 -> 0x02,
+     which the creator's check halts on.
+  Now (libs/spurs/spurs_taskset.h "Task id ownership..."): ids are claimed and
+  freed by one locked update of the header line (`spurs_taskset_claim_id`,
+  `spurs_taskset_free_id`, with the lock-line notify); a Taskset2 exit writes
+  0x12 and keeps the id; PPU Join/TryJoinTask2 work on the record state
+  (0x12 -> 0x01, then free the id), so they also reap the tasks the SPUs
+  created; an SPU TryJoin's 0x04 is turned into 0x01 in the commit hook
+  (`spu_taskset_line_committed`), before the joiner frees the id. The
+  record helpers write guest memory raw: `vm_write32` takes the lock-line
+  stripe itself, and called under it deadlocked the first try (the whole
+  physics stopped on the first exit). The name buffer pointer is +0x18A8,
+  where the SPU side looks for it. No halt and no rejected DMA in any run
+  since. Test: `libs/spurs/tests/test_spurs_taskset2.c` (also races
+  simulated SPU creates against PPU creates/joins on 4 threads).
 - **Every task ran on "SPU 0".** The SpursTasksetContext the runtime builds
   for a task said spuNum 0 for all of them, and SPURS code indexes per-SPU
   areas by it, so concurrent tasks shared one. After a few thousand raycast
@@ -967,53 +987,193 @@ decoder landed), title, SET SCREEN SIZE, Choose A Control Method (the
 default accelerates on R2), the first autosave, r01_60.avi, "LOADING" (the
 Havok chain above), the intro cutscene with the opening credits drawn over
 it, 3-2-1-GO, and the race with its HUD (the boost/heat gauge, bottom right).
-On this machine, shared with other runs, that is about 25-35 minutes of wall
-time from boot to GO.
+On this machine, shared with other runs, that was 25-35 minutes of wall
+time from boot to GO; it is about 8 minutes now (see Speed below).
 
-Rendering: the G-buffer and lit passes draw (PS3RECOMP_ENG_DUMP_SURFACES shows
-the bridge, the docks and the ship in the 1280x1080 targets), the UI draws
-(credits, countdown, HUD), but the presented frame has a black 3D scene. The
-composite of the scene into the display buffer (0x003B0000 / 0x00734000) has
-not been found: the pipelines drawing into it sample only UI textures and the
-movie planes, no SPU reads VRAM, and no NV3089/NV0039 copy happens.
+Rendering: the 3D scene is on screen under the credits and the HUD since the
+fixes in "Race rendering" below (it was black: the composite is two NV3089
+copies, which the draw engine did not see).
 
-Speed: about 30 fps on the menus, 4-9 fps once the world draws. The main
-thread waits in Havok's step-completion loops (fn 0x8BC4B8, 0x8BDA0C,
-0x8BE498, usleep(1) polls on the job queue): the Havok tasks are slow
-(collide median 30 ms, p90 200 ms per run) and busy-wait on lock lines
-(GETLLAR spins, e.g. hkp_collide LS 0x18AAC). The MultiStream task runs its
-DSP plugins on the interpreter at 100% of one core. RSS grows to ~11 GB
-over 30 minutes (not investigated).
+Speed: the intro and race ran at 2-9 fps because the Havok tasks waited
+for a CPU, not because they had much to do. Each run's thread CPU time
+beside its wall time (the RETURNED line now prints both) said collide
+153 ms wall / 16 ms CPU, integrate 56 / 6; `/proc/<pid>/task/<tid>/schedstat`
+put the rest in the run queue (a collide thread: 28 ms run, 180 ms
+waiting). The cause was `PS3_HOT_PIN=1`, inherited from inFAMOUS 2: it pins
+the main PPU thread, rsx, rsx-record and the SPURS kernel SPUs to cores of
+their own and confines every other thread -- here the short-lived SPURS
+task threads Havok runs on, and the PPU threads polling for them -- to the
+remaining CPUs, which the rest of a busy host shares too. With the pin off
+(work/port/main.cpp now defaults it to 0), in the same LOADING phase:
+
+| | collide (33) | integrate (35) | collision query (34) | frames |
+|---|---|---|---|---|
+| pin on  | 69-153 ms wall, 14-16 ms CPU | 29-56 / 6 | 7-36 / 2-3 | 2-9 fps |
+| pin off | 2.3 / 1.8 | 1.8 / 1.4 | 1.3 / 0.9 | ~20 fps in the race, 30 in the load |
+
+(A/B on one binary: pin on + yielding polls was as slow as before; pin off
+with the usual PAUSE spin as fast as pin off with yielding, so
+`PS3_USLEEP_YIELD=1`, a sched_yield spin in sys_timer_usleep, stays an
+option, off.) Boot to GO is now about 8 minutes, most of it the movies.
+
+Smaller items done at the same time: the task fingerprint (FNV over a
+150 KB ELF, twice per task start) is memoised by (pointer, size)
+(`spu_task_fingerprint`); three MultiStream DSP plugins are lifted (see
+"Open questions" above) -- before, the interpreter running them was about
+45% of the process's samples; collision_query's second-segment table
+targets (0x3ACB8..0x3AF70) and MultiStream's 0x21D20 are lifted entries now.
+RSS grows to ~11 GB over 30 minutes (not investigated).
+
+### How the Prologue race ends (and what stopped it after GO)
+
+Seen in frame dumps with the UI drawn (runs of 2026-11-04): GO; about six
+minutes after the first save the game stops for a button prompt, CROSS,
+then shortly after TRIANGLE (a glyph in a dark ring at the top centre; the
+physics is paused until it is pressed -- a run with the fixes above but
+only R2 held "stopped" here: no Havok task for 120 s); then the race,
+with two or three short in-race cutscenes that hide the HUD; then
+"Trophy NN 1/3 33%" progress pop-ups, the HUD goes, and an end screen
+(the title logo over the scene; with the old renderer just black) with
+"(X) CONTINUE" bottom right waits for CROSS. CROSS there is followed at once by
+the progress autosave (three `SAVE complete` lines). Boot to that save:
+about 20 minutes, the race itself about 10.
+
+The earlier "every Havok task has exited and the main thread waits in fn
+0x8C20D8 on the semaphore at 0x436F90A0" stalls came with the Taskset2 halts
+and bogus-EA DMAs (fixed above); none of those has been seen since, in six
+race runs (three to the end).
 
 ### Next blocker
 
-The race does not reach its end yet. A few seconds to a minute after GO the
-physics step stops: every Havok task has exited and the main thread waits in
-fn 0x8C20D8 (from fn 0x7820C0) on a lock-line semaphore (16-byte object at
-0x436F90A0, port 0x20, one waiter, count 0) that a raycast/collide task should
-have released. What comes before it differs between runs:
-
-- SPU-side cellSpursCreateTask halts (`[spu] HALT-ASSERT heqi pc=0x126D8
-  img=35`, `pc=0x194C0 img=33`) -- the Taskset2 slot state above;
-- a raycast or collide task DMAs to/from a bogus EA (`[mfc] REJECTED
-  malformed transfer: img=36 ... ea=0xFFFFFFFF`, `img=33 ... ea=0x00000000`),
-  i.e. a job pointer it read was never written.
-
-Both point at the HLE's model of the Havok taskset (who owns a slot when,
-what an exited/joined task leaves behind, how many run at once) rather than
-at the lifted code. The next step is to trace one slot through
-create/exit/join with `SPU_ATOM_EA=<taskset+0x1980>` and compare against the
-SPU libspurs create/TryJoin code (hkp_integrate LS 0x11F28 and 0x127E8).
+Milestone 4's race runs end to end; what is left on this path is the
+picture (libs/video, worked on separately: the 3D scene was black, then
+blown-out white while that work was in progress, and is starting to show).
+first_race.sh does not depend on it: when a frame is too bright to read
+CONTINUE, it presses CROSS once the HUD has been gone for 20 dumps.
+Also open: RSS growth, the MultiStream task spinning in its lifted code
+through indirect-branch dispatch (~25% of one core in spu_lookup /
+spu_drain_call from its LS 0x65B0), and the i3dl2 lift being evicted by the
+core's 48-byte writes at its base.
 
 ### first_race.sh
 
 `work/tests/first_race.sh` (run_all.sh runs it only with `SLOW=1`): one first
 boot on a fresh save root, CROSS every 2 s until the first `[cellSaveData]
-SAVE complete`, CROSS for another 60 s (the movie), then `R2=255` held. PASS
-when the game autosaves a second time (it does after the event), with the
-physics still running and no unresolved NID; it saves the last frame as
-`work/runs/first_race.png` and one from three minutes before the end as
-`work/runs/first_race_inrace.png`. It fails after `LIMIT_S` (3600 s) or as
-soon as no Havok task has returned for 120 s (the stall above). That the
-second autosave marks the end of the race is an assumption: no run has got
-that far yet.
+SAVE complete`, CROSS for another 60 s (the movie), then `R2=255` held.
+The Prologue stops twice early in the race for a button prompt -- a glyph in
+a dark ring at the top centre, CROSS (~6 min after the save) then TRIANGLE
+-- and waits there with the physics paused until it is pressed; the
+controller looks for one in each frame dump (every 60 frames; the glyph's
+colour inside the ring) and taps that button. The race ends on CONTINUE,
+which it answers with CROSS (seen by the text, or by the HUD gauge being
+gone for 20 dumps). PASS when the game autosaves a second time,
+with the physics still running and no unresolved NID; it saves the last
+frame as `work/runs/first_race.png` and one from three minutes before the
+end as `work/runs/first_race_inrace.png`. It fails after `LIMIT_S` (3600 s)
+or when no Havok task has returned for 120 s outside a prompt. `OUT=<dir>`
+moves its run directory (default `work/runs/first_race`).
+
+## Race rendering
+
+The race intro (the opening credits over a fly-by, from ~1-10 minutes after
+boot depending on the load) draws the whole 3D frame, so it is the place to
+look; GO is not needed. `work/tests/race_intro.sh` gets there on a fresh save
+and checks the presented frame (SLOW=1 in run_all.sh).
+
+### The frame
+
+One world frame, mapped with `PS3RECOMP_ENG_DRAWTRACE` (below): shadow map
+0x0C250000 (1024x3072) -> depth/G-buffer 0x00AC0000, 0x01AB0000 (1280x1080
+targets, the scene in their top-left corner at a dynamic resolution: 1240x776,
+1208x664, 1116x612 ... seen) -> lighting into FP16 0x02000000 -> composite
+into 0x01010000 / 0x01560000 (MRT) -> DOF, motion blur, luminance chain
+(FP16 0x04130000 320x180 down to 0x003AEB00 10x5) -> bloom (bright pass and
+flares into FP16 0x041A0800, blurs 0x0422D200 / 0x04211000) -> tonemap into
+0x02AA0000 -> **NV3089** copy to main memory (IO 0x600000, EA 0x41100000) ->
+the SPUs' EDGE MLAA in place -> **NV3089** copy into the display buffer
+(0x003B0000 / 0x00734000) -> credits/HUD drawn over it -> flip. No draw ever
+samples the tonemapped image; earlier notes missed the copies because
+`[NV3089]` lines only print with `NV3089_DBG`, on stdout.
+
+### What was wrong
+
+1. **NV3089 copies into a colour target never reached it**
+   (`rsx_draw_engine_guest_wrote`, new; cellGcmSys.c `nv3089_blit`). The copy
+   writes guest bytes; the engine's display-buffer target is a GPU image that
+   only draws change, so the HUD went over black. After a copy the newest
+   linear 32-bit target over the destination takes those rows
+   (backend `color_target_upload`, Vulkan: a buffer-to-image copy).
+2. **The write-back before the copy read the zeta.** The tonemap pass points
+   its zeta at its own colour target (0x02AA0000, depth off); the zeta, bound
+   later, won the "newest target" test and its cleared 1.0 (0xFFFFFF) went
+   into the guest bytes -- a white frame. Zetas now compete by their last
+   depth/stencil write or clear (`wstamp`), not by their last bind.
+3. **2D-engine methods landed in the 3D register file.** The engine strips
+   the subchannel, so NV3089 (subchannel 6/7) and NV3062 (2/3) state at
+   0x0300..0x040C overwrote NV4097's alpha test, blend enable/factors, ...
+   (an NV3089 SET_OUT_SIZE became the blend source factor). libgcm does not
+   resend state it thinks unchanged. Only subchannels 0, 1 (unless
+   GCM_SUBCH1_2D) and the driver methods >= 0xE900 feed the engine now.
+4. **A geometry-cache entry without geometry was a hit.** `eng_geo_drop_data`
+   (a dirty streak) keeps the key with no ranges and no vertices;
+   `eng_geo_valid` found zero ranges clean, and after the 64-frame skip the
+   draw "hit" with 0 vertices and was dropped as `fetch` -- every frame. The
+   bloom bright pass (a quad the game rewrites at local 0 each frame) never
+   drew, the flares accumulated in 0x041A0800 (values in the hundreds) and
+   the frame went white. A hit now needs vertices.
+5. **Half registers alias the full ones** (rsx_fp_decompiler.c,
+   `rsx_fp_alias_pairs` / `rsx_fp_alias_sync`). H(2n) / H(2n+1) are the fp16
+   halves of R(n) (R(n).x = H(2n).x low, H(2n).y high). The decompiler kept
+   r[] and h[] apart; the velocity pass writes H0.xy and stores R0 through
+   UP4UB, so the motion-blur buffer held garbage and the frame smeared into
+   vertical streaks. Registers a program uses both ways are now synced after
+   every write (no change for programs that use one file). Test:
+   libs/video/tests/test_fp_decompiler.c `alias_*`.
+6. **Y16_X16_FLOAT over an A8R8G8B8 target** (the velocity buffer
+   0x01AB0000): the host keeps the target as unorm bytes; such a unit now gets
+   `RSX_FP_TEXOP_RAW8_HALF2` and an identity view, and the program rebuilds
+   the two big-endian halves (first = A:R, second = G:B) from the bytes.
+7. **A texture smaller than the target at its address** is the target's
+   top-left corner (the dynamic-resolution frame in a 1280x1080 target,
+   sampled as 1116x612): it is bound as a copy of that rectangle
+   (backend `color_snapshot_rect`), not as the whole target stretched over
+   [0,1]. Re-copied only when the target was drawn since (its stamp).
+8. **Alpha reference for float targets** (`rsx_fp_alpha_ref`): tested the
+   surface formats 14..16 (X8B8G8R8/A8B8G8R8) instead of 0x0B..0x0D
+   (FP16/FP32/X32), so an FP16 target's half reference was read as a byte
+   (RPCS3 rsx_decode alpha_ref is the reference for the rule).
+
+FP16 (rsx_be_format 10) and FP32 RGBA (12) colour targets both work on this
+device (the 128x1 FP32 targets in main memory included); the race log has no
+"not supported" lines left. The one Vulkan error, `vkAllocateMemory(buffer)
+failed (-2)`, is the optional 512 MB resident-geometry buffer and falls back.
+
+Left: a thin stale band at the left/right edge of the frame (the screen-size
+margin of 0x02AA0000, which no pass writes); HDR brightness not compared with
+a reference.
+
+### Tools
+
+- `PS3RECOMP_ENG_DRAWTRACE=<world frame>,<dir>[,fs|,vp|,<first>,<last>]` with
+  `PS3RECOMP_ENG_DRAWTRACE_AT=<file>`: a script creates <file> and the next
+  world frame is traced. Per draw now also: viewport/scissor/window, blend,
+  alpha, cull, depth state, the first vertices and vertex-constant rows of
+  small draws, every clear, every dropped draw and why (`dropped before dN`),
+  and float targets' unclamped mean/max. `,vp` logs the state of every draw
+  without the per-draw readbacks (seconds, not minutes).
+- `PS3RECOMP_ENG_DUMP_SURFACES` / `_PROBE` / the trace read float targets back
+  correctly (they wrote 8- and 16-byte pixels into 4-byte buffers) and name
+  them `_fp16` / `_fp32`.
+- `PS3RECOMP_VK_SKIPLOG=<n>`: the first n draws the Vulkan backend drops, and
+  why.
+- `NV3089_GATE=<file>`: every blit while <file> exists (stdout; run the game
+  under `stdbuf -oL` to see them in time).
+
+### race_intro.sh
+
+`work/tests/race_intro.sh`: fresh save root, CROSS every 2 s until the first
+save and for 60 s more, then waits for 200 world frames
+(`PS3RECOMP_ENG_WORLDLOG`) and checks the frames dumped after that: PASS when
+one has a central-60% luma mean in [12, 235] with a standard deviation of at
+least 12 (the black screen and the white one both fail). Saves
+`work/runs/race_intro.png`. 3-15 minutes, mostly the race load.

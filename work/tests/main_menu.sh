@@ -135,17 +135,21 @@ g = Game("second_boot", save)
 closes = lambda: len(re.findall(r"^\[cellVdec\] Close", g.text(), re.M))
 g.until(lambda: closes() >= 2, 180, tap="CROSS", what="end of the intro movies")
 
-def red_mean(p, x0, x1, y0, y1):
-    """Mean red over a box given at 1280x720 (title logo / menu panel tests)."""
+def red_mean(p, x0, x1, y0, y1, minus_blue=False):
+    """Mean red (or red minus blue) over a box given at 1280x720 (title logo /
+    menu panel tests)."""
     w, h, px = read_ppm(p)
     x0, x1, y0, y1 = w * x0 // 1280, w * x1 // 1280, h * y0 // 720, h * y1 // 720
     s = n = 0
     for y in range(y0, y1, 2):
         for x in range(x0, x1, 2):
-            s += px[(y * w + x) * 3]; n += 1
+            o = (y * w + x) * 3
+            s += px[o] - (px[o + 2] if minus_blue else 0); n += 1
     return s / max(n, 1)
-# "APOC" of the title logo: about 90 on the title, 0 on the menu.
-is_title = lambda f: red_mean(f, 300, 700, 130, 270) > 30
+# "APOC" of the title logo, red minus blue: about 50 on the title, 0 on the
+# menu -- whose 3D background, now that it draws, is bright but grey/white
+# (plain red read ~210 there and the menu passed for the title).
+is_title = lambda f: red_mean(f, 300, 700, 130, 270, minus_blue=True) > 25
 # the menu's right-hand panel (sunburst picture), with no title logo.
 is_menu = lambda f: not is_title(f) and red_mean(f, 770, 1160, 120, 490) > 10
 

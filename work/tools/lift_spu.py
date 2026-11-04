@@ -32,7 +32,7 @@ port's runtime (ps3recomp's cellSpurs HLE, runtime/spu) dispatches each kind:
     linked at 0x80). The MultiStream core loads them into its own local store
     at an address it picks at run time, so a lift (whose branch targets are
     absolute) has nowhere to be registered. They are found and checked, not
-    lifted, unless MS_DSP_LSAS names the LS address(es) they run at.
+    lifted only where MS_DSP_LIFTS names the LS address they run at.
 
 Not present, and checked for: SPURS job chains (no cellSpursCreateJobChain
 import), raw SPU / SPU thread groups (no sys_spu_thread_group_create or
@@ -68,14 +68,25 @@ PM_LSA = 0xA00
 PM_IMAGE_ID = 2             # runtime/spu: the WWS handling is keyed to image 2
 TASK_IMAGE_BASE = 30        # clear of ids the runtime special-cases (1,2,3,6,22,23)
 JOBMOD_IMAGE_BASE = 200     # fixed by tools/lift_jobmods.py
-DSP_IMAGE_BASE = 260        # only used when MS_DSP_LSAS is set
+DSP_IMAGE_BASE = 260        # the MS_DSP_LIFTS images
 TASK_LS_BASE = 0x3000       # SPURS taskset tasks are linked here
 DSP_LINK_BASE = 0x80        # the MultiStream .pic plugins
 
-# The LS address(es) the MultiStream core loads its DSP plugins at. Not known
-# statically (see docs/NOTES.md); fill in from a run (SPU_MISS_LOG=1 or
-# SPU_DUMP_OVL) to have every plugin lifted and registered there.
-MS_DSP_LSAS = []
+# Where the MultiStream core puts its DSP plugins. It picks the LS address at
+# run time (from its own heap), so nothing static says; but every run so far
+# (42 logs, menus and the Prologue) loaded the same three at the same places,
+# found from the "[spu] img=37 branched into unlifted LS" lines by matching
+# the words logged there against the plugins' .text. Per plugin: the LS
+# address its code segment's link address lands at, and the entries the core
+# calls (function-table targets; LS addresses). A lift is valid only while its
+# own bytes are at that address: the runtime makes it resident when a GET puts
+# them there and evicts it when a GET overwrites them (i3dl2's span overlaps
+# the other two), and anything else stays on the interpreter.
+MS_DSP_LIFTS = {
+    "msdsp_i3dl2":                (0x37000, [0x37010, 0x37018, 0x37C20]),
+    "msdsp_multi_compressor_td":  (0x37480, [0x37490, 0x38230]),
+    "msdsp_filter":               (0x39800, [0x39810, 0x39B48]),
+}
 
 # Every image is lifted with its registers in locals (--local-regs), each run of
 # contiguous chunks as one C function (--merge-chunks) and `bi` on a register
@@ -100,7 +111,10 @@ TASK_EXTRA_ENTRIES = {
         0x0C628, 0x0C630, 0x0C6C0, 0x0C720, 0x0C798, 0x0C7A0, 0x0C7F8, 0x0C8A8, 0x0C918,
         0x0C9D8, 0x0CA48, 0x0CBA8, 0x0CD08, 0x0CE08, 0x0CE78, 0x0CF70, 0x0D018, 0x0D030,
         0x0D0E0, 0x0D480, 0x0D6E0, 0x0D7C8, 0x0D8B0, 0x0DA88, 0x0DCA0, 0x0DD38, 0x0DF60,
-        0x105A0, 0x105F8, 0x10668, 0x10838, 0x111F8],
+        0x105A0, 0x105F8, 0x10668, 0x10838, 0x111F8,
+        # second code segment (LS 0x38F00): targets of a table called from 0x3AB40
+        0x3ACB8, 0x3ADA0, 0x3ADC0, 0x3ADF0, 0x3AE80, 0x3AEB0, 0x3AF40, 0x3AF70],
+    "task_multistream_mp3_012BC500": [0x21D20],
 }
 
 # Lifted functions a native replacement may take over (keyed by lifted
@@ -656,18 +670,21 @@ def main():
                              entry=t["entry"], fp=f"{t['fp']:016X}",
                              text_fp=f"{fnv1a64(t['bytes'][code['off']:code['off'] + code['filesz']]):016X}",
                              launch="cellMSDSPLoadDSPFromMemory; the MultiStream core loads it into its LS",
-                             lifted_at=[hex(a) for a in MS_DSP_LSAS]))
-        for lsa in MS_DSP_LSAS:
-            name = f"{t['name']}_ls{lsa:05X}"
+                             lifted_at=[hex(MS_DSP_LIFTS[t["name"]][0])] if t["name"] in MS_DSP_LIFTS else []))
+        if t["name"] in MS_DSP_LIFTS:
+            lsa, extra = MS_DSP_LIFTS[t["name"]]
+            name = re.sub(r"[^0-9A-Za-z_]", "_", t["name"]) + f"_ls{lsa:05X}"
             blob = t["bytes"][code["off"]:code["off"] + code["filesz"]]
             entry = lsa + t["entry"] - code["vaddr"]
-            lift_raw(tools, img_dir, spu, name, blob, lsa, entry, [])
+            lift_raw(tools, img_dir, spu, name, blob, lsa, entry, extra)
             dsp_lifted.append((name, text_ea, lsa, len(blob), DSP_IMAGE_BASE + len(dsp_lifted)))
+    if len(dsp_lifted) != len(MS_DSP_LIFTS):
+        die(f"MS_DSP_LIFTS names {len(MS_DSP_LIFTS)} plugin(s), {len(dsp_lifted)} found")
     if DSP_IMAGE_BASE + len(dsp_lifted) > 512:
         die("image ids run past 511 (runtime tables are 512 wide)")
-    if not MS_DSP_LSAS:
+    if not MS_DSP_LIFTS:
         print(f"[lift_spu] {len(dsps)} MultiStream DSP plugin(s) classified, not lifted: "
-              "their LS load address is chosen at run time (set MS_DSP_LSAS)")
+              "their LS load address is chosen at run time (see MS_DSP_LIFTS)")
 
     # 5. Registration of the PM and the DSP plugins (the tasks register from
     #    spu_elf_workloads.c, the job modules from jobmods_register.c).
