@@ -1180,11 +1180,14 @@ the motion blur) and a 256x256 of it into 0x0CE50000.
   copy reads, strips that do not line up, or a draw that samples the buffer
   write the target's bytes into the buffer (`eng_mlaa_materialize`) and go
   back to the guest's way for 8 frames. Only on world frames (>1000 guest
-  draws): with it on in the boot screens about half the boots hung in the
-  MLAA tasks' barrier (the PPU in 0x857EF8 on the completion word, 5 tasks in
-  the barrier wait at LS 0xA910 from 0x32FC, 5 in the signal wait at 0xA508)
-  -- the tasks then run over a stale near-black buffer, and it looks like a
-  signal race in the taskset runtime that their timing exposes; open. The
+  draws): the boot screens gain nothing from it. **Open, not from this
+  change**: boots hang now and then at ~frame 2100-2200 (the loading spinner)
+  in the MLAA tasks' barrier -- the PPU in 0x857EF8 on the completion word,
+  four tasks in the barrier wait (LS 0xA910 from 0x32FC), the fifth still in
+  the signal wait at its start (0xA508 from 0x31AC): its start signal was
+  lost. Seen with native MLAA on and off and with the binary from before it:
+  eight boots side by side at load ~25-40, the old binary hung in 2 of 4, the
+  new one in 2 of 4. The
   acquire is honoured by default: it also keeps the PPU from signalling tasks
   still running, and passing it (mode 2) measured no faster. The skipped rows
   still break SPU reservations on their lines (`gcm_row_touch`).

@@ -724,9 +724,9 @@ int main(int argc, char** argv)
      * only: it is built on mprotect and SIGSEGV. */
     env_default("PS3RECOMP_WTRACK", "1");
 #endif
-    /* GPU stand-ins for SPU post-processing jobs (native_passes.c): none for
-     * MotorStorm yet. Before any SPU runs: a pass may gate lifted SPU
-     * functions. Each pass is switched by its own env var, off by default. */
+    /* GPU stand-ins for SPU post-processing jobs (native_passes.c): EDGE
+     * MLAA (PS3_NATIVE_MLAA, on by default). Before any SPU runs: a pass may
+     * gate lifted SPU functions. */
     port_native_passes_init();
 
 #ifdef _WIN32

@@ -57,6 +57,8 @@ NATIVE_ENTRIES = [
     0x00FF5B40,     # the game's event Set(bool): its reset deadlocks against a late Set
     0x005EE2A4,     # game clock constructor (PS3_SIM_60: remembers the instance, declines)
     0x005EE178,     # game clock step recompute (PS3_SIM_60: real-time, interval 1; declines)
+    0x00675D3C,     # the game's spinlock acquire: futex wait instead of 250 us sleeps
+    0x00675E00,     # its release: wakes the futex waiters
 ]
 
 # Hooks for port/ppu_native.cpp's call-count probes (PS3RECOMP_PPU_PROBE=1):

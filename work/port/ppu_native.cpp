@@ -42,6 +42,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <linux/futex.h>
 #include <atomic>
 #include <utility>
 #include <vector>
@@ -144,10 +148,135 @@ static inline int nat_trylock(ppu_context* c, uint32_t ea)
         if (v != 0) return 0;
     }
 }
+/* The game's spinlock (func_00675D3C / func_00675E00) and its waiters.
+ *
+ * The guest spins 500 reads and then sleeps 250 us, so every contended
+ * acquire costs at least a quarter of a millisecond more than the hold: the
+ * main thread waits on the job-batch events (0xFF5AD8) this way several times
+ * a frame. Here a waiter spins a little, then sleeps on a futex on the lock
+ * word itself, and a native unlock wakes it. The futex wait still times out
+ * at 250 us, so an unlock that is not ours (the word written by other guest
+ * code) is seen no later than before. Waiters are counted per hashed address
+ * so an unlock with nobody waiting makes no system call.
+ *
+ * PS3_LOCK_NATIVE=0: the lifted lock and unlock (and nat_event_set's own
+ * 250 us back-off). PS3_LOCK_SPIN=<n>: spin rounds before sleeping (10). */
+static std::atomic<uint32_t> s_lk_waiters[256];
+static inline std::atomic<uint32_t>& lk_waiters(uint32_t ea)
+{
+    return s_lk_waiters[((ea >> 2) * 0x9E3779B1u) >> 24];
+}
+static int lk_native(void)
+{
+    static int v = -1;
+    if (v < 0) { const char* e = getenv("PS3_LOCK_NATIVE"); v = !(e && e[0] == '0'); }
+    return v;
+}
+static int lk_spin_rounds(void)
+{
+    static int v = -1;
+    if (v < 0) { const char* e = getenv("PS3_LOCK_SPIN"); v = e ? atoi(e) : 10; if (v < 0) v = 0; }
+    return v;
+}
+/* Wait, up to 250 us, for the word at ea to change from nonzero. */
+static void lk_wait(uint32_t ea)
+{
+    uint32_t* hw = (uint32_t*)(vm_base + ea);
+    const int rounds = lk_spin_rounds();
+    for (int k = 0; k < rounds; k++) {
+        for (int j = 0; j < 8; j++) __builtin_ia32_pause();
+        if (__atomic_load_n(hw, __ATOMIC_RELAXED) == 0) return;
+    }
+    std::atomic<uint32_t>& w = lk_waiters(ea);
+    w.fetch_add(1, std::memory_order_seq_cst);
+    const uint32_t raw = __atomic_load_n(hw, __ATOMIC_SEQ_CST);
+    if (raw != 0) {
+        struct timespec ts = {0, 250000};
+        syscall(SYS_futex, hw, FUTEX_WAIT_PRIVATE, raw, &ts, nullptr, 0);
+    }
+    w.fetch_sub(1, std::memory_order_relaxed);
+}
+static inline void lk_wake(uint32_t ea)
+{
+    std::atomic_thread_fence(std::memory_order_seq_cst);   /* the store before the waiter count */
+    if (lk_waiters(ea).load(std::memory_order_relaxed))
+        syscall(SYS_futex, (uint32_t*)(vm_base + ea), FUTEX_WAKE_PRIVATE, INT32_MAX, nullptr, nullptr, 0);
+}
 static inline void nat_unlock(uint32_t ea)
 {
     PPU_FENCE(release);   /* lwsync */
     vm_write32(ea, 0u);
+    lk_wake(ea);
+}
+/* PS3_LOCK_STATS=1: every 10 s, the contended acquires of the game's
+ * spinlock -- count and time waited per (guest thread, caller lr) -- so a wait
+ * can be named without the 250 us poll lines that no longer exist. */
+static uint64_t lk_now_ns(void)
+{
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+static int lk_stats_on(void)
+{
+    static int v = -1;
+    if (v < 0) v = getenv("PS3_LOCK_STATS") ? 1 : 0;
+    return v;
+}
+static void lk_stats_note(const ppu_context* c, uint32_t ea, uint64_t ns)
+{
+    enum { N = 32 };
+    static std::atomic<uint64_t> key[N], cnt[N], tot[N];
+    static std::atomic<uint32_t> lockea[N];
+    const uint64_t k = ((uint64_t)(uint32_t)c->thread_id << 32) | (uint32_t)c->lr;
+    for (unsigned i = (unsigned)(k * 0x9E3779B97F4A7C15ull >> 59), n = 0; n < N; n++, i = (i + 1) % N) {
+        uint64_t cur = key[i].load(std::memory_order_relaxed);
+        if (cur == 0 && key[i].compare_exchange_strong(cur, k)) cur = k;
+        if (cur != k) continue;
+        cnt[i].fetch_add(1, std::memory_order_relaxed);
+        tot[i].fetch_add(ns, std::memory_order_relaxed);
+        lockea[i].store(ea, std::memory_order_relaxed);
+        break;
+    }
+    static std::atomic<uint64_t> next;
+    const uint64_t now = lk_now_ns();
+    uint64_t t = next.load(std::memory_order_relaxed);
+    if (!t) { next.compare_exchange_strong(t, now + 10000000000ull); return; }
+    if (now < t || !next.compare_exchange_strong(t, now + 10000000000ull)) return;
+    char buf[2048]; int p = snprintf(buf, sizeof buf, "[lock-stats] 10 s, contended acquires (tid lr lock: n, ms):");
+    for (unsigned i = 0; i < N; i++) {
+        const uint64_t kk = key[i].load(std::memory_order_relaxed), n = cnt[i].exchange(0);
+        const uint64_t ms = tot[i].exchange(0) / 1000000ull;
+        if (!kk || !n || p > (int)sizeof buf - 64) continue;
+        p += snprintf(buf + p, sizeof buf - p, " %u@%08X(%08X):%llu,%llu", (unsigned)(kk >> 32), (uint32_t)kk,
+                      lockea[i].load(std::memory_order_relaxed), (unsigned long long)n, (unsigned long long)ms);
+    }
+    fprintf(stderr, "%s\n", buf);
+}
+
+/* func_00675D3C(lock r3): lwarx/stwcx. 0 -> 1, or wait. Leaves r3 = 0 (the
+ * word its last lwarx read) and r4 as the guest's spin count would not matter:
+ * both are volatile. */
+static int nat_lock(ppu_context* c)
+{
+    if (!lk_native()) return 0;
+    const uint32_t ea = (uint32_t)c->gpr[3];
+    if (ea < 0x10000u || (ea & 3u)) return 0;
+    if (nat_trylock(c, ea)) { c->gpr[3] = 0; return 1; }
+    const uint64_t t0 = lk_stats_on() ? lk_now_ns() : 0;
+    do lk_wait(ea); while (!nat_trylock(c, ea));
+    if (t0) lk_stats_note(c, ea, lk_now_ns() - t0);
+    c->gpr[3] = 0;
+    return 1;
+}
+/* func_00675E00(lock r3): lwsync, store 0 -- and wake a waiter. */
+static int nat_unlock_fn(ppu_context* c)
+{
+    if (!lk_native()) return 0;
+    const uint32_t ea = (uint32_t)c->gpr[3];
+    if (ea < 0x10000u || (ea & 3u)) return 0;
+    nat_unlock(ea);
+    c->gpr[4] = 0;
+    return 1;
 }
 static void nat_usleep250(ppu_context* c)
 {
@@ -170,13 +299,14 @@ static int nat_event_set(ppu_context* c)
     if (obj < 0x10000u) return 0;
     const uint32_t guard = obj + 8, ev = obj + 12;
     uint32_t tries = 0;
+    const int nl = lk_native();
     for (;;) {
-        while (!nat_trylock(c, guard)) nat_usleep250(c);
+        while (!nat_trylock(c, guard)) { if (nl) lk_wait(guard); else nat_usleep250(c); }
         const int got = nat_trylock(c, ev);
         nat_unlock(guard);
         if (got) break;
         tries++;
-        nat_usleep250(c);
+        if (nl) lk_wait(ev); else nat_usleep250(c);
     }
     if (tries) {
         /* the reset the lifted code would have deadlocked in */
@@ -279,6 +409,9 @@ static int nat_clock_recompute(ppu_context* c) /* 0x5EE178(this r3) */
 static const ppu_native_desc s_funcs[] = {
     /* no compare (lifted = null): the lifted reset is the deadlock */
     { 0x00FF5B40u, "event_set", nat_event_set, nullptr, nullptr, 0u },
+    /* the game's spinlock: futex waits instead of 250 us sleeps */
+    { 0x00675D3Cu, "spin_lock", nat_lock, nullptr, nullptr, 0u },
+    { 0x00675E00u, "spin_unlock", nat_unlock_fn, nullptr, nullptr, 0u },
     /* PS3_SIM_60: both always decline after patching the clock's fields */
     { 0x005EE2A4u, "clock_ctor", nat_clock_ctor, nullptr, nullptr, 0u },
     { 0x005EE178u, "clock_recompute", nat_clock_recompute, nullptr, nullptr, 0u },
