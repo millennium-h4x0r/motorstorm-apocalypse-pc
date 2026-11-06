@@ -1148,9 +1148,91 @@ device (the 128x1 FP32 targets in main memory included); the race log has no
 "not supported" lines left. The one Vulkan error, `vkAllocateMemory(buffer)
 failed (-2)`, is the optional 512 MB resident-geometry buffer and falls back.
 
-Left: a thin stale band at the left/right edge of the frame (the screen-size
-margin of 0x02AA0000, which no pass writes); HDR brightness not compared with
-a reference.
+The stale bands at the left/right edge and the washed-out, blurry picture
+are fixed too (next section).
+
+### The post chain on the GPU (2026-11-06)
+
+The copies around the MLAA, as they come in the race (`NV3089_GATE`, or
+`PS3RECOMP_ENG_NV3089_LOG=<n>` for what the engine is handed): the tonemap
+draws the picture at 20,30 in 0x02AA0000 (up to 1240x1020 at the top of the
+dynamic resolution); two unscaled strips (1004 + 236 wide) copy it to the MLAA
+buffer in main memory (IO 0x60C000); two scaled copies of a 4x4 texel at
+local 0x00382B80 fill the buffer around it; the PPU signals the five MLAA
+tasks; and **early in the next frame**, after the composite and before the
+next tonemap, the RSX waits on label 0x480 and copies the buffer scaled
+(bilinear) into the display buffer at 20,20, 1240x680. Also every frame,
+target to texture: 0x01010000 halved into 0x02FF0000 (pitch 2560, sampled by
+the motion blur) and a 256x256 of it into 0x0CE50000.
+
+- **Native MLAA** (`PS3_NATIVE_MLAA`, default 1; 0 the SPU path; 2 also
+  passes the 0x480 acquire). work/port/native_passes.c describes it to the
+  engine (`rsx_draw_engine_set_native_mlaa`: the source target, the label).
+  The engine leaves the strips and the fills out of guest memory and does the
+  display copy as its own MLAA over the target plus a blit into the display
+  buffer's target (`surface_blit` with `RSX_BE_BLIT_AA`). Our MLAA, three
+  passes in rsx_vulkan_backend.c: luma edges with local contrast adaptation;
+  per edge pixel the run of edges each way (up to 32) and the crossing edges
+  at its ends give the silhouette line, whose coverage over the pixel is
+  computed directly; a blend with the four neighbours.
+  `PS3RECOMP_MLAA_THRESHOLD` (0.1). Safety: a buffer copy goes the guest's way
+  until three in a row were seen read back by a display copy; one no display
+  copy reads, strips that do not line up, or a draw that samples the buffer
+  write the target's bytes into the buffer (`eng_mlaa_materialize`) and go
+  back to the guest's way for 8 frames. Only on world frames (>1000 guest
+  draws): with it on in the boot screens about half the boots hung in the
+  MLAA tasks' barrier (the PPU in 0x857EF8 on the completion word, 5 tasks in
+  the barrier wait at LS 0xA910 from 0x32FC, 5 in the signal wait at 0xA508)
+  -- the tasks then run over a stale near-black buffer, and it looks like a
+  signal race in the taskset runtime that their timing exposes; open. The
+  acquire is honoured by default: it also keeps the PPU from signalling tasks
+  still running, and passing it (mode 2) measured no faster. The skipped rows
+  still break SPU reservations on their lines (`gcm_row_touch`).
+- **Target to target copies** on the GPU (`rsx_draw_engine_nv3089`,
+  `PS3RECOMP_ENG_GPU_BLIT=0` off): an A8R8G8B8 copy whose source is a colour
+  target and whose destination is one in local memory is a blit; a
+  destination no target covers gets one made at the copy's pitch
+  (`eng_blit_new_target`; `PS3RECOMP_ENG_GPU_BLIT=2` keeps those on the CPU),
+  which the texture units then bind. With both, the race has no write-back of
+  a target and no GPU wait left but the present.
+- The CPU copies that remain: a scaled one goes a row at a time (source
+  columns once, gathered on the host, `gcm_row_write`) instead of
+  vm_read32/vm_write32 a pixel; the write-back before an A8R8G8B8 copy covers
+  the rows it reads, not the whole source surface.
+- **ZPASS reports**: the race asks for more than a thousand a frame (flares,
+  coronas). The report table held 64 a batch and a full one cost a
+  submit-and-wait: ~18 a frame, ~9 ms. It holds 4096 now, the query pool
+  16384.
+- **The washed-out picture**: the small FP16 luminance targets in local
+  memory (40x22, 20x11, 10x5) and the 128x1 FP32 ones in main memory never
+  reached guest memory -- the write-back was RGBA8 only -- and the CPU
+  computes the exposure (and more) from them. Small float targets now go back
+  every frame like the RGBA8 ones (`eng_wb_small`, deferred readback,
+  big-endian components, R first).
+- **The blur**: the velocity pass reads the depth at 0x00AC0000 through
+  A8R8G8B8, and a colour target sits at the same address (the depth pass binds
+  one there with its colour mask off), so the texture bound was that black
+  target: depth 0, a velocity of up to 0.17 of the screen width that depended
+  on x alone, and the motion blur smeared everything. A texture at an address
+  with a zeta written after the colour target's last colour write
+  (`cwstamp`) now reads the zeta (`PS3RECOMP_ENG_ZWINS=0`: as before). And a
+  zeta sampled at a smaller size than its extent (760x416 of 1280x1080) is
+  copied at that size, its top-left corner, as colour targets already were.
+- **The stale bands**: after the CPU's display copy the engine uploaded
+  whole rows of the display buffer from guest memory, whose margins no one
+  wrote (the GPU had cleared them); only the copied columns go up now
+  (`color_target_upload_rect`). With native MLAA the copy never touches guest
+  memory anyway.
+
+Measured (both binaries side by side, drive.py, load average 28-40 from other
+work on the host): race 11.7-15.7 fps before, 14-20 after with the player's
+settings (`PS3RECOMP_BE_THREAD=1` etc.); vk-stats 200-340 submit-and-waits
+a second before, ~13 after (the frame dump's present only). The dynamic
+resolution goes to its top (1240x1020 source) once the RSX keeps up.
+
+Left: the big black shapes under the cars and on the road near the camera
+(already in the composite 0x01010000, before the post chain: a decal or
+shadow pass), not looked at.
 
 ### Tools
 
@@ -1296,7 +1378,7 @@ With PS3_SIM_60=0 it fails ("96% of the samples have the stock fixed dt").
 
 ps3recomp moved from v0.13.0 (42f5f8f9) to v0.18.0 (4e8f3ca8, 848 upstream
 commits, 542 files). `scripts/setup.sh` and `scripts/make_patch.sh` pin the
-new BASE; `work/patches/ps3recomp.patch` is now 198 files, +36.1k/-11.5k
+new BASE; `work/patches/ps3recomp.patch` is now 199 files, +36.3k/-11.6k
 lines (was 211 files, +43.7k/-6.1k against v0.13). The old tree is kept in
 the ps3recomp repository as branch `pre-v0.18` (one commit on 42f5f8f9 holding
 the old working tree); the rebase is branch `rebase-v0.18`.
@@ -1422,5 +1504,14 @@ top. Elsewhere upstream's code was taken and ours ported onto it.
   test_spu_coherency (204/0), the PPU lifter self-tests (test_ppu_lift
   1533/0), and work/tests/codec (evologo_60.avi: 300 pictures; AC3
   correlation 1.000000 against the ffmpeg CLI).
-- work/patches/pending/memleak.diff (per-thread SPU caches pooled) was not
-  folded in; it applies to v0.18.
+- Folded in after the switch-over (from work/patches/pending/): memleak.diff
+  (the per-thread SPU caches -- spu_step's decode cache, spu_lookup's
+  tl_lookup -- go back to a pool when their thread exits instead of leaking:
+  race RSS flat at ~1.3 GB instead of +25 MB/s) and spu_task_pool.diff (a
+  worker pool for async SPURS task runs, on by default, PS3_SPU_TASK_POOL=0
+  turns it off). With all three pending diffs in: SLOW=1 run_all.sh 7 of 8
+  (one main_menu freeze: evologo closed, maintitles never opened -- the
+  "logo that never ends" shape, no `[ppu-native] event` line; sim_speed
+  passed on its own afterwards). main_menu.sh 12 more times on that build,
+  six with PS3_SPU_TASK_POOL=0: 5 of 6 PASS either way, each failure a menu
+  press that moved the panel too little (DOWN 11 / 17), no freeze.
