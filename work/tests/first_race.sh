@@ -42,6 +42,16 @@ from pathlib import Path
 BIN, ELF, OUT, RUNS = sys.argv[1], sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
 LIMIT, SKIP = float(sys.argv[5]), float(sys.argv[6])
 ROOT = Path(ELF).parents[3]
+def _hdd1(save):
+    """Each run gets its own /dev_hdd1 (games sharing one die after the logo).
+    Seeded from ROOT/hdd1 so the game skips its first-boot font/cache build,
+    which corrupts the UI timer tree today (docs/NOTES.md "First-boot hdd1
+    corruption"); FRESH_HDD1=1 starts empty to reproduce that."""
+    import shutil
+    d = str(save) + "_hdd1"
+    if not os.path.exists(d) and not os.environ.get("FRESH_HDD1") and (ROOT / "hdd1").is_dir():
+        shutil.copytree(ROOT / "hdd1", d)
+    return d
 
 def fail(msg):
     print("FAIL: " + msg); sys.exit(1)
@@ -53,7 +63,7 @@ def setp(held):
     tmp = pad.with_suffix(".tmp"); tmp.write_text(held + "\n"); os.replace(tmp, pad)
 setp("")
 env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy",
-           SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_PAD_FILE_0=str(pad),
+           SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_HDD1_ROOT=_hdd1(save), PS3_PAD_FILE_0=str(pad),
            LD_FRAME_DUMP=str(OUT / "d"), LD_FRAME_DUMP_EVERY="60")
 f = open(log, "wb")
 p = subprocess.Popen([BIN, ELF], cwd=ROOT, env=env, stdout=f, stderr=subprocess.STDOUT,
@@ -162,10 +172,23 @@ def screen(path):
             box(px, w, 1040, 1210, 560, 632, lambda r, g, b: max(r, g, b) > 60, 3) == 0)
     gauge = box(px, w, 1080, 1160, 560, 640, lambda r, g, b: r < 120 and g > 150 and b < 90) > 10
     return ("CONTINUE" if cont else None), gauge
+# "SELECT  Reset To Track" (centre, below the button prompts): the car is stuck
+# against scenery and only SELECT puts it back. White caption right of a dark
+# SELECT button box; pressed once it has shown for two dumps in a row.
+def reset_prompt(path):
+    try: w, h, px = read_ppm(path)
+    except Exception: return False
+    if (w, h) != (1280, 720): return False
+    white = lambda r, g, b: r > 220 and g > 220 and b > 220
+    dark = lambda r, g, b: max(r, g, b) < 40
+    return (box(px, w, 600, 800, 335, 360, white, 1) > 600 and
+            box(px, w, 530, 600, 325, 370, dark, 1) > 1500 and
+            box(px, w, 600, 800, 365, 372, white, 1) < 40)
 setp("R2=255")
 hist = []                          # (time, frames dumped so far)
 prompts = []                       # (seconds after the first save, button)
 hud_seen, no_hud = False, 0
+resets_seen = 0
 last_h, last_h_t = havok_runs(), time.time()
 checked = None
 while True:
@@ -185,6 +208,12 @@ while True:
             b = "CROSS"
             print(f"{'CONTINUE' if cont else 'no HUD for %d dumps' % no_hud}: CROSS at {el:.0f} s "
                   f"({Path(fr[-1]).name})", flush=True)
+        if not b and gauge and reset_prompt(fr[-1]):
+            resets_seen += 1
+            if resets_seen >= 2:
+                b, resets_seen = "SELECT", 0
+        elif not b:
+            resets_seen = 0
         if b:
             prompts.append((round(el), b))
             print(f"prompt {b} at {el:.0f} s ({Path(fr[-1]).name})", flush=True)

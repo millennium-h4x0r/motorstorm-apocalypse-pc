@@ -39,6 +39,16 @@ BIN, ELF, OUT, RUNS = sys.argv[1], sys.argv[2], Path(sys.argv[3]), Path(sys.argv
 LIMIT, SKIP, WF = float(sys.argv[5]), float(sys.argv[6]), int(sys.argv[7])
 MIN_LUMA, MAX_LUMA, MIN_STDDEV = 12.0, 235.0, 12.0
 ROOT = Path(ELF).parents[3]
+def _hdd1(save):
+    """Each run gets its own /dev_hdd1 (games sharing one die after the logo).
+    Seeded from ROOT/hdd1 so the game skips its first-boot font/cache build,
+    which corrupts the UI timer tree today (docs/NOTES.md "First-boot hdd1
+    corruption"); FRESH_HDD1=1 starts empty to reproduce that."""
+    import shutil
+    d = str(save) + "_hdd1"
+    if not os.path.exists(d) and not os.environ.get("FRESH_HDD1") and (ROOT / "hdd1").is_dir():
+        shutil.copytree(ROOT / "hdd1", d)
+    return d
 
 def fail(msg):
     print("FAIL: " + msg); sys.exit(1)
@@ -50,7 +60,7 @@ def setp(held):
     tmp = pad.with_suffix(".tmp"); tmp.write_text(held + "\n"); os.replace(tmp, pad)
 setp("")
 env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy",
-           SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_PAD_FILE_0=str(pad),
+           SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_HDD1_ROOT=_hdd1(save), PS3_PAD_FILE_0=str(pad),
            LD_FRAME_DUMP=str(OUT / "d"), LD_FRAME_DUMP_EVERY="50",
            PS3RECOMP_ENG_WORLDLOG="1")
 f = open(log, "wb")

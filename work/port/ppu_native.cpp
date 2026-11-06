@@ -346,41 +346,59 @@ static int sim60_on(void)
     if (v < 0) { const char* e = getenv("PS3_SIM_60"); v = !e || atoi(e) != 0; }
     return v;
 }
-/* PS3_SIM_DT_MAX_MS=<ms> (with PS3_SIM_60; default: the game's 40): the
- * longest frame the race simulates in one step. func_001DA398 clamps a
- * frame's dt to 0.04 s (float compare 0x1DA384, double result 0x1DA388), so
- * under 25 fps the race runs slower than wall time (0.65x at 16 fps). A larger
- * value keeps real time lower down, at the price of bigger physics steps
- * than the game was ever tuned for. The lift reads both constants from guest
- * memory, so they are rewritten there, once, after checking they are the
- * game's. */
-static void sim_dt_max(void)
+/* Two constants of the race's dt path, rewritten once in guest memory (the
+ * lift reads both from there), after checking they are the game's:
+ *
+ * The clamp. func_001DA398 clamps a frame's dt to 0.04 s (float compare
+ * 0x1DA384, double result 0x1DA388): under 25 fps the race ran slower than
+ * wall time, and in the 25-30 fps the port reaches, every frame over 40 ms
+ * lost time (0.88x at 25.5 fps). PS3_SIM_DT_MAX_MS=<ms> (20..200) sets it;
+ * the default is 66.7 ms (1/15 s): real time down to 15 fps. Havok gets one
+ * step a frame with this dt either way (its task runs per frame do not change
+ * with dt); 6 minutes of race at 100 ms steps showed no trouble. 40 is the
+ * game's.
+ *
+ * The snap. func_00EC8A98 replaces a dt in 0.031..0.035 s by exactly 1/30 s
+ * (doubles 0xEC8A80 / 0xEC8A88): right for a game locked to 30 Hz, a 5% error
+ * per frame for a real-time one near 30 fps. Turned off by raising the low
+ * bound to 1e30 (the test is "dt <= low: no snap"). PS3_SIM_SNAP=1 keeps it. */
+static void sim_patch_consts(void)
 {
+    double ms = 1000.0 / 15.0;
     const char* e = getenv("PS3_SIM_DT_MAX_MS");
-    if (!e || !*e) return;
-    const double ms = atof(e);
-    if (!(ms >= 20.0 && ms <= 200.0)) {
-        fprintf(stderr, "[sim60] PS3_SIM_DT_MAX_MS=%s out of range (20..200), keeping 40\n", e);
-        return;
+    if (e && *e) {
+        const double v = atof(e);
+        if (v >= 20.0 && v <= 200.0) ms = v;
+        else fprintf(stderr, "[sim60] PS3_SIM_DT_MAX_MS=%s out of range (20..200), using %.1f\n", e, ms);
     }
-    if (vm_read32(0x1DA384u) != 0x3D23D70Au || vm_read64(0x1DA388u) != 0x3FA47AE140000000ull) {
+    if (vm_read32(0x1DA384u) == 0x3D23D70Au && vm_read64(0x1DA388u) == 0x3FA47AE140000000ull) {
+        const float f = (float)(ms / 1000.0);
+        const double d = (double)f;
+        uint32_t fw; uint64_t dw;
+        memcpy(&fw, &f, 4); memcpy(&dw, &d, 8);
+        vm_write32(0x1DA384u, fw);
+        vm_write64(0x1DA388u, dw);
+        fprintf(stderr, "[sim60] frame dt clamp %.1f ms (the game's: 40)\n", ms);
+    } else {
         fprintf(stderr, "[sim60] the dt clamp at 0x1DA384 is not the one expected: left alone\n");
-        return;
     }
-    const float f = (float)(ms / 1000.0);
-    const double d = (double)f;
-    uint32_t fw; uint64_t dw;
-    memcpy(&fw, &f, 4); memcpy(&dw, &d, 8);
-    vm_write32(0x1DA384u, fw);
-    vm_write64(0x1DA388u, dw);
-    fprintf(stderr, "[sim60] frame dt clamp %.1f ms (the game's: 40)\n", ms);
+    const char* sn = getenv("PS3_SIM_SNAP");
+    if (sn && atoi(sn) != 0) return;
+    if (vm_read64(0xEC8A80u) == 0x3F9FBE76C8B43958ull && vm_read64(0xEC8A88u) == 0x3FA1EB851EB851ECull) {
+        const double big = 1e30;
+        uint64_t bw; memcpy(&bw, &big, 8);
+        vm_write64(0xEC8A80u, bw);
+        fprintf(stderr, "[sim60] 1/30 s dt snap off\n");
+    } else {
+        fprintf(stderr, "[sim60] the dt snap at 0xEC8A80 is not the one expected: left alone\n");
+    }
 }
 static std::atomic<uint32_t> s_sim_clock;
 static int nat_clock_ctor(ppu_context* c)      /* 0x5EE2A4(this r3) */
 {
     if (sim60_on()) {
         static std::atomic<int> once;
-        if (!once.exchange(1)) sim_dt_max();
+        if (!once.exchange(1)) sim_patch_consts();
         const uint32_t src = (uint32_t)c->gpr[3];
         if (s_sim_clock.exchange(src) != src)
             fprintf(stderr, "[sim60] game clock source at 0x%08X: real-time, vsync interval 1\n", src);

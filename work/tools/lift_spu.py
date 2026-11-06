@@ -88,6 +88,33 @@ MS_DSP_LIFTS = {
     "msdsp_filter":               (0x39800, [0x39810, 0x39B48]),
 }
 
+# Firmware SPU code a task loads from /dev_flash at run time, lifted from the
+# user's own firmware (the one installed in RPCS3) when it is there. Per file:
+# the LS address its vaddr 0 lands at, and extra entries. The MultiStream core
+# (task_multistream_mp3) reads /dev_flash/sys/external/flashMP3.pic into its
+# bss and calls its entry (vaddr 0x74A0 -> LS 0x21D20, from LS 0x6E28); the
+# whole code segment was found at LS 0x1A900 in a local-store dump of the race
+# (SPU_INTERP_LSDUMP_PC=21D20). Interpreted, the MP3 decoder kept a core busy.
+# The lift is resident only while its own bytes are at that address
+# (spu_overlay_register_bytes_at); SPU_FW_LIFT=0 leaves it to the interpreter.
+FW_LIFTS = {
+    "sys/external/flashMP3.pic": (0x1A880, []),
+}
+
+
+def dev_flash_dir():
+    """The firmware's dev_flash, as main.cpp finds it."""
+    e = os.environ.get("PS3_DEV_FLASH")
+    if e:
+        return e
+    home = os.environ.get("HOME", "")
+    for rel in (".var/app/net.rpcs3.RPCS3/config/rpcs3/dev_flash", ".config/rpcs3/dev_flash"):
+        d = os.path.join(home, rel)
+        if os.path.isdir(d):
+            return d
+    return None
+
+
 # Every image is lifted with its registers in locals (--local-regs), each run of
 # contiguous chunks as one C function (--merge-chunks) and `bi` on a register
 # just loaded from a constant dispatched directly (--const-bi), as in the
@@ -114,8 +141,16 @@ TASK_EXTRA_ENTRIES = {
         0x105A0, 0x105F8, 0x10668, 0x10838, 0x111F8,
         # second code segment (LS 0x38F00): targets of a table called from 0x3AB40
         0x3ACB8, 0x3ADA0, 0x3ADC0, 0x3ADF0, 0x3AE80, 0x3AEB0, 0x3AF40, 0x3AF70],
+    # 0x21D20 (the core's call at LS 0x6E28) is in the task's bss, where the
+    # MultiStream core loads the firmware's flashMP3.pic at run time (FW_LIFTS).
+    # Lifted from the ELF it is an empty function, and dispatching to it never
+    # moves the pc: the core's thread spins in spu_drain_call / spu_lookup for
+    # good (100% of a core, no audio mixed). SPU_LIFT_DISABLE_AT=37:21D20 (or
+    # SPU_FW_LIFT=1, whose resident lift owns the address) avoids it; the entry
+    # goes once that is validated.
     "task_multistream_mp3_012BC500": [0x21D20],
 }
+TASK_EXTRA_OUTSIDE_TEXT = {("task_multistream_mp3_012BC500", 0x21D20)}   # see above; to be removed
 
 # Lifted functions a native replacement may take over (keyed by lifted
 # directory name -> LS addresses). None yet for this title.
@@ -647,6 +682,13 @@ def main():
          "--constructor", "--title", "MotorStorm Apocalypse", "--first-image-id", str(TASK_IMAGE_BASE),
          "--eboot", args.eboot, "--relift"] + [f"--lift-arg={a}" for a in LIFT_ARGS]
         + [f"--extra-funcs={k}=" + ",".join(hex(a) for a in v) for k, v in TASK_EXTRA_ENTRIES.items()])
+    # An extra entry must be in the task's file-backed executable bytes: one in
+    # bss or data lifts to an empty function that never leaves its own pc.
+    for t in tasks:
+        for a in TASK_EXTRA_ENTRIES.get(t["dir"], []):
+            if (t["dir"], a) not in TASK_EXTRA_OUTSIDE_TEXT and \
+               not any(sg["flags"] & 1 and sg["vaddr"] <= a < sg["vaddr"] + sg["filesz"] for sg in t["segments"]):
+                die(f"TASK_EXTRA_ENTRIES: {t['dir']} 0x{a:X} is not in an executable segment's file bytes")
     # build_spu_workloads.py numbers images in sorted file-name order.
     for i, t in enumerate(sorted(tasks, key=lambda t: t["dir"])):
         prefix = re.sub(r"[^0-9A-Za-z_]", "_", t["dir"]) + "_"
@@ -686,6 +728,30 @@ def main():
         print(f"[lift_spu] {len(dsps)} MultiStream DSP plugin(s) classified, not lifted: "
               "their LS load address is chosen at run time (see MS_DSP_LIFTS)")
 
+    # 4b. Firmware SPU code loaded from /dev_flash (FW_LIFTS).
+    fw_lifted = []
+    flash = dev_flash_dir()
+    for rel, (base, extra) in FW_LIFTS.items():
+        path = os.path.join(flash, rel) if flash else None
+        if not path or not os.path.isfile(path):
+            print(f"[lift_spu] {rel}: not found (no dev_flash), left to the interpreter")
+            continue
+        elf = Path(path).read_bytes()
+        if elf[:4] != b"\x7fELF":
+            die(f"{path} is not an ELF")
+        code = [sg for sg in spu_load_segments(elf) if sg["flags"] & 1][0]
+        blob = elf[code["off"]:code["off"] + code["filesz"]]
+        lsa, entry = base + code["vaddr"], base + be32(elf, 0x18)
+        name = "fw_" + re.sub(r"[^0-9A-Za-z_]", "_", os.path.basename(rel)) + f"_ls{lsa:05X}"
+        lift_raw(tools, img_dir, spu, name, blob, lsa, entry, [base + a for a in extra])
+        img = DSP_IMAGE_BASE + len(dsp_lifted) + len(fw_lifted)
+        fw_lifted.append((name, blob, lsa, img))
+        manifest.append(dict(name=name, kind="firmware_spu_code", file=rel, size=len(blob), ls=lsa,
+                             entry=entry, image_id=img, fp=f"{fnv1a64(blob):016X}",
+                             launch="read from /dev_flash by the title and DMA'd into a task's local store"))
+    if DSP_IMAGE_BASE + len(dsp_lifted) + len(fw_lifted) > 512:
+        die("image ids run past 511 (runtime tables are 512 wide)")
+
     # 5. Registration of the PM and the DSP plugins (the tasks register from
     #    spu_elf_workloads.c, the job modules from jobmods_register.c).
     dsp_decl = "".join(f"extern void {nm}_spu_recomp_register(void);\n" for nm, *_ in dsp_lifted)
@@ -693,24 +759,38 @@ def main():
         f"    spu_begin_image({img}); {nm}_spu_recomp_register();\n"
         f"    spu_overlay_register_region_at(0x{ea:08X}u, 0x{lsa:X}u, 0x{n:X}u, {img});\n"
         for nm, ea, lsa, n, img in dsp_lifted)
+    fw_decl = "".join(f"extern void {nm}_spu_recomp_register(void);\n" for nm, *_ in fw_lifted)
+    for nm, blob, lsa, img in fw_lifted:
+        rows = ",\n".join("    " + ",".join(f"0x{b:02X}" for b in blob[i:i + 24]) for i in range(0, len(blob), 24))
+        fw_decl += f"static const uint8_t {nm}_bytes[0x{len(blob):X}] = {{\n{rows}\n}};\n"
+    fw_reg = "".join(
+        f"    spu_begin_image({img}); {nm}_spu_recomp_register();\n"
+        f"    if (fw_lift_on()) spu_overlay_register_bytes_at({nm}_bytes, 0x{lsa:X}u, 0x{len(blob):X}u, {img});\n"
+        for nm, blob, lsa, img in fw_lifted)
     src = f"""/* spu_workloads.c -- GENERATED by work/tools/lift_spu.py. Do not edit.
  * MotorStorm Apocalypse's WWS Job Manager policy module (EA 0x{pm['ea']:X}, 0x{pm['size']:X}
  * bytes at LS 0x{PM_LSA:X}): the SPURS kernel fingerprints the module it copies
  * into local store and runs this lift when the fingerprint matches. Image
  * {PM_IMAGE_ID}: the runtime's WWS job-manager handling is keyed to it.
- * MultiStream DSP plugins lifted at known load addresses: {len(dsp_lifted)}. */
+ * MultiStream DSP plugins lifted at known load addresses: {len(dsp_lifted)}.
+ * Firmware SPU code lifted at its load address: {len(fw_lifted)}. */
 #include "spu_workload.h"
 
 extern void spu_begin_image(int image_id);
 extern void spu_overlay_register_region_at(uint32_t content_ea, uint32_t lsa, uint32_t span, int image_id);
+extern void spu_overlay_register_bytes_at(const uint8_t* bytes, uint32_t lsa, uint32_t span, int image_id);
+extern char* getenv(const char*);
+/* SPU_FW_LIFT=1: the firmware code lifts below become resident when their
+ * bytes are loaded at their address (default off until validated). */
+static int fw_lift_on(void) {{ const char* e = getenv("SPU_FW_LIFT"); return e && e[0] == '1'; }}
 extern void wws_pm_spu_recomp_register(void);
 extern void wws_pm_spu_func_{PM_LSA:08X}(spu_context*);
-{dsp_decl}
+{dsp_decl}{fw_decl}
 void port_spu_register_all(void)
 {{
     spu_begin_image({PM_IMAGE_ID}); wws_pm_spu_recomp_register();
     spu_workload_register_img(0x{pm_fp:016X}ULL, wws_pm_spu_func_{PM_LSA:08X}, {PM_IMAGE_ID}, "wws_pm");
-{dsp_reg}    spu_begin_image(0);
+{dsp_reg}{fw_reg}    spu_begin_image(0);
 }}
 
 __attribute__((constructor)) static void port_spu_register_all_ctor(void)
@@ -729,7 +809,7 @@ __attribute__((constructor)) static void port_spu_register_all_ctor(void)
     lifted = sorted(d for d in os.listdir(spu) if os.path.exists(os.path.join(spu, d, "spu_recomp.c")))
     unsup = sum(m.get("unsupported", 0) for m in manifest)
     print(f"[lift_spu] lifted {len(lifted)} image(s) into {spu} "
-          f"(1 PM, {len(jm)} job modules, {len(tasks)} tasks, {len(dsp_lifted)} DSP lifts); "
+          f"(1 PM, {len(jm)} job modules, {len(tasks)} tasks, {len(dsp_lifted)} DSP lifts, {len(fw_lifted)} firmware); "
           f"{unsup} unsupported instruction(s) in job modules; manifest spu_manifest.json")
 
 

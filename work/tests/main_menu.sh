@@ -41,6 +41,17 @@ from pathlib import Path
 
 BIN, ELF, OUT, PNG = sys.argv[1], sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
 ROOT = Path(ELF).parents[3]          # the project dir (disc/ lives here)
+def _hdd1(save):
+    """Each run gets its own /dev_hdd1 (games sharing one die after the logo).
+    Seeded from ROOT/hdd1 so the game skips its first-boot font/cache build
+    (minutes of chimp cache writes); FRESH_HDD1=1 starts empty, the path
+    work/tests/first_boot_fresh.sh covers (docs/NOTES.md "First-boot hdd1
+    corruption")."""
+    import shutil
+    d = str(save) + "_hdd1"
+    if not os.path.exists(d) and not os.environ.get("FRESH_HDD1") and (ROOT / "hdd1").is_dir():
+        shutil.copytree(ROOT / "hdd1", d)
+    return d
 
 def fail(msg):
     print("FAIL: " + msg); sys.exit(1)
@@ -53,7 +64,7 @@ class Game:
         self.pad = self.dir / "pad"
         self.set("")
         env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy",
-                   SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save),
+                   SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_HDD1_ROOT=_hdd1(save),
                    PS3_PAD_FILE=str(self.pad), LD_FRAME_DUMP=str(self.dir / "d"),
                    LD_FRAME_DUMP_EVERY="10")
         self.f = open(self.log, "wb")

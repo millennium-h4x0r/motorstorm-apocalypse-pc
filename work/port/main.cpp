@@ -805,6 +805,14 @@ int main(int argc, char** argv)
             fprintf(stderr, "[boot] WARNING: cannot create %s (%s)\n", hdd1, strerror(errno));
         setenv("PS3_HDD1_ROOT", hdd1, 1);
 #endif
+    } else {
+        /* A caller-chosen root (tests give each instance its own: concurrent
+         * games sharing one hdd1 cache die after the logo movie). */
+#ifdef _WIN32
+        _mkdir(getenv("PS3_HDD1_ROOT"));
+#else
+        mkdir(getenv("PS3_HDD1_ROOT"), 0755);
+#endif
     }
 #ifdef _WIN32
     if (!getenv("PS3_DEV_FLASH")) {

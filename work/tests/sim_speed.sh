@@ -11,16 +11,18 @@
 #
 # Each 4 s window where the race clock moved at every sample (not paused at a
 # prompt) and the game read a dt of at least half the wall time between two
-# presents (not a load, whose loop runs without presenting) is checked against what the clock should do: one frame
-# advances it by min(dt, clamp), the clamp being 0.04 s (func_001DA398) or
-# PS3_SIM_DT_MAX_MS. So at clamp * fps >= 1 the clock must keep wall time
-# (0.95..1.05), and below that it runs at about clamp * fps (0.70..1.10 of it:
-# frame times vary inside a window, every frame over the clamp loses time,
-# and a window holds a whole number of frames). At least 90% of the windows must be in range (a hitch of a second
-# inside a window is not the pacing's fault), and the dt the game read must
-# follow the wall frame time: no more than half the samples may be exactly
-# 33333 us, the stock fixed step (under 25 fps the stock game's ratio, fps/30,
-# is 0.83 of the clamped one, inside the band; this tells them apart).
+# presents (not a load, whose loop runs without presenting) is checked against
+# what the clock should do. One frame advances it by min(dt, clamp), the clamp
+# being the one the port logs ("[sim60] frame dt clamp": 66.7 ms by default,
+# PS3_SIM_DT_MAX_MS; the game's own is 40, func_001DA398). PS3_SIM_60 also
+# turns off the game's snap of a 31-35 ms dt to 1/30 s, which would put
+# windows near 30 fps 5% out. So at clamp * fps >= 1 the clock must keep wall
+# time (0.95..1.05), and below that run at about clamp * fps (0.70..1.10 of
+# it: frame times vary inside a window, every frame over the clamp loses time,
+# and a window holds a whole number of frames). At least 90% of the windows
+# must be in range (a hitch of a second inside a window is not the pacing's
+# fault), and the dt the game read must follow the wall frame time: no more
+# than half the samples may be exactly 33333 us, the stock fixed step.
 # PASS: at least MIN_WINDOWS windows, those checks, and the vblank handler
 # running 50..70 times a second on average (GCM_VBLANK_EACH).
 #
@@ -119,7 +121,12 @@ while moved < SAMPLE:
 stop(pid)
 while not race_done(): time.sleep(0.5)      # first_race.sh sees the game gone and ends
 
-clamp = float(os.environ.get("PS3_SIM_DT_MAX_MS") or 40) / 1000.0
+# the clamp the port set ("[sim60] frame dt clamp <ms> ms"); a binary that
+# does not say leaves the game's 40 ms
+import re
+m = re.search(rb"\[sim60\] frame dt clamp ([0-9.]+) ms", (OUT / "race" / "log").read_bytes())
+clamp = (float(m.group(1)) if m else 40.0) / 1000.0
+print(f"dt clamp {clamp * 1000:.1f} ms", flush=True)
 bad, n, vbl, ok_real = [], 0, [], []
 for i in range(0, len(samples) - 8, 8):
     w = samples[i:i + 9]

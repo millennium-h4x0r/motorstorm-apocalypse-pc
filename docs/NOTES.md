@@ -792,6 +792,59 @@ menu starts the Festival (and the Prologue load).
 PASS also requires no `unresolved NID` in either log. The menu frame is
 written to `work/runs/main_menu.png`.
 
+### First-boot hdd1 corruption
+
+A player's first boot (empty `/dev_hdd1`, `PS3_HDD1_ROOT`) died on about 5
+boots of 6: null reads at node +0x18/+0x1C in the UI timer walk
+`func_005BE4C0`, "unresolved indirect call -> 0x74746366" ('ttcf', the
+TrueType-collection header of japanese.ttf), then the walk's unbounded node
+stack (this+0x3A4, count +0x428) filled memory with 0x19062FA0 up through the
+vblank OPD 0x01430BD0. Other boots stalled before the first movie. Boots with
+a seeded hdd1 passed.
+
+Cause: on an empty hdd1 the game copies its fonts from
+`/dev_bdvd/PS3_GAME/USRDIR/ui/fonts/` (`func_004FE688`: cellFsStat hdd1,
+open O_CREAT + close, stat the disc file (at most 3 MB), alloc(size)
+through `func_005F785C`, cellFsRead, open hdd1 O_WRONLY, cellFsWrite, free).
+For the 2.1 MB japanese.ttf the game's heap returns NULL. `ppu_fs`'s
+cellFsRead then fread() 2,197,144 bytes to guest address 0, over the ELF's
+first segment from 0x10000 (read-only data: the timer walk's 0.0f at
+0x67960, jump tables, vtables). Nothing in our code touched the font after
+that; the damage was the read itself. Whether a boot died or stalled depended
+on which constant got read next.
+
+Fix: lv2 answers CELL_EFAULT (0x8001000D) and moves nothing for a buffer in
+unmapped memory. `ppu_fs.cpp` (`fs_bad_buf`: buffer below 0x10000 or past
+4 GB, length > 0) now does that in cellFsRead, cellFsWrite and
+cellFsAioRead (the completion callback gets the error), and
+`runtime/syscalls/sys_fs.c` in sys_fs_read/write. The first 16 refusals are
+logged as `[fs] read fd=.. buf=0x00000000 .. -> CELL_EFAULT (... by <caller>)`.
+The game handles the failed copy: it calls `func_00ABCD30` and opens
+japanese.ttf from the disc path (`[cellFont] OpenFontFile(...
+'/dev_bdvd/.../japanese.ttf')`). The hdd1 copy stays 0 bytes, and the game
+retries it each time it loads the font set, harmlessly. The three nimbus fonts
+(83-229 KB) copy normally.
+
+Not answered: whether a PS3 heap would also fail the 2.1 MB alloc there. The
+buffers that did get allocated sit at 0x1B79xxxx, near the top of the
+0xAB00000 block at 0x11000000. Either way the console's behaviour for the
+NULL buffer is the EFAULT.
+
+Tools that found it: `FS_CALLER=1` now also logs open flags, cellFsStat
+results and every cellFsWrite with its buffer, and the `[fs] read` line
+prints the buffer address.
+
+Test: `work/tests/first_boot_fresh.sh` (BOOTS=<n>) boots with an empty hdd1
+and save. It taps CROSS until `SAVE complete` and fails on any null call,
+unresolved indirect call, bctr to NULL, unregistered OPD or null read in
+0x5BE4C0, and on a missing/short nimbus font in hdd1. The other tests still
+seed hdd1 from ROOT/hdd1 (`FRESH_HDD1=1` starts them empty).
+
+Measured (copied binary, host load ~40): before, 8 of the 10 fresh first boots
+looked at failed (6 corruptions, 2 pre-movie stalls). After:
+first_boot_fresh.sh 3 of 3 and 3 of 3, main_menu.sh 2 of 2 seeded and 2 of 2
+with `FRESH_HDD1=1`, no null call or unresolved indirect call in any log.
+
 ### The Prologue race load (was the next blocker)
 
 Fixed in milestone 4; see "Race" below.
@@ -1233,9 +1286,40 @@ settings (`PS3RECOMP_BE_THREAD=1` etc.); vk-stats 200-340 submit-and-waits
 a second before, ~13 after (the frame dump's present only). The dynamic
 resolution goes to its top (1240x1020 source) once the RSX keeps up.
 
-Left: the big black shapes under the cars and on the road near the camera
-(already in the composite 0x01010000, before the post chain: a decal or
-shadow pass), not looked at.
+Left: the big black shapes under the cars and on the road near the camera.
+They are in the composite 0x01010000 before any draw of it in the frame
+(`PS3RECOMP_ENG_DRAWTRACE=<f>,<dir>,2330,2420` dumps; both MRT halves, the
+composite and 0x01560000, have them), shaped like extruded shadows: the arch
+on the left of the Prologue's canal casts one too, but the cars' reach the
+camera, and shadowed ground is pure black, no ambient. Still to find: the
+lighting/shadow pass that writes them (the sun's cascades live in the
+1024x3072 target 0x0C250000; both a colour target and a zeta sit there).
+
+### Upstream v0.18 engine features, ported (2026-11-06)
+
+- **Scissored clears** (upstream #560): a CLEAR_SURFACE under a scissor
+  narrower than the surface clip clears only that rectangle
+  (`eng_clear_rect`; new optional backend hooks `clear_color_rect` /
+  `clear_depth_stencil_rect`, Vulkan: a fill copied from the staging ring;
+  `PS3RECOMP_ENG_RECT_CLEAR=0` clears whole as before). MotorStorm uses it in
+  its particle passes (620x510 of the 640x540 target). A partial depth clear
+  keeps the zeta's earlier contents readable.
+- **User clip planes** (upstream #537): SET_USER_CLIP_PLANE_CONTROL (0x1478)
+  feeds `rsx_vp_apply_user_clip` (SV_ClipDistance from o5/o6.yzw), part of
+  the pipeline key; Vulkan enables shaderClipDistance.
+  `PS3RECOMP_ENG_USER_CLIP=0` ignores the register.
+- Already here before: polygon offset (#562), WPOS in the window convention
+  (#589, ours in fp_alpha), depth read as a texture converted on the GPU
+  (#499), a depth snapshot of the region the texture names (#507, now for
+  colour-format reads too).
+- **3D textures: not yet.** The race binds them (a one-time log names each:
+  32x32x16 A8R8G8B8 at local 0x002E6900, 16x16x16 B8 volumes at 0x04367A00,
+  0x04896A00, 0x0425EB00, a 512x64x4 DXT5 at 0x0D3ECE00); they are sampled
+  as their first slice. Upstream's Vulkan backend has no 3D path either (only
+  the engine's slice upload and the decompiler's Texture3D declarations).
+- `[vk-stats]` also reports from the present (and presents/s): it used to
+  print only from a flush, and with frames in flight and no flushes the
+  player's configuration logged nothing.
 
 ### Tools
 
@@ -1297,7 +1381,7 @@ work.
   1/30 (0xEC8A80/88/90) -> the race clock float 0x14FC348 (0x739540 from
   0x415DA0). At 60 fps (16.7 ms) neither the clamp nor the snap engages; at
   30 fps the snap makes dt exactly 1/30; under 25 fps the clamp makes the race
-  run at 0.04 * fps (0.65x at 16 fps).
+  run at 0.04 * fps (0.65x at 16 fps). PS3_SIM_60 changes both (below).
 - **Present** (object [0x144F150], func_006AF3E8 from func_006AFD30): mode
   +0x64/+0x68 = 1 (vsync), interval +0x74 = the clock source's +0x18, stored
   every frame (0x6AF7D4), so the interval follows the clock. The vblank
@@ -1326,10 +1410,18 @@ work.
   (it was work/patches/pending/vblank_count.diff until the v0.18.0 rebase);
   a binary built without it ignores the variable and keeps the folded count,
   which at interval 1 only delays a flip by up to one drain.
-- `PS3_SIM_DT_MAX_MS=<ms>` (20..200, default the game's 40): rewrites the
-  clamp constants at 0x1DA384/0x1DA388 (after checking they hold 0.04), so the
-  race keeps real time down to 1000/ms fps. Larger steps than the game was
-  tuned for; not on by default.
+- The dt clamp is raised to 66.7 ms (1/15 s): the clamp constants at
+  0x1DA384/0x1DA388 are rewritten once (after checking they hold 0.04), so
+  the race keeps real time down to 15 fps. With the game's 40 ms, the port's
+  24-31 fps race lost every frame over 40 ms (sim_speed.sh: 0.88x at 25.5
+  fps). `PS3_SIM_DT_MAX_MS=<ms>` (20..200) sets another; 40 is the game's.
+  Havok steps once a frame with this dt: its task runs per 60 frames are
+  ~1600 at 33 ms and at 100 ms steps alike, so there are no fixed substeps,
+  and physics takes the frame's dt, jitter included (6 minutes of race at
+  100 ms steps showed nothing wrong).
+- The 1/30 snap (func_00EC8A98: 0.031..0.035 s -> 1/30) is turned off by
+  raising its low bound (double 0xEC8A80) to 1e30: for a real-time clock it is
+  a 5% error per frame around 30 fps. `PS3_SIM_SNAP=1` keeps it.
 
 ### Measured (load average ~40: three games and a toolkit build at once)
 
@@ -1373,7 +1465,8 @@ samples the game's memory every 0.5 s (frame counter, vblank counter, race
 clock, dt) until the race clock has moved for SAMPLE_S (300) s, then stops
 it. In 4 s windows where the clock moved and the game presented: clock/wall
 within 0.95..1.05 when clamp * fps >= 1, else within 0.70..1.10 of
-clamp * fps; 90% of the windows must pass, no more than half the samples may
+clamp * fps, the clamp read from the log's `[sim60] frame dt clamp` line
+(40 ms if the binary does not print one); 90% of the windows must pass, no more than half the samples may
 have the stock dt 33333, and the handler must run 50..70 times a second.
 With PS3_SIM_60=0 it fails ("96% of the samples have the stock fixed dt").
 
