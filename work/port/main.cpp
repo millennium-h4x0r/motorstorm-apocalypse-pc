@@ -700,6 +700,14 @@ int main(int argc, char** argv)
     env_default("SPURS_JC_NO_SYNTH", "1");      /* inherited from inFAMOUS 2; revisit for MotorStorm */
     /* Texture builds off the recording queue: off until measured. */
     env_default("PS3RECOMP_BQ_TEXBUILD", "0");
+    /* Real-time simulation, flipping on every vblank (ppu_native.cpp
+     * nat_clock_recompute; docs/NOTES.md "Simulation pacing"): the race keeps
+     * wall-clock speed at any frame rate from 25 fps up, and can reach 60.
+     * PS3_SIM_60=0 is the game as shipped: a fixed 1/30 s a frame, every
+     * second vblank. The vblank handler counts vblanks to decide its flips,
+     * so it gets every one (GCM_VBLANK_EACH, libs/video/cellGcmSys.c). */
+    env_default("PS3_SIM_60", "1");
+    if (atoi(getenv("PS3_SIM_60")) != 0) env_default("GCM_VBLANK_EACH", "1");
     /* inFAMOUS 2 built its frames on the SPU: the FIFO parked at the end of
      * what was ready and the title patched the park with the rest. Wait at a
      * park the way the RSX does instead of following the write head. */

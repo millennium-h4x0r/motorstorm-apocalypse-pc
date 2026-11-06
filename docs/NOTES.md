@@ -1177,3 +1177,118 @@ save and for 60 s more, then waits for 200 world frames
 one has a central-60% luma mean in [12, 235] with a standard deviation of at
 least 12 (the black screen and the white one both fail). Saves
 `work/runs/race_intro.png`. 3-15 minutes, mostly the race load.
+
+## Simulation pacing
+
+As shipped, the game steps its simulation a fixed 1/30 s every frame and
+flips every second vblank: on the PS3 a steady 30 fps. Here a race frame
+takes 50-120 ms, so the race ran at 0.4-0.6x real time. `PS3_SIM_60` (default
+1; `PS3_SIM_60=0` is the game as shipped) makes the step real-time and the
+flip interval 1. main.cpp sets the default, work/port/ppu_native.cpp does the
+work.
+
+### How the game keeps time
+
+- **Clock source** (the one instance is constructed by 0x5EE2A4, called from
+  0x2D6C90; heap 0x450E36B0 in every run so far): +0x00 int64 step (us),
+  +0x08 slack, +0x10 refresh Hz, +0x14 float scale, +0x18 vsync interval,
+  +0x1C real-time flag, +0x20/+0x21 slack flags. The constructor's defaults
+  are 60 Hz, interval 1, real-time. Setters: 0x5EE3B4 Hz, 0x5EE3D8 +0x20,
+  0x5EE3FC scale, 0x5EE420 interval, 0x5EE444 +0x21, each ending in 0x5EE178,
+  which recomputes the step (interval * 1e6 / Hz * scale: 16666 or 33333); the
+  flag is a plain store, 0x4F8F60. The game's setup, 0x2D6F30 (0x2D6E58 the
+  same from 0x1E3F28), sets 60 (50 on a 50 Hz display) Hz, flag 0, scale 1,
+  interval 2. Other configurations: 0x1E3F28 (real-time, interval 1: the game
+  has a real-time mode of its own), 0x1D90C8 (30 Hz, interval 1, fixed; from
+  the race update, behind a flag), 0x1F1F58/0x1F37A8 (flag 0, scale), and the
+  crash slow motion through the scale (0.35, 0.107 -> steps 11666/3579 us). A
+  second, stack-local clock (0x5EE310 from 0x1D5680: 30 Hz, fixed) is
+  something else and must stay fixed.
+- **Frame timer** (0x5EE620, the present's timer at device+1000): flag 0 adds
+  the step, flag 1 adds (now - last) * scale from sys_time_get_system_time.
+  The race reads it as dt (int64 us at [[[[0x144FB4C]+0x29C]+0x294]]+0x78),
+  -> 0x5BE4C0 -> func_001DA398 clamps it to 0.04 s (float compare 0x1DA384,
+  double result 0x1DA388) -> func_00EC8A98 snaps 0.031..0.035 s to exactly
+  1/30 (0xEC8A80/88/90) -> the race clock float 0x14FC348 (0x739540 from
+  0x415DA0). At 60 fps (16.7 ms) neither the clamp nor the snap engages; at
+  30 fps the snap makes dt exactly 1/30; under 25 fps the clamp makes the race
+  run at 0.04 * fps (0.65x at 16 fps).
+- **Present** (object [0x144F150], func_006AF3E8 from func_006AFD30): mode
+  +0x64/+0x68 = 1 (vsync), interval +0x74 = the clock source's +0x18, stored
+  every frame (0x6AF7D4), so the interval follows the clock. The vblank
+  handler (OPD 0x01430BD0 -> 0x6B05E4 -> func_006B02BC) ignores its argument,
+  adds 1 to +0x6C per call and releases the frame when +0x6C >= the last
+  flip's +0x70 + interval.
+
+### What PS3_SIM_60 does
+
+- `nat_clock_ctor` (native hook on 0x5EE2A4) remembers the instance;
+  `nat_clock_recompute` (on 0x5EE178) sets its +0x1C to 1 and an interval
+  above 1 to 1 before every recompute. Every configuration sequence ends in a
+  setter, so the game's flag-0/interval-2 setup and the others all come out
+  real-time with interval 1; the scale (slow motion) still applies. Both
+  hooks decline: the lifted bodies run on the patched fields. They are in
+  tools/ppu_native_entries.py NATIVE_ENTRIES (`PS3RECOMP_NATIVE_PPU=0` turns
+  them off with the other natives). Log: `[sim60] game clock source at ...`
+  once, `[sim60] clock ... made real-time` for the first 16 fixes (two at
+  boot: the setup's flag and interval).
+- `GCM_VBLANK_EACH=1` (set by main.cpp with PS3_SIM_60): the runtime calls the
+  vblank handler once per vblank. The RSX thread ticks the 60 Hz vblanks it
+  owes in a burst after each drain, and the pump folded them into one pending
+  bit, so the handler's count ran at ~2-4x the frame rate (19-49 a second
+  measured at 8-16 fps) instead of 60. This is a change to
+  ps3recomp/libs/video/cellGcmSys.c, kept as
+  work/patches/pending/vblank_count.diff until the toolkit rebase carries it
+  (it applies to v0.18.0 too); a binary built without it ignores the variable
+  and keeps the folded count, which at interval 1 only delays a flip by up to
+  one drain.
+- `PS3_SIM_DT_MAX_MS=<ms>` (20..200, default the game's 40): rewrites the
+  clamp constants at 0x1DA384/0x1DA388 (after checking they hold 0.04), so the
+  race keeps real time down to 1000/ms fps. Larger steps than the game was
+  tuned for; not on by default.
+
+### Measured (load average ~40: three games and a toolkit build at once)
+
+| run | race fps | race clock / wall | dt (us) | vblank handler calls/s |
+|---|---|---|---|---|
+| PS3_SIM_60=0 | 7-17 | fps/30 (0.23-0.56) | 33333 always | 19-49 |
+| PS3_SIM_60=1 | 7-14 | 0.04 * fps (0.26-0.58), 0 windows off of 64 | wall frame time | 60.0 |
+| + PS3_SIM_DT_MAX_MS=100 | 7-11 | 0.69-0.96 (median 0.96 where 0.1 * fps >= 1) | wall frame time | 60.0 |
+
+No race frame reached 25 fps under that load, so the full-speed band was
+measured only with the 100 ms clamp; with the default clamp it needs frames
+of 40 ms or less. The menus run with the interval at 1 too (present +0x74 =
+1, the clock's +0x18 = 1, +0x1C = 1, read live) and, with
+PS3RECOMP_FPS_LIMIT unset (as in every headless run), went over 30: 30-38 fps
+on the first-boot "Choose a Control Method" screen at load average ~20. The
+stretch before the intro where the race clock stands still (the r01_60.avi
+movie, by where it falls in the boot) ran at 30.7-32. first_race.sh with PS3_SIM_60=1 (the default
+now): PASS, race over 841 s after the first save at load ~40 (278081 Havok
+task runs; prompts TRIANGLE at 365 s, CROSS at the end); run_all.sh: 5 of 5.
+
+### Things that do not use dt
+
+- The audio stream thread (func_00068380) paces itself on the wall clock:
+  each pass sleeps 33333 us minus the time it took (`ori 0x8235` at
+  0x6930C), 4 ms when over. Independent of the frame rate.
+- The EBOOT holds the 1/30 float (0x3D088889) 31 times, mostly in
+  per-function constant pools; the functions found loading one: 0x1E4E8, 0x124138, 0x1E3268, 0x4254C8,
+  0x47D950, 0x488378, 0x49CFE0, 0x4A3E28, 0x4D0818, 0x4EBDF0, 0x5337D0,
+  0x534BE8, 0x56FBD0, 0x570A28, 0x5BA728, 0x762DE0, 0x7899A0, 0xEC8448 (and
+  the snap, 0xEC8A98). None has been read one by one. If something runs at
+  the wrong speed at a high frame rate, start there.
+- SPU job batches are queued per frame and finish within it, so they follow
+  the frame rate, as on the hardware at 60 fps. Havok's task runs kept coming
+  at every frame rate measured; whether its step takes the game's dt or a
+  fixed one has not been read.
+
+### sim_speed.sh
+
+`work/tests/sim_speed.sh` (SLOW=1 in run_all.sh): runs first_race.sh and
+samples the game's memory every 0.5 s (frame counter, vblank counter, race
+clock, dt) until the race clock has moved for SAMPLE_S (300) s, then stops
+it. In 4 s windows where the clock moved and the game presented: clock/wall
+within 0.95..1.05 when clamp * fps >= 1, else within 0.70..1.10 of
+clamp * fps; 90% of the windows must pass, no more than half the samples may
+have the stock dt 33333, and the handler must run 50..70 times a second.
+With PS3_SIM_60=0 it fails ("96% of the samples have the stock fixed dt").

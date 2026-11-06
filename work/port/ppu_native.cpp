@@ -1,7 +1,9 @@
 /* MotorStorm Apocalypse (BCES-00484): native stand-ins for lifted PPU functions.
  *
- * One MotorStorm function is registered: the game's event Set (0xFF5B40, see
- * nat_event_set). s_probes is empty; the mechanism is game-independent.
+ * Registered: the game's event Set (0xFF5B40, see nat_event_set), and two
+ * hooks on the game clock that only patch its fields and decline (PS3_SIM_60,
+ * see nat_clock_recompute). s_probes is empty; the mechanism is
+ * game-independent.
  *
  * The lift calls PPU_NATIVE_HOOK at the entry of each function listed in
  * tools/ppu_native_entries.py (a post-pass over the lifter's output). The
@@ -187,12 +189,99 @@ static int nat_event_set(ppu_context* c)
     return 1;
 }
 
+/* Simulation pacing, PS3_SIM_60 (default on; 0 = the game as shipped). See
+ * docs/NOTES.md "Simulation pacing".
+ *
+ * The game advances its simulation by a clock source object (constructor
+ * 0x5EE2A4, from 0x2D6C90): +0x00 int64 step in us, +0x10 refresh Hz, +0x14
+ * float scale, +0x18 vsync interval, +0x1C real-time flag, +0x20/+0x21 two
+ * slack flags. Every setter (0x5EE3B4 Hz, 0x5EE3D8 +0x20, 0x5EE3FC scale,
+ * 0x5EE420 interval, 0x5EE444 +0x21; the real-time flag is a plain store,
+ * 0x4F8F60) ends in 0x5EE178, which recomputes the step from them. The
+ * frame timer (0x5EE620) adds step to the game time each frame when the flag
+ * is 0, and (now - last) * scale when it is 1. The game's setup (0x2D6F30,
+ * again 0x2D6E58) asks for 60 Hz, interval 2, flag 0: a fixed 1/30 s a frame,
+ * with the present (0x6AF3E8, interval from [[cfg+0x18]+0x18] = this +0x18)
+ * flipping every second vblank. At less than 30 fps the race runs slow.
+ *
+ * With PS3_SIM_60 the game clock is kept real-time with interval 1: before
+ * every recompute, flag 1 and an interval above 1 made 1. Scale still
+ * applies, so the crash slow motion (scale 0.35, 0.107) is as it was. Only the
+ * instance the constructor built: a second clock (0x5EE310, from 0x1D5680, on
+ * the stack, 30 Hz fixed) is left alone. Both hooks decline, so the lifted
+ * bodies run as before, on the patched fields. */
+static int sim60_on(void)
+{
+    static int v = -1;
+    if (v < 0) { const char* e = getenv("PS3_SIM_60"); v = !e || atoi(e) != 0; }
+    return v;
+}
+/* PS3_SIM_DT_MAX_MS=<ms> (with PS3_SIM_60; default: the game's 40): the
+ * longest frame the race simulates in one step. func_001DA398 clamps a
+ * frame's dt to 0.04 s (float compare 0x1DA384, double result 0x1DA388), so
+ * under 25 fps the race runs slower than wall time (0.65x at 16 fps). A larger
+ * value keeps real time lower down, at the price of bigger physics steps
+ * than the game was ever tuned for. The lift reads both constants from guest
+ * memory, so they are rewritten there, once, after checking they are the
+ * game's. */
+static void sim_dt_max(void)
+{
+    const char* e = getenv("PS3_SIM_DT_MAX_MS");
+    if (!e || !*e) return;
+    const double ms = atof(e);
+    if (!(ms >= 20.0 && ms <= 200.0)) {
+        fprintf(stderr, "[sim60] PS3_SIM_DT_MAX_MS=%s out of range (20..200), keeping 40\n", e);
+        return;
+    }
+    if (vm_read32(0x1DA384u) != 0x3D23D70Au || vm_read64(0x1DA388u) != 0x3FA47AE140000000ull) {
+        fprintf(stderr, "[sim60] the dt clamp at 0x1DA384 is not the one expected: left alone\n");
+        return;
+    }
+    const float f = (float)(ms / 1000.0);
+    const double d = (double)f;
+    uint32_t fw; uint64_t dw;
+    memcpy(&fw, &f, 4); memcpy(&dw, &d, 8);
+    vm_write32(0x1DA384u, fw);
+    vm_write64(0x1DA388u, dw);
+    fprintf(stderr, "[sim60] frame dt clamp %.1f ms (the game's: 40)\n", ms);
+}
+static std::atomic<uint32_t> s_sim_clock;
+static int nat_clock_ctor(ppu_context* c)      /* 0x5EE2A4(this r3) */
+{
+    if (sim60_on()) {
+        static std::atomic<int> once;
+        if (!once.exchange(1)) sim_dt_max();
+        const uint32_t src = (uint32_t)c->gpr[3];
+        if (s_sim_clock.exchange(src) != src)
+            fprintf(stderr, "[sim60] game clock source at 0x%08X: real-time, vsync interval 1\n", src);
+    }
+    return 0;
+}
+static int nat_clock_recompute(ppu_context* c) /* 0x5EE178(this r3) */
+{
+    const uint32_t src = (uint32_t)c->gpr[3];
+    if (!src || src != s_sim_clock.load(std::memory_order_relaxed)) return 0;
+    const uint32_t iv = vm_read32(src + 0x18), rt = vm_read32(src + 0x1C);
+    if (rt == 1 && iv <= 1) return 0;
+    vm_write32(src + 0x1C, 1u);
+    if (iv > 1) vm_write32(src + 0x18, 1u);
+    static std::atomic<int> told;
+    if (told.fetch_add(1, std::memory_order_relaxed) < 16)
+        fprintf(stderr, "[sim60] clock 0x%08X set to %u Hz, interval %u, %s (caller 0x%08X): "
+                "made real-time, interval 1\n", src, vm_read32(src + 0x10), iv, rt ? "real-time" : "fixed step",
+                (uint32_t)c->lr);
+    return 0;
+}
+
 /* Add MotorStorm entries here (and their addresses to
  * tools/ppu_native_entries.py NATIVE_ENTRIES). The last row is an end marker
  * that keeps the array non-empty; the registry skips it (no fn). */
 static const ppu_native_desc s_funcs[] = {
     /* no compare (lifted = null): the lifted reset is the deadlock */
     { 0x00FF5B40u, "event_set", nat_event_set, nullptr, nullptr, 0u },
+    /* PS3_SIM_60: both always decline after patching the clock's fields */
+    { 0x005EE2A4u, "clock_ctor", nat_clock_ctor, nullptr, nullptr, 0u },
+    { 0x005EE178u, "clock_recompute", nat_clock_recompute, nullptr, nullptr, 0u },
     { 0u, nullptr, nullptr, nullptr, nullptr, 0u },
 };
 
