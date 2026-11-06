@@ -1237,11 +1237,10 @@ work.
   owes in a burst after each drain, and the pump folded them into one pending
   bit, so the handler's count ran at ~2-4x the frame rate (19-49 a second
   measured at 8-16 fps) instead of 60. This is a change to
-  ps3recomp/libs/video/cellGcmSys.c, kept as
-  work/patches/pending/vblank_count.diff until the toolkit rebase carries it
-  (it applies to v0.18.0 too); a binary built without it ignores the variable
-  and keeps the folded count, which at interval 1 only delays a flip by up to
-  one drain.
+  ps3recomp/libs/video/cellGcmSys.c, now in work/patches/ps3recomp.patch
+  (it was work/patches/pending/vblank_count.diff until the v0.18.0 rebase);
+  a binary built without it ignores the variable and keeps the folded count,
+  which at interval 1 only delays a flip by up to one drain.
 - `PS3_SIM_DT_MAX_MS=<ms>` (20..200, default the game's 40): rewrites the
   clamp constants at 0x1DA384/0x1DA388 (after checking they hold 0.04), so the
   race keeps real time down to 1000/ms fps. Larger steps than the game was
@@ -1292,3 +1291,136 @@ within 0.95..1.05 when clamp * fps >= 1, else within 0.70..1.10 of
 clamp * fps; 90% of the windows must pass, no more than half the samples may
 have the stock dt 33333, and the handler must run 50..70 times a second.
 With PS3_SIM_60=0 it fails ("96% of the samples have the stock fixed dt").
+
+## Toolkit rebase to v0.18.0
+
+ps3recomp moved from v0.13.0 (42f5f8f9) to v0.18.0 (4e8f3ca8, 848 upstream
+commits, 542 files). `scripts/setup.sh` and `scripts/make_patch.sh` pin the
+new BASE; `work/patches/ps3recomp.patch` is now 198 files, +36.1k/-11.5k
+lines (was 211 files, +43.7k/-6.1k against v0.13). The old tree is kept in
+the ps3recomp repository as branch `pre-v0.18` (one commit on 42f5f8f9 holding
+the old working tree); the rebase is branch `rebase-v0.18`.
+
+How: the old tree committed, cherry-picked onto v0.18 with
+`-Xignore-cr-at-eol` (upstream turned the CRLF lines of several runtime/spu
+files into LF), 83 files in conflict, resolved area by area. Where both sides
+had rebuilt the same subsystem along different lines (draw engine and Vulkan
+backend, SPU coherency/context/float helpers, the SPURS kernel and taskset
+scheduling, cellSpurs, cellFont), ours was kept whole -- it is what runs this
+game -- and upstream's interfaces and the fixes that apply to it were added on
+top. Elsewhere upstream's code was taken and ours ported onto it.
+
+### Dropped: upstream already does it
+
+- PPU lifter: our inline guest loads/stores (`g_vm_inl_lim`) -> upstream's
+  per-function memory snapshot (`PPU_MM_SNAP`); our r1 stack accessors ->
+  its one-compare range check; `--max-chunk-lines` -> `--chunk-lines`;
+  callback stacks (64-slot), the atomic lwmutex, the real-PRX import block.
+- SPU lifter: our second-code-segment lifting (`extra_segments`) -> upstream's
+  `text_image`, which lifts every executable PT_LOAD (hkp_collide's high
+  segment: 29 functions, ours 26). MFC slot release in `spu_run_lifted_job_abi`
+  is upstream's too.
+- cellVdec core: handle never 0, QueryAttrEx/OpenEx, 16-deep queue with BUSY,
+  drain on idle, log gating -- upstream's. FFmpeg is loaded at run time
+  (`PS3RECOMP_FFMPEG_RUNTIME`, libavcodec.so.60/libavutil.so.58; turned on by
+  CMake when the headers are found; `PS3RECOMP_FFMPEG=0` turns it off) instead
+  of linked through pkg-config; our swscale conversion -> `vdec_store_picture`.
+- cellSaveData: upstream registers the ctx handlers itself
+  (`cellSaveData_register_ctx_handlers` from `ppu_sysprx_register`); our
+  `ps3_savedata_register_ctx` is gone. `PS3_SAVEDATA_ROOT` still wins over
+  upstream's `PS3_GAMEDATA_ROOT`.
+- cellGcm NV3089: upstream's row copy (`gcm_row_copy`) with the 12.4 source
+  origin -- ours computed it 256x too small. Our engine hooks stay around it.
+- cellPad: upstream's freshness block, SDL hot-plug, XInput (loaded at run
+  time) and rumble backends; our virtual pads sit on top of them.
+- Windows/macOS backends (`rsx_live_draw.c`, `rsx_d3d12_backend.c`,
+  `rsx_metal_backend.m`), `cellResc.c`: upstream's, wholesale. Not built here.
+- Every `__atomic` log counter -> upstream's `PS3_LOG_FIRST`; our
+  `runtime/ps3_thread_name.h` -> `include/ps3emu/thread_name.h` (which now
+  names threads on Linux too); `sys_time_get_timezone` -> upstream's.
+
+### Kept (ours ported onto v0.18)
+
+- SPURS: Taskset2, task-id ownership and slot states, event-flag attach,
+  barrier, LFQueue detach (cellSpurs.c); our kernel/policy (`spurs_kernel.c`,
+  `spurs_policy.c`); taskset scheduling in spu_workload.c
+  (`spu_taskset_header_committed`, `spu_num_claim`, the 0x04 -> 0x01 TryJoin
+  hook). Added from upstream: `cellSpursQueueSize`, `GetTasksetInfo`,
+  `TaskExitCodeInitialize`, the decrementer overflow at 231 s, RdMachStat
+  interrupt-enable, the list-stall ack guard.
+- SPU runtime: our striped lock-line coherency, context, channels and
+  float/int helpers (they pass upstream's `test_spu_float_exact`,
+  `numeric_semantics`, `helpers`, `shufb`), with shims for upstream's API
+  (`spu_coh_watch_add/remove`, `g_spu_coh_bits`, SDCRZ, stack-reset hint).
+  The lifted SPU code now emits upstream's `SPU_DIRECT` tail calls, but
+  `spu_direct_init` is not called: they stay off, as before.
+- Draw engine and Vulkan backend: ours, plus upstream's
+  `rsx_draw_engine_note_flip`, `_guest_read` and its 5-argument
+  `_guest_wrote(loc, off, pitch, w, h)`, DXT textures never matched against a
+  colour target, and the Vulkan present entry points host_posix.c needs.
+- Fragment decompiler: rebuilt on upstream's, with ours re-applied
+  (`rsx_fp_decompile_buffered_ex2`, half/full aliasing, `RAW8_HALF2`,
+  `rsx_fp_alpha_ref` for float targets, UNNORM, CUBE_BANK, WPOS_SCALE, our
+  gamma/expand rules on the ex2 path). Texture layout keeps our crossbar
+  model (X16 presents {R,1,R,1}; two upstream tests changed to expect it).
+- cellGcmSys: our subchannel filter (the bloom fix) beside upstream's
+  `wdiag` gate; REPORT_LOCATION_MAIN at IO 0x0E000000 + offset; park waits
+  (`GCM_PARK_PATIENCE_MS`), `GCM_SEMA_TIMEOUT_MS`; NV3089_GATE/DBG tooling;
+  `GCM_VBLANK_EACH` (work/patches/pending/vblank_count.diff, now in the patch).
+- cellVdec MPEG-4/DivX (types 2 and 5) through FFmpeg's MPEG-4 decoder, the
+  N-VOP repeat, CellVdecDivxInfo; cellAdec AC3 and `cellAdecOpenEx` on the
+  run-time FFmpeg table; cellFont (ours, with its own
+  `cellFontInitializeWithRevision`); `PS3_SYS_LANG` read before upstream's
+  `PS3_LANG`/locale chooser.
+- PPU runtime: line-granular reservations and store re-check
+  (`VM_WRITE_COH`), the hashed NID index, real lwcond, `--local-regs`,
+  `__restrict` ctx (ppu_native_entries.py's header regex still matches).
+
+### Behaviour differences seen
+
+- **The guest heap moved.** v0.18 puts user memory (sys_memory_allocate) at
+  0x10000000-0x20000000 and the mapper at 0x40000000+; v0.13 had user memory
+  at 0x40000000. Every heap address in the logs and in the notes above
+  (0x436F9040 semaphores, 0x452F8A00 zlib queue, ...) is now about 0x2F000000
+  lower (the zlib queue is 0x162F7180). boot_past_fios.sh finds the queue by
+  its init line now. `PS3_MEM_ALLOC_BASE` moves it within 0x10000000-0x30000000.
+- `sceNpManagerGetAccountRegion` answers SCE_NP_ERROR_OFFLINE (upstream's;
+  it was "us"). The game does not seem to care.
+- With the draw engine on and no vtable backend, upstream hands
+  `rsx_process_method` only the methods with effects outside rsx_state (#466),
+  so the `[RSX] DRAW_*` lines came from nowhere; gcm_3d_method now logs the
+  first draws itself (`... (draw engine)`), which first_draw.sh reads.
+- PPU lift: 76,362 functions (was 76,372: 11 switch cases around 0x607340
+  are now `goto` labels inside their function; one new function at
+  0x126BF84 in embedded SPU bytes). SPU lift: more functions per task
+  (hkp_collide 1769 -> 1894).
+- `[cellVdec] DecodeAu` lines still print (~500 a race).
+- Speed: the same. Old and new first_race.sh side by side on the busy host
+  (load ~30): both PASS (780 / 771 s from the first save to the end), whole
+  run 16.1 / 16.2 fps average, in race (frames 7200..12960) 16.0 / 16.0 fps
+  average, median 15.2 / 16.0. (Those two binaries had PS3_SIM_60 but not
+  GCM_VBLANK_EACH.) The final build-vk alone at load ~12: SLOW=1 run_all.sh
+  8 of 8 PASS, first_race 687 s from the save, 20.9 fps average. The black
+  box under the in-race button prompt is in both builds' pictures.
+
+### Not carried / open
+
+- Upstream engine features our engine does not have: 3D textures, user clip
+  planes, scissored CLEAR_SURFACE (matters for split-screen, milestone 5),
+  antialiased surfaces at sample resolution and AA WPOS, border colour,
+  FP16 targets read by 2D transfers, `RSX_ENGINE_PASS_DUMP`; Vulkan present on
+  its own command buffer, D32S8 depth readback, cached-memory readback.
+- Upstream unit tests that do not build against the patch (they test
+  upstream's engine, coherency or taskset internals, or are single-file
+  fixtures that lack our `ppu_memory.h` hooks): e.g. test_color_feedback_engine,
+  test_nv3089_engine_read, test_spu_lockline_peer's lock-free section,
+  test_spu_taskset_elf_flags, test_spurs_taskset_bits_atomic, the
+  memory-domain/mmapper fixtures. The tests for our code pass:
+  test_spurs_taskset2 (110/0), test_spurs_taskset_signal (23/0),
+  test_fp_decompiler (126/0), test_texture_layout, test_pad_virtual (997/0),
+  test_vdec_handles, test_savedata_fixed, test_cellfont (56/0),
+  test_spu_coherency (204/0), the PPU lifter self-tests (test_ppu_lift
+  1533/0), and work/tests/codec (evologo_60.avi: 300 pictures; AC3
+  correlation 1.000000 against the ffmpeg CLI).
+- work/patches/pending/memleak.diff (per-thread SPU caches pooled) was not
+  folded in; it applies to v0.18.

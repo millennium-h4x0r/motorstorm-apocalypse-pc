@@ -3,7 +3,8 @@
 # ms3.psarc decompression requests after Havok creates its taskset.
 #
 # The old failure: every taskset had workload id 0, so the zlib task's LFQueue
-# waiter id was 0x0000 and a PPU push to the SPURS-owned queue q=0x452F8A00
+# waiter id was 0x0000 and a PPU push to the SPURS-owned queue (q=0x452F8A00
+# then)
 # woke "the last taskset created". Once HavokSpursTaskset existed, the push
 # signalled Havok's task 0, the zlib task slept in WAIT_SIGNAL forever and
 # "fios mediathread 5" blocked in cellSpursEventFlagWait on flag 0x452F8980;
@@ -16,11 +17,12 @@
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(cd "$HERE/.." && pwd)"
+RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"   # RUNS=<dir> keeps this run's logs and pictures apart
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
 ELF="$WORK/../disc/PS3_GAME/USRDIR/EBOOT.elf"
 SECS="${1:-45}"
-mkdir -p "$WORK/runs"
-LOG="$WORK/runs/boot_past_fios.log"
+mkdir -p "$RUNS"
+LOG="$RUNS/boot_past_fios.log"
 
 [ -x "$BIN" ] || { echo "FAIL: no binary at $BIN (scripts/build.sh)"; exit 2; }
 SPURS_LFQ_LOG=1 SDL_NO_SIGNAL_HANDLERS=1 SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy \
@@ -37,8 +39,13 @@ if [ -n "$blocked" ]; then
 fi
 # The zlib task's taskset: the one its context (image 31) was built for.
 zts=$(grep -m1 -o 'built SpursTasksetContext image=31 taskset=0x[0-9A-F]*' "$LOG" | sed 's/.*taskset=//')
-pushes=$(grep -c 'q=0x452F8A00 wake id=' "$LOG")
-wrong=$(grep 'q=0x452F8A00 wake id=' "$LOG" | grep -vc "taskset ${zts:-NONE} ")
+# The zlib request queue: the one 32-byte x 12 LFQueue FIOS creates (its
+# address follows the heap layout: 0x452F8A00 with v0.13's user memory at
+# 0x40000000, 0x162F7180 with v0.18's at 0x10000000).
+zq=$(grep -m1 -o '_LFQueueInitialize(owner=0x[0-9A-F]* q=0x[0-9A-F]* buf=0x[0-9A-F]* size=32 depth=12' "$LOG" |
+     sed 's/.* q=\(0x[0-9A-F]*\).*/\1/')
+pushes=$(grep -c "q=${zq:-NONE} wake id=" "$LOG")
+wrong=$(grep "q=${zq:-NONE} wake id=" "$LOG" | grep -vc "taskset ${zts:-NONE} ")
 if [ "${pushes:-0}" -eq 0 ]; then
     echo "FAIL: no zlib LFQueue wake was logged ($LOG)"; exit 1
 fi

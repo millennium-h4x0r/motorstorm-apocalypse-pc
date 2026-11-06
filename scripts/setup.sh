@@ -7,7 +7,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UPSTREAM=https://github.com/sp00nznet/ps3recomp.git
-BASE=42f5f8f9415117f324ca438c46573f2caca63468   # v0.13.0 docs, 2026-10-07
+BASE=4e8f3ca87a3e1d87bb83b8b7e9348fe2685cd514   # v0.18.0 (merge of #594), 2026-10-26
 PATCH="$ROOT/work/patches/ps3recomp.patch"
 DIR="${PS3RECOMP_DIR:-$ROOT/ps3recomp}"
 

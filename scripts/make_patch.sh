@@ -9,7 +9,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UPSTREAM=https://github.com/sp00nznet/ps3recomp.git
-BASE=42f5f8f9415117f324ca438c46573f2caca63468
+BASE=4e8f3ca87a3e1d87bb83b8b7e9348fe2685cd514
 SRC="${1:-${PS3RECOMP_DIR:-$ROOT/ps3recomp}}"
 [ -d "$SRC/tools" ] || { echo "no toolkit at $SRC" >&2; exit 1; }
 tmp=$(mktemp -d)

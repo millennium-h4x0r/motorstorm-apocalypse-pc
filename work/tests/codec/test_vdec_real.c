@@ -30,6 +30,8 @@ uint8_t* vm_base;
 uint32_t ppu_hle_inject_base = 0x00F00000u;
 #include "ps3/libs/codec/cellVdec.c"
 #include "ps3/libs/codec/cellAdec.c"
+#include "ps3/libs/codec/vdec_ffmpeg.c"
+#include "ps3/libs/codec/ffmpeg_runtime.c"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "ps3/libs/codec/stb_image_write.h"
@@ -223,8 +225,10 @@ int main(int argc, char** argv)
                     printf("frame %u: pictureType %u, AU size %u\n", vframe, vm_read8(info), padded);
                     /* the same picture twice: once as ARGB (peek, then put
                      * it back by copying the queue head), once as YUV420. */
-                    VdecSlot* v = vdec_get(vh);
-                    AVFrame* keep = av_frame_clone(v->frames[v->picHead]);
+                    VdecSlot* v = &s_vdec[VDEC_SLOT_OF(vh)];
+                    VdecPic keep = v->queue[v->qHead];
+                    keep.yuv = (u8*)malloc((size_t)w * h * 3 / 2);
+                    memcpy(keep.yuv, v->queue[v->qHead].yuv, (size_t)w * h * 3 / 2);
                     vm_write32(FMT + 0, 0); vm_write32(FMT + 4, 1); vm_write8(FMT + 8, 0x80);
                     assert(cellVdecGetPicture(vh, (void*)(uintptr_t)FMT, (void*)(uintptr_t)PIC) == CELL_OK);
                     u8 a;
@@ -232,8 +236,8 @@ int main(int argc, char** argv)
                     save_argb_png(path, PIC, w, h, &a);
                     assert(a == 0x80);
                     /* requeue */
-                    v->picHead = (v->picHead + VDEC_PICQ - 1) % VDEC_PICQ; v->picCount++;
-                    v->frames[v->picHead] = keep;
+                    v->qHead = (v->qHead + VDEC_QUEUE - 1) % VDEC_QUEUE; v->qCount++;
+                    v->queue[v->qHead] = keep;
                     vm_write32(FMT + 0, 3); vm_write32(FMT + 4, 0); vm_write8(FMT + 8, 0xFF);
                 }
                 assert(cellVdecGetPicture(vh, (void*)(uintptr_t)FMT, (void*)(uintptr_t)PIC) == CELL_OK);

@@ -28,13 +28,14 @@
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(cd "$HERE/.." && pwd)"
+RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"   # RUNS=<dir> keeps this run's logs and pictures apart
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
 ELF="$WORK/../disc/PS3_GAME/USRDIR/EBOOT.elf"
-OUT="${OUT:-$WORK/runs/first_race}"
+OUT="${OUT:-$RUNS/first_race}"
 [ -x "$BIN" ] || { echo "FAIL: no binary at $BIN (scripts/build.sh)"; exit 2; }
 rm -rf "$OUT"; mkdir -p "$OUT"
 
-python3 -I - "$BIN" "$ELF" "$OUT" "$WORK/runs" "${LIMIT_S:-3600}" "${SKIP_S:-60}" <<'EOF'
+python3 -I - "$BIN" "$ELF" "$OUT" "$RUNS" "${LIMIT_S:-3600}" "${SKIP_S:-60}" <<'EOF'
 import os, re, signal, subprocess, sys, time, zlib, struct
 from pathlib import Path
 

@@ -11,13 +11,14 @@
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(cd "$HERE/.." && pwd)"
+RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"   # RUNS=<dir> keeps this run's logs and pictures apart
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
 ELF="$WORK/../disc/PS3_GAME/USRDIR/EBOOT.elf"
 SECS="${1:-120}"
 EVERY="${EVERY:-10}"
-mkdir -p "$WORK/runs"
-LOG="$WORK/runs/first_frame.log"
-DIR="$WORK/runs/first_frame_dump"
+mkdir -p "$RUNS"
+LOG="$RUNS/first_frame.log"
+DIR="$RUNS/first_frame_dump"
 rm -rf "$DIR"; mkdir -p "$DIR"
 
 [ -x "$BIN" ] || { echo "FAIL: no binary at $BIN (scripts/build.sh)"; exit 2; }
@@ -30,7 +31,7 @@ grep -aq '^\[ppu\] run: code 0x' "$LOG" ||
     { echo "FAIL: the guest entry was never dispatched (status $rc, $LOG)"; exit 1; }
 case "$rc" in 0|124) ;; *) echo "FAIL: exited with status $rc ($LOG)"; exit 3 ;; esac
 
-python3 -I - "$DIR" "$WORK/runs/first_frame.png" "$(grep -ac '^\[frame-dump\]' "$LOG")" <<'EOF'
+python3 -I - "$DIR" "$RUNS/first_frame.png" "$(grep -ac '^\[frame-dump\]' "$LOG")" <<'EOF'
 import math, struct, sys, zlib
 from pathlib import Path
 

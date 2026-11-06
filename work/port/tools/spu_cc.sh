@@ -11,7 +11,7 @@ spu=0 cold=0
 for a in "$@"; do
     case "$a" in
         */runtime/spu/spu_cold.c) spu=1 cold=1 ;;
-        */port/spu/*.c|*/runtime/spu/spu_dispatch_mt.c) spu=1 ;;
+        */port/spu/*.c|*/port/spu-*/*.c|*/runtime/spu/spu_dispatch_mt.c) spu=1 ;;
     esac
 done
 if [ "$spu" = 1 ] && [ -z "${PORT_SPU_GCC:-}" ]; then
