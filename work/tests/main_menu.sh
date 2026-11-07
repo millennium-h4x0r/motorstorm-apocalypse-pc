@@ -64,7 +64,7 @@ class Game:
         self.pad = self.dir / "pad"
         self.set("")
         env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy",
-                   SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_HDD1_ROOT=_hdd1(save),
+                   SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_GAMEDATA_ROOT=str(save) + "_gamedata", PS3_HDD1_ROOT=_hdd1(save),
                    PS3_PAD_FILE=str(self.pad), LD_FRAME_DUMP=str(self.dir / "d"),
                    LD_FRAME_DUMP_EVERY="10")
         self.f = open(self.log, "wb")

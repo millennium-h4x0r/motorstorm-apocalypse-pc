@@ -1545,6 +1545,13 @@ Every step is checked on the frame dumps (the yellow OPTIONS title, the
 DISPLAY SETTINGS subtitle, the yellow `< >` around the focused row): a press
 made while a screen slides in is lost. It also fails on any `sceNpTrophy`
 error. 2 of 2 PASS (|A-B| 13-14, |C-B| 2, |C-A| 13).
+Trophies are kept in `$PS3_GAMEDATA_ROOT/trophies` (sceNpTrophy.c), and by
+default that is the player's `gamedata/trophies`. The tests set
+PS3_SAVEDATA_ROOT but not PS3_GAMEDATA_ROOT, so a race in a test unlocked
+trophies into the player's file (gamedata/trophies/NPWR00899.json changed at
+03:19 on 2026-11-07). all_tracks, save_options, festival and
+first_boot_fresh now give each run its own PS3_GAMEDATA_ROOT; main_menu.sh
+and first_race.sh do not yet.
 `work/tests/ms3patch.py` has the shared helpers: read/write PSARC, the stock
 gamestates.xml, the AutoPilot HUD, and frame boxes.
 
@@ -1567,8 +1574,14 @@ race, and the results.
 
 The pad policy (from the frame dumps):
 - While the race HUD (yellow POS) shows, nothing is pressed.
-- Otherwise it taps CROSS, CROSS, SQUARE. A car that finishes outside the top
-  5 gets QUIT (CIRCLE) / RETRY RACE (SQUARE) instead of CONTINUE.
+- On the not-qualified results it presses SQUARE, then CROSS to confirm the
+  retry. A car that finishes
+  outside the top 5 gets QUIT (CIRCLE) / RETRY RACE (SQUARE) instead of
+  CONTINUE, and that screen is told apart by QUIT's pink circle where
+  CONTINUE's cross would be (x 930..962, y 640..668).
+- Anything else gets CROSS. A blind SQUARE every third tap also retried
+  races that had been won ("CONGRATULATIONS! You won the race!", then the
+  race again), so it is only pressed on that screen.
 
 Boot 1 ends at the first `SAVE complete` after a race HUD. Boot 2 reboots on
 that save and goes the same way to the next race HUD. The event is the track
@@ -1581,14 +1594,22 @@ event.
 The first event after the Prologue is Upper Bohemia (track_haight_v1), "Day
 One - Morning", a buggy in a field of 16, 3 laps. The next is Good Herb
 (track_yerbabuena_v1). Measured: race HUD 150 s after boot, event finished
-and saved at 458 s, and boot 2 continued on track_yerbabuena_v1 (PASS). Under AutoPilot the car
+and saved at 458 s (923 s in a run that had to retry), and boot 2 continued
+on track_yerbabuena_v1. festival.sh on the final pad policy and earlier
+ones: 3 PASS (fest3, fest5, fest8 under work/runs), 1 hang (fest4, below).
+Two runs (fest6, fest7) were stopped while the retry handling was being fixed. Under AutoPilot the car
 has finished from 1st to below 5th.
 
-One hang so far, in an earlier hand run (work/runs/festival/fe1, reported to
-ppu2): at 1:05 into that race, one SPU task of taskset 0x1483F880 (image 36)
-spun forever on a "task0" host thread and Havok stopped. Seven dispatches of
-that image against six returns: task 0 was started again while its first
-instance still ran. The rerun did not hang.
+Intermittent hang in the race (2 of 6 races so far, both on haight_v1, at
+~0:35 and ~1:05; reported to ppu2). The frame dumps and the Havok task
+returns stop for good. In one run a "ppu main" thread spins at ~110% CPU, in
+the other only an SPU "task0" thread (one of the persistent images 30/31/37,
+which never return in any run). The dispatches and returns of images 32-36
+balance in both logs. festival.sh starts the game with
+PR_SET_PTRACER_ANY (ms3patch.allow_ptrace). When no frame has been dumped
+for 120 s it writes every host thread's stack (gdb `thread apply all bt 40`;
+lifted functions are func_<addr>, so it is the guest chain too) to
+`<boot>/hang.bt` and fails.
 
 ## Simulation pacing
 
@@ -1980,6 +2001,14 @@ batches the main thread waits for.
   lifted PPU code itself (FPRs and vector registers live in ctx memory, every
   store checks the coherence bitmap twice), and the SPU job code that the
   main thread waits for (renderablejob, pvsjob).
+- Seen once (integ6 SLOW, sim_speed's race, ~81 s of race clock): a host
+  SIGSEGV on the main PPU thread in lifted func_00911128 (callers 0x8FDE10,
+  0x8FED40), a 16-byte vector store to guest EA 0xD0000000 -- the guard page
+  of the first guest thread stack (vm_stack_allocate puts a one-page guard
+  under each stack, from VM_STACK_BASE 0xD0000000 up; stack sizes are the
+  requested ones rounded to a page, 16 KB minimum, as lv2). The main thread's
+  own stack is at 0x0FEFxxxx, so this was a pointer into another thread's
+  stack area, not an overflow of its own. Not seen again.
 - More DSP plugins and job modules at the slots and buffers a run uses
   (`SPU_INTERP_STATS=10` names the pages still interpreted).
 - Boots with an empty hdd1 corrupted the UI timer tree (func_005BE4C0 pushes

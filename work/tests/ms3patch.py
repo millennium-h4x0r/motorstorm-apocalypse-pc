@@ -166,3 +166,20 @@ def psarc_ranges(path, prefix=""):
         if name.startswith(prefix):
             out.append((off, off + sum(bsz[idx:idx + nblk(usz)]), name))
     return sorted(out)
+
+
+def allow_ptrace():
+    """preexec_fn: let any process of this user attach (Yama ptrace_scope=1
+    only lets a parent): a hung game can then be backtraced with gdb -p.
+    PR_SET_PTRACER survives the exec."""
+    import ctypes
+    ctypes.CDLL(None).prctl(0x59616d61, ctypes.c_ulong(0xffffffffffffffff), 0, 0, 0)
+
+
+def host_backtrace(pid, out):
+    """Every host thread's stack (lifted guest functions show as func_<addr>,
+    so this is the guest call chain too) into the file out."""
+    import subprocess
+    with open(out, "w") as f:
+        subprocess.run(["gdb", "-p", str(pid), "-batch", "-ex", "set pagination off",
+                        "-ex", "thread apply all bt 40"], stdout=f, stderr=subprocess.STDOUT, timeout=300)

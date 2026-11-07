@@ -97,7 +97,7 @@ class Game:
         self.pads = [self.dir / f"pad{n}" for n in range(pads)]
         for n in range(pads): self.set(n, "")
         env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy",
-                   SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_HDD1_ROOT=hdd1(save),
+                   SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_GAMEDATA_ROOT=str(save) + "_gamedata", PS3_HDD1_ROOT=hdd1(save),
                    LD_FRAME_DUMP=str(self.dir / "d"), LD_FRAME_DUMP_EVERY="10",
                    PS3RECOMP_ENG_WORLDLOG="1")
         for n, p in enumerate(self.pads): env[f"PS3_PAD_FILE_{n}"] = str(p)

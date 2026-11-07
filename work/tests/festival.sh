@@ -16,8 +16,9 @@
 # Boot 1 (the save copied to a fresh root): CROSS through the movies, the
 # title, MAIN MENU > FESTIVAL > Continue, the event's intro, and its results.
 # While the race HUD (yellow POS, bottom left) is up nothing is pressed. If
-# the car did not qualify the results offer only QUIT and RETRY RACE (SQUARE),
-# so the taps off the HUD alternate CROSS, CROSS, SQUARE. Done at the first
+# the car did not qualify the results offer only QUIT and RETRY RACE (SQUARE):
+# seen by QUIT's pink circle in the prompt, it presses SQUARE and CROSS (the
+# retry asks to confirm); else CROSS. Done at the first
 # "[cellSaveData] SAVE complete" after a race HUD was seen: the event's
 # progress.
 # Boot 2 (same save root): the save loads (new=0), CROSS through to FESTIVAL >
@@ -69,13 +70,15 @@ class Game:
         shutil.copytree(ROOT / "hdd1", self.dir / "hdd1")
         self.log, self.pad = self.dir / "log", self.dir / "pad"; self.set("")
         env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy", SDL_VIDEODRIVER="dummy",
-                   PS3_SAVEDATA_ROOT=str(save), PS3_HDD1_ROOT=str(self.dir / "hdd1"),
+                   PS3_SAVEDATA_ROOT=str(save), PS3_GAMEDATA_ROOT=str(OUT / "gamedata"),
+                   PS3_HDD1_ROOT=str(self.dir / "hdd1"),
                    PS3_HDD0_ROOT=str(hdd0), PS3_PAD_FILE=str(self.pad), FS_CALLER="1",
                    LD_FRAME_DUMP=str(self.dir / "d"), LD_FRAME_DUMP_EVERY="60")
         self.f = open(self.log, "wb")
         self.p = subprocess.Popen([BIN, ELF], cwd=ROOT, env=env, stdout=self.f,
-                                  stderr=subprocess.STDOUT, start_new_session=True)
+                                  stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=mp.allow_ptrace)
         self.t0 = time.time(); self.taps = 0; self.pos = 0; self.worlds = []
+        self.last_frame, self.last_frame_t = None, time.time()
     def set(self, held):
         t = self.pad.with_suffix(".tmp"); t.write_text(held + "\n"); os.replace(t, self.pad)
     def tap(self, b):
@@ -86,17 +89,31 @@ class Game:
         if m: self.stop(); fail(f"{m.group(0)!r} in {self.log}")
         if self.p.poll() is not None: self.stop(); fail(f"the game exited ({self.log})")
         if time.time() - self.t0 > LIMIT: self.stop(); fail(f"{self.dir.name}: nothing done within {LIMIT} s ({self.log})")
-    def hud(self):
         fr = sorted((self.dir / "d").glob("frame_*.ppm"), key=os.path.getmtime)
-        if len(fr) < 2: return False
-        w, h, px = mp.read_ppm(fr[-2])
-        return mp.count(px, w, h, (40, 220, 560, 640), lambda r, g, b: r > 200 and g > 150 and b < 90) > 25
+        if fr and fr[-1] != self.last_frame: self.last_frame, self.last_frame_t = fr[-1], time.time()
+        if self.last_frame and time.time() - self.last_frame_t > 120:
+            bt = self.dir / "hang.bt"; mp.host_backtrace(self.p.pid, bt)
+            self.stop(); fail(f"{self.dir.name}: no new frame for 120 s, the game hung; host stacks in {bt} ({self.log})")
+    def latest(self):
+        fr = sorted((self.dir / "d").glob("frame_*.ppm"), key=os.path.getmtime)
+        return mp.read_ppm(fr[-2]) if len(fr) > 1 else None
     def drive(self):
-        """One step of the pad policy: hands off while racing, else
-        CROSS, CROSS, SQUARE (RETRY RACE when the event was not qualified)."""
-        if self.hud(): return True
-        self.taps += 1
-        self.tap("SQUARE" if self.taps % 3 == 0 else "CROSS")
+        """One step of the pad policy: hands off while the race HUD (yellow
+        POS) shows; SQUARE (RETRY RACE) on the not-qualified results, whose
+        prompt starts with QUIT's pink circle where CONTINUE's cross would
+        be; CROSS on anything else. A blind SQUARE also retried races that
+        had been won."""
+        f = self.latest()
+        if f is None: self.tap("CROSS"); return False
+        w, h, px = f
+        if mp.count(px, w, h, (40, 220, 560, 640), lambda r, g, b: r > 200 and g > 150 and b < 90) > 25:
+            return True
+        failed = mp.count(px, w, h, (930, 962, 640, 668),
+                          lambda r, g, b: r > 190 and 70 < g < 160 and b > 100 and r - g > 60, 1) > 15
+        if failed:                            # RETRY RACE, then CROSS on its "are you sure"
+            self.tap("SQUARE"); time.sleep(1.5); self.tap("CROSS")
+        else:
+            self.tap("CROSS")
         return False
     def new_worlds(self, t):
         """Track worlds the game reads, in order. The boot reads a header of

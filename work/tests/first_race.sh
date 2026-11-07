@@ -63,7 +63,7 @@ def setp(held):
     tmp = pad.with_suffix(".tmp"); tmp.write_text(held + "\n"); os.replace(tmp, pad)
 setp("")
 env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy",
-           SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_HDD1_ROOT=_hdd1(save), PS3_PAD_FILE_0=str(pad),
+           SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_GAMEDATA_ROOT=str(save) + "_gamedata", PS3_HDD1_ROOT=_hdd1(save), PS3_PAD_FILE_0=str(pad),
            LD_FRAME_DUMP=str(OUT / "d"), LD_FRAME_DUMP_EVERY="60")
 f = open(log, "wb")
 p = subprocess.Popen([BIN, ELF], cwd=ROOT, env=env, stdout=f, stderr=subprocess.STDOUT,
