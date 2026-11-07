@@ -62,6 +62,7 @@
 
 /work/tests/*
 !/work/tests/*.sh
+!/work/tests/*.py
 !/work/tests/codec/
 
 /work/patches/*
