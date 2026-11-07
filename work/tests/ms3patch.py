@@ -183,3 +183,175 @@ def host_backtrace(pid, out):
     with open(out, "w") as f:
         subprocess.run(["gdb", "-p", str(pid), "-batch", "-ex", "set pagination off",
                         "-ex", "thread apply all bt 40"], stdout=f, stderr=subprocess.STDOUT, timeout=300)
+
+
+# -- a hard time limit for a whole test ---------------------------------------
+def _descendants(pid):
+    """Every process below pid (by /proc ppid), deepest last."""
+    import os
+    kids = {}
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/stat") as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            continue
+        kids.setdefault(ppid, []).append(int(d))
+    out, todo = [], [pid]
+    while todo:
+        p = todo.pop()
+        for c in kids.get(p, []):
+            out.append(c)
+            todo.append(c)
+    return out
+
+
+def hard_limit(seconds, what):
+    """Fail the test (exit 1) if it is still running after `seconds`: kill
+    every process it started (games run in their own session, so each one's
+    whole group) and say so. A wait that never ends -- a game that stopped
+    presenting frames, a screen the driver does not know -- then costs the
+    suite this long instead of hanging it. HARD_LIMIT_S overrides."""
+    import os
+    import signal
+    seconds = int(os.environ.get("HARD_LIMIT_S", seconds))
+
+    def fire(*_):
+        print(f"FAIL: {what}: still running after the hard limit of {seconds} s "
+              f"(HARD_LIMIT_S); killed", flush=True)
+        for p in reversed(_descendants(os.getpid())):
+            for kill in (lambda: os.killpg(p, signal.SIGKILL), lambda: os.kill(p, signal.SIGKILL)):
+                try:
+                    kill()
+                except (ProcessLookupError, PermissionError):
+                    pass
+        os._exit(1)
+    signal.signal(signal.SIGALRM, fire)
+    signal.alarm(seconds)
+
+
+# -- /dev_hdd1 seed -----------------------------------------------------------
+# A boot with an empty /dev_hdd1 copies four fonts there and builds the
+# game's UI cache: it writes "chimp" and renames it to a hash name, 1558
+# times, ~1.2 GB in all (the same files RPCS3 keeps in
+# dev_hdd1/caches/BCES00484_BCES00484439898). Tests skip that with a seed:
+# work/runs/hdd1_seed, built once by a clean boot and then read-only, and
+# hard-linked into each run's own PS3_HDD1_ROOT (the game only reads the
+# cache once it exists; a write would hit the read-only file, not change
+# the seed). Never ROOT/hdd1, which play.sh and any run without its own
+# PS3_HDD1_ROOT rewrite in place.
+HDD1_FONTS = {"nimbussanconl-bla.ttf": 132372, "nimbussandot-blaconita.ttf": 229120,
+              "nimbussanst-regularcondensed.ttf": 83912}
+HDD1_CACHE_FILES = 1558
+
+
+def _hdd1_cache(d):
+    import os
+    try:
+        return [f for f in os.listdir(d) if f not in HDD1_FONTS and f not in ("japanese.ttf", "cache")
+                and os.path.isfile(os.path.join(d, f))]
+    except OSError:
+        return []
+
+
+def hdd1_complete(d):
+    """The nimbus fonts copied and the whole cache renamed into place (no
+    "chimp" left half-built). japanese.ttf may be 0 bytes: its 2.1 MB copy
+    can fail (docs/NOTES.md "First-boot hdd1 corruption") and the game then
+    reads it from the disc."""
+    import os
+    d = Path(d)
+    try:
+        if not all(os.path.getsize(d / f) == n for f, n in HDD1_FONTS.items()):
+            return False
+    except OSError:
+        return False
+    c = _hdd1_cache(d)
+    return "chimp" not in c and len(c) >= HDD1_CACHE_FILES
+
+
+def _freeze(src, seed):
+    """Move a finished hdd1 into place as the seed, read-only."""
+    import os
+    import subprocess
+    if not hdd1_complete(src):
+        return False
+    os.rename(src, seed)                  # before the chmod: a read-only dir cannot be moved
+    subprocess.run(["chmod", "-R", "a-w", str(seed)], check=True)
+    return True
+
+
+def _generate_hdd1(root, out):
+    """Boot once with an empty hdd1 into `out`, CROSS every 2 s, until the
+    cache is complete and nothing in it has changed for 60 s."""
+    import os
+    import signal
+    import subprocess
+    import time
+    elf = Path(root) / "disc/PS3_GAME/USRDIR/EBOOT.elf"
+    binp = os.environ.get("BIN") or str(Path(root) / "work/port/build-vk/MotorStormRecomp")
+    out = Path(out)
+    out.mkdir(parents=True)
+    (out.parent / "save").mkdir(exist_ok=True)
+    pad = out.parent / "pad"
+    pad.write_text("\n")
+    env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy", SDL_VIDEODRIVER="dummy",
+               PS3_HDD1_ROOT=str(out), PS3_SAVEDATA_ROOT=str(out.parent / "save"),
+               PS3_GAMEDATA_ROOT=str(out.parent / "gamedata"), PS3_PAD_FILE=str(pad))
+    with open(out.parent / "log", "wb") as f:
+        p = subprocess.Popen([os.path.abspath(binp), str(elf)], cwd=root, env=env, stdout=f,
+                             stderr=subprocess.STDOUT, start_new_session=True)
+        end = time.time() + 2400
+        try:
+            last, quiet_since = None, time.time()
+            while time.time() < end and p.poll() is None:
+                state = sorted(_hdd1_cache(out))
+                if state != last:
+                    last, quiet_since = state, time.time()
+                if hdd1_complete(out) and time.time() - quiet_since > 60:
+                    break
+                pad.write_text("CROSS\n"); time.sleep(0.25); pad.write_text("\n"); time.sleep(1.75)
+        finally:
+            if p.poll() is None:
+                os.killpg(p.pid, signal.SIGKILL)
+                p.wait()
+    return hdd1_complete(out)
+
+
+def hdd1_seed(root):
+    """The read-only seed, built on first use by one boot with an empty hdd1
+    (a few minutes; tests starting meanwhile wait on a lock)."""
+    import fcntl
+    import shutil
+    import subprocess
+    root = Path(root)
+    seed = root / "work/runs/hdd1_seed"
+    if hdd1_complete(seed):
+        return seed
+    lock = open(str(seed) + ".lock", "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    if hdd1_complete(seed):
+        return seed
+    if seed.exists():
+        raise SystemExit(f"FAIL: {seed} exists but is not a complete hdd1; remove it (chmod -R u+w first)")
+    gen = root / "work/runs/hdd1_seed_gen"
+    subprocess.run(["chmod", "-R", "u+w", str(gen)], stderr=subprocess.DEVNULL)
+    shutil.rmtree(gen, ignore_errors=True)
+    print("[hdd1] building the /dev_hdd1 seed: one boot with an empty /dev_hdd1", flush=True)
+    if not _generate_hdd1(root, gen / "hdd1") or not _freeze(gen / "hdd1", seed):
+        raise SystemExit(f"FAIL: could not build an hdd1 seed (see {gen}/log)")
+    return seed
+
+
+def seed_hdd1(root, dst):
+    """The seed hard-linked into dst (a test's own PS3_HDD1_ROOT): instant,
+    no 1.2 GB copy. Its directories are made writable (the game adds files);
+    the files stay the seed's read-only inodes."""
+    import os
+    import shutil
+    shutil.copytree(hdd1_seed(root), dst, copy_function=os.link)
+    for d, _, _ in os.walk(dst):
+        os.chmod(d, 0o755)
+    return dst

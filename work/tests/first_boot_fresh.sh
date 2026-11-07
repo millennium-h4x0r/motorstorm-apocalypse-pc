@@ -20,6 +20,7 @@
 # keeps the logs apart, BOOTS=<n> repeats the boot n times (all must pass).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export TESTS_DIR="$HERE"   # for the python below: ms3patch.hard_limit
 WORK="$(cd "$HERE/.." && pwd)"
 RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
@@ -29,6 +30,7 @@ OUT="$RUNS/first_boot_fresh"
 rm -rf "$OUT"; mkdir -p "$OUT"
 
 python3 -I - "$BIN" "$ELF" "$OUT" "${BOOTS:-1}" <<'EOF'
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp; _mp.hard_limit(400 * int(_o.environ.get("BOOTS", 1)) + 120, "first_boot_fresh")
 import os, re, signal, subprocess, sys, time
 from pathlib import Path
 

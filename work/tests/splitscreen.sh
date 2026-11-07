@@ -22,6 +22,7 @@
 # Usage: tests/splitscreen.sh     BIN=..., RUNS=<dir>, TRACK=<world>, MENU=1.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export TESTS_DIR="$HERE"   # for the python below: ms3patch.hard_limit
 WORK="$(cd "$HERE/.." && pwd)"
 RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
@@ -73,6 +74,7 @@ PYEOF
 fi
 
 python3 -I - "$BIN" "$ELF" "$OUT" "$RUNS/splitscreen.png" <<'EOF'
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp; _mp.hard_limit(1800, "splitscreen")
 import os, re, signal, struct, subprocess, sys, time, zlib, shutil
 from pathlib import Path
 
@@ -85,8 +87,8 @@ def fail(msg):
 
 def hdd1(save):
     d = str(save) + "_hdd1"
-    if not os.path.exists(d) and not os.environ.get("FRESH_HDD1") and (ROOT / "hdd1").is_dir():
-        shutil.copytree(ROOT / "hdd1", d)
+    if not os.path.exists(d) and not os.environ.get("FRESH_HDD1"):
+        _mp.seed_hdd1(ROOT, d)            # work/runs/hdd1_seed, never ROOT/hdd1 (ms3patch.py)
     return d
 
 class Game:

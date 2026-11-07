@@ -34,6 +34,7 @@
 #   the Quick Race modes besides FESTIVAL (= race with the track's gags).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export TESTS_DIR="$HERE"   # for the python below: ms3patch
 WORK="$(cd "$HERE/.." && pwd)"
 RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
@@ -43,6 +44,7 @@ OUT="$RUNS/all_tracks"
 rm -rf "$OUT"; mkdir -p "$OUT"
 
 python3 -I - "$BIN" "$ELF" "$OUT" "${PAR:-1}" "${LIMIT_S:-600}" "${PLAYERS:-1}" "${KEEP:-0}" "${MODE:-race}" "$@" <<'EOF'
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp
 import hashlib, os, re, shutil, signal, struct, subprocess, sys, time, zlib
 from pathlib import Path
 
@@ -205,7 +207,7 @@ class Run:
         usr = d / "hdd0/game/BCES00484/USRDIR"; usr.mkdir(parents=True)
         psarc_write(usr / "ms3patchv0101.psarc", "/data/gamestate/gamestates.xml", gamestates(ticket, world))
         (d / "save").mkdir(); (d / "d").mkdir()
-        shutil.copytree(ROOT / "hdd1", d / "hdd1") if (ROOT / "hdd1").is_dir() else (d / "hdd1").mkdir()
+        _mp.seed_hdd1(ROOT, d / "hdd1")
         self.log, self.pad = d / "log", d / "pad"
         self.pads = [self.pad] + [d / f"pad{i}" for i in range(1, PLAYERS)]
         self.set("")

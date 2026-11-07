@@ -22,6 +22,7 @@
 # LIMIT_S=<s> the time limit (default 1500), WORLD_FRAMES=<n> (default 200).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export TESTS_DIR="$HERE"   # for the python below: ms3patch.hard_limit
 WORK="$(cd "$HERE/.." && pwd)"
 RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"   # RUNS=<dir> keeps this run's logs and pictures apart
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
@@ -32,6 +33,7 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 
 python3 -I - "$BIN" "$ELF" "$OUT" "$RUNS" "${LIMIT_S:-1500}" "${SKIP_S:-60}" \
     "${WORLD_FRAMES:-200}" <<'EOF'
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp; _mp.hard_limit(int(_o.environ.get("LIMIT_S", 1500)) + 600, "race_intro")
 import os, re, signal, subprocess, sys, time, zlib, struct
 from pathlib import Path
 
@@ -46,8 +48,8 @@ def _hdd1(save):
     corruption"); FRESH_HDD1=1 starts empty to reproduce that."""
     import shutil
     d = str(save) + "_hdd1"
-    if not os.path.exists(d) and not os.environ.get("FRESH_HDD1") and (ROOT / "hdd1").is_dir():
-        shutil.copytree(ROOT / "hdd1", d)
+    if not os.path.exists(d) and not os.environ.get("FRESH_HDD1"):
+        _mp.seed_hdd1(ROOT, d)            # work/runs/hdd1_seed, never ROOT/hdd1 (ms3patch.py)
     return d
 
 def fail(msg):

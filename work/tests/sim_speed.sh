@@ -36,6 +36,7 @@
 #        MIN_WINDOWS=<n> (default 15), RUNS=<dir>.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export TESTS_DIR="$HERE"   # for the python below: ms3patch.hard_limit
 WORK="$(cd "$HERE/.." && pwd)"
 RUNS="${RUNS:-$WORK/runs}"
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
@@ -48,6 +49,7 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 # sampler beside the race got EPERM on every read ("ended after 0 s of race
 # clock" while the race itself passed).
 python3 -I - "$BIN" "$OUT" "${SAMPLE_S:-300}" "${MIN_WINDOWS:-15}" "$HERE/first_race.sh" <<'EOF'
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp; _mp.hard_limit(6000, "sim_speed")
 import os, signal, struct, subprocess, sys, time
 from pathlib import Path
 BIN, OUT, SAMPLE, MINW, FIRST_RACE = sys.argv[1], Path(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]), sys.argv[5]

@@ -32,6 +32,7 @@
 # Usage: tests/festival.sh   BIN=... RUNS=... SAVE_FROM=...
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export TESTS_DIR="$HERE"   # for the python below: ms3patch.hard_limit
 WORK="$(cd "$HERE/.." && pwd)"
 RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
@@ -48,6 +49,7 @@ fi
 [ -d "$SAVE_FROM/BCES00484" ] || { echo "FAIL: no BCES00484 save in $SAVE_FROM"; exit 2; }
 
 python3 -I - "$BIN" "$ELF" "$OUT" "$HERE" "$SAVE_FROM" "${LIMIT_S:-3600}" <<'EOF'
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp; _mp.hard_limit(2 * int(_o.environ.get("LIMIT_S", 3600)) + 900, "festival")
 import bisect, os, re, shutil, signal, subprocess, sys, time
 from pathlib import Path
 BIN, ELF, OUT, HERE = os.path.abspath(sys.argv[1]), sys.argv[2], Path(sys.argv[3]).resolve(), Path(sys.argv[4])
@@ -67,7 +69,7 @@ BAD = re.compile(r"^\[null-call\]|unresolved indirect call|unresolved NID|guest_
 class Game:
     def __init__(self, name):
         self.dir = OUT / name; (self.dir / "d").mkdir(parents=True)
-        shutil.copytree(ROOT / "hdd1", self.dir / "hdd1")
+        mp.seed_hdd1(ROOT, self.dir / "hdd1")
         self.log, self.pad = self.dir / "log", self.dir / "pad"; self.set("")
         env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy", SDL_VIDEODRIVER="dummy",
                    PS3_SAVEDATA_ROOT=str(save), PS3_GAMEDATA_ROOT=str(OUT / "gamedata"),

@@ -27,6 +27,7 @@
 # Usage: tests/main_menu.sh        BIN=... overrides the binary.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export TESTS_DIR="$HERE"   # for the python below: ms3patch.hard_limit
 WORK="$(cd "$HERE/.." && pwd)"
 RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"   # RUNS=<dir> keeps this run's logs and pictures apart
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
@@ -36,6 +37,7 @@ OUT="$RUNS/main_menu"
 rm -rf "$OUT"; mkdir -p "$OUT"
 
 python3 -I - "$BIN" "$ELF" "$OUT" "$RUNS/main_menu.png" <<'EOF'
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp; _mp.hard_limit(1200, "main_menu")
 import os, re, signal, subprocess, sys, time, zlib, struct
 from pathlib import Path
 
@@ -49,8 +51,8 @@ def _hdd1(save):
     corruption")."""
     import shutil
     d = str(save) + "_hdd1"
-    if not os.path.exists(d) and not os.environ.get("FRESH_HDD1") and (ROOT / "hdd1").is_dir():
-        shutil.copytree(ROOT / "hdd1", d)
+    if not os.path.exists(d) and not os.environ.get("FRESH_HDD1"):
+        _mp.seed_hdd1(ROOT, d)            # work/runs/hdd1_seed, never ROOT/hdd1 (ms3patch.py)
     return d
 
 def fail(msg):
@@ -182,16 +184,36 @@ def frame_now():
     n = len(g.frames()); g.until(lambda: len(g.frames()) > n + 1, 20, what="a new frame")
     return g.frames()[-1]
 
-shots = [frame_now()]
+def back_to_menu():
+    """The main menu plays its attract video after 30 s without input
+    (ui/fe/carrier_menus.xml: Flow inactivetime="30" target="AttractVideo"),
+    which a slow host can reach between presses. START leaves it (any button
+    does; START does nothing on the menu itself). Returns the menu frame."""
+    for _ in range(10):
+        f = frame_now()
+        if is_menu(f): return f
+        g.tap("START", 0.2); time.sleep(2)
+    g.stop(); fail(f"lost the main menu (attract video?) and could not get back ({g.log})")
+
+def settled(wait):
+    """Two frames `wait` s after the last press, 1 s apart, and their
+    difference: the menu's own motion once a selection's zoom-and-wiggle
+    has finished (measured right after a press, it read 18.9 once)."""
+    time.sleep(wait); a = back_to_menu(); time.sleep(1); b = frame_now()
+    return b, menu_diff(a, b)
+
+first, noise = settled(0)
+shots = [first]
 for b in ("DOWN", "DOWN", "UP"):
-    g.tap(b, 0.2); time.sleep(1.5); shots.append(frame_now())
-still = frame_now()                     # no input: how much the menu animates by itself
+    back_to_menu()
+    g.tap(b, 0.2); time.sleep(2.5); shots.append(back_to_menu())
+_, noise2 = settled(3)
+noise = min(noise, noise2)              # no input: how much the menu animates by itself
 alive = g.alive()
 g.stop()
 u2 = unresolved(g)
 
 w, h, px = read_ppm(shots[0]); write_png(PNG, w, h, px)
-noise = menu_diff(shots[-1], still)
 diffs = [menu_diff(shots[i], shots[i + 1]) for i in range(3)]
 desc = ", ".join(f"{b} {d:.2f}" for b, d in zip(("DOWN", "DOWN", "UP"), diffs))
 if u1 or u2:

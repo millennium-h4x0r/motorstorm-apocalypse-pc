@@ -18,6 +18,12 @@ SECS="${1:-120}"
 EVERY="${EVERY:-10}"
 mkdir -p "$RUNS"
 LOG="$RUNS/first_frame.log"
+# Its own save, gamedata and /dev_hdd1 (the seed hard-linked, ms3patch.py):
+# without them the game writes the player's gamedata/ and ROOT/hdd1.
+ROOTS="$RUNS/first_frame_roots"; chmod -R u+w "$ROOTS" 2>/dev/null; rm -rf "$ROOTS"; mkdir -p "$ROOTS/save" "$ROOTS/gamedata"
+if [ -d "$WORK/runs/hdd1_seed" ]; then cp -al "$WORK/runs/hdd1_seed" "$ROOTS/hdd1" && find "$ROOTS/hdd1" -type d -exec chmod u+w {} +
+else mkdir -p "$ROOTS/hdd1"; fi
+export PS3_SAVEDATA_ROOT="$ROOTS/save" PS3_GAMEDATA_ROOT="$ROOTS/gamedata" PS3_HDD1_ROOT="$ROOTS/hdd1"
 DIR="$RUNS/first_frame_dump"
 rm -rf "$DIR"; mkdir -p "$DIR"
 

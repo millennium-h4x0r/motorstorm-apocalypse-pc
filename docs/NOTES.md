@@ -845,6 +845,45 @@ looked at failed (6 corruptions, 2 pre-movie stalls). After:
 first_boot_fresh.sh 3 of 3 and 3 of 3, main_menu.sh 2 of 2 seeded and 2 of 2
 with `FRESH_HDD1=1`, no null call or unresolved indirect call in any log.
 
+### The /dev_hdd1 UI cache, cellFsRename, and the test seed
+
+The game keeps a UI cache in /dev_hdd1. Each entry is written as "chimp" and
+renamed to a hash name (cellFsOpen of the hash first, which misses), 1558
+entries and about 1.2 GB in all: the same files RPCS3 keeps in
+dev_hdd1/caches/BCES00484_BCES00484439898.
+
+cellFsRename was never registered by ppu_fs. It fell through to
+libs/filesystem/cellFs.c, whose mount table has no /dev_hdd1 (and ignores
+PS3_HDD1_ROOT), so every rename failed with CELL_ENOENT. No entry ever
+persisted. Every boot rebuilt the whole cache (minutes of I/O beside the
+menus) and rewrote "chimp" in place in whatever hdd1 the run had. ppu_fs now
+implements cellFsRename with the cellFsOpen mapping (`[fs] rename ...
+failed` on an error). A first boot now leaves the 1558 files, and later boots
+read them. cellFsUnlink and cellFsRmdir are still CELL_OK stubs.
+
+Tests take /dev_hdd1 from a seed, work/runs/hdd1_seed (ms3patch.hdd1_seed,
+seed_hdd1):
+- It is built by one clean boot with an empty hdd1. Done means the fonts are
+  there, at least 1558 cache files, no "chimp" left, and 60 s without a
+  change. Its japanese.ttf may be 0 bytes (see "First-boot hdd1
+  corruption").
+- It is then renamed into place and made read-only. Creation holds a lock,
+  so concurrent tests wait and reuse it.
+- Each run gets it hard-linked into its own PS3_HDD1_ROOT: writable
+  directories, read-only files.
+- Never ROOT/hdd1: play.sh and every run without its own PS3_HDD1_ROOT
+  rewrite it in place, and a copy taken at 11:11 on 2026-11-07 differed from
+  it a minute later.
+reach_entry, first_frame, first_draw and boot_past_fios now set their own
+PS3_SAVEDATA_ROOT, PS3_GAMEDATA_ROOT and PS3_HDD1_ROOT too.
+
+Every python-driven test also has a hard time limit (ms3patch.hard_limit,
+HARD_LIMIT_S overrides). When it fires it kills every process the test
+started and fails, instead of hanging a suite. That happened once:
+save_options waited 51 minutes on a game that had stopped presenting frames
+on the OPTIONS screen. save_options also fails after 120 s with no new frame,
+writing gdb stacks to boot*/hang.bt first.
+
 ### The Prologue race load (was the next blocker)
 
 Fixed in milestone 4; see "Race" below.
@@ -2185,3 +2224,98 @@ average 35-65 throughout, so only same-moment pairs are compared.
   controller support itself (it showed "none found" there before).
 - `PS3RECOMP_UI_KEYS` also takes `click:X,Y` (window pixels); ImGui may need
   it sent two or three times.
+
+## PPU codegen performance (2026-11-07)
+
+What the lifted PPU code costs on the main thread, and new lifter options
+that make it cheaper. All behind flags: `ppu_lifter.py` with the old flags
+writes byte-identical output (relifted and diffed against work/src/recomp).
+
+### Measuring
+
+`work/codegen/bench.py NAME BIN [track]` boots straight into a quick race
+(all_tracks.sh's patched gamestates.xml, union_v1 by default), holds R2 and
+measures the main thread between two frame dumps (exact frame counts):
+CPU ms/frame, `perf stat` events, or with `PERF=1 PERF_REC_EV=cycles:u,instructions:u`
+a perf profile that `work/codegen/cat.py` splits per frame into lifted code,
+waits (sys_timer_usleep, lk_wait, ...), coherence, dispatch/HLE. Boot to the
+race HUD ~45 s, a run ~2 min. The host ran at load 40-100 throughout: cycle
+counts are only comparable side by side; instruction counts are stable to
+~2%.
+
+A control with the same runtime objects is linked from another build's
+lifted objects (`work/codegen/hyb.py LINKCMD OUT BUILDDIR NNN=OBJ...`; with
+`--chunks 140` the chunk cut depends only on the function list, so any mix
+of two lifts' chunk objects links).
+
+### Where it goes
+
+- Main thread, race, default lift: lifted code ~75M cycles and ~70M
+  instructions a frame, IPC ~0.85; `ic_fetch_stall` on nearly every cycle and
+  ~38 L1i misses per 1000 instructions. It is frontend-bound: per ~40 s the
+  main thread runs ~2450 lifted functions, 26 MB of x86 (the top 200, half the
+  time, are 5.5 MB). The default lift is ~70 bytes of x86 per PPU instruction.
+- With `--chunks 140`, 10 chunks hold 72% of the main thread's lifted
+  samples and 20 hold 93%.
+- What made the code big: every guest store ~25 instructions of checks (span,
+  two diagnostic globals, a NULL test and the bitmap pre-check, the bitmap
+  post-check) with an out-of-line slow path whose call clobbered every SSE
+  register, so float and vector values lived in stack slots; FPRs and VRs in
+  ctx (re-read after every store); SNC's `addic` for stack addresses (~12% of
+  all PPU instructions) whose dead carry stayed live in `_xer` to the next
+  write-back; a ~40-byte trampoline drain at every call site; the memory
+  model recomputed at every function entry.
+
+### The options (`--local-regs` plus)
+
+- `--local-fprs`, `--local-vrs`: FPRs and VRs as C locals, the same
+  dataflow as `--local-regs` (written back before calls and exits, reloaded
+  after calls).
+- `--split-xer`: XER as two locals, CA and the rest; an addic's carry is
+  then dead unless something reads it. (`--split-cr`, CR as eight field
+  locals, made the code bigger; not used.)
+- `--fast-mm`: the memory-model copy from a per-unit cache filled once; a
+  store tests the runtime's `g_spu_coh_bitmap` array directly (no pointer,
+  no NULL test; zero until an SPU reserves a line); the diagnostic globals
+  dropped from the inline store (their probes already force the span to 0);
+  lvx/stvx as one 16-byte access through the copy; the trampoline drain out
+  of line; the out-of-line accesses through register-keeping thunks.
+- `--lean-fp`: the FP helpers test the result for NaN once and look at the
+  operands only when it is one. Same bits (11760 operand combinations incl.
+  NaN payloads/signs, GCC and clang).
+
+The thunks: the cold paths call `vm_*_cold`, which callers see as clang's
+`preserve_all` (everything but RAX/R11 kept, YMM0-15 whole). They are
+naked asm, because clang 18 ends an AVX `preserve_all` function with a
+`vzeroupper` before `ret`, wiping the upper halves of the YMM registers it
+has just restored. That bug cost a day: the first build guest-read NULL in
+func_009649C4 on every boot; found by linking mixes of the new and the
+default chunk objects (chunk 048), then header variants. A void thunk must
+keep RAX too (callers keep values in it across a void preserve_all call).
+`tools/test_ppu_fast_mm.py` checks both against a callee that clobbers every
+caller-saved register.
+
+### Results
+
+Full lift `--local-regs --local-fprs --local-vrs --fast-mm --lean-fp
+--split-xer --chunks 140` (work/codegen/src/recomp_v3, build work/port/build-v3)
+against the same runtime with the default chunks, side by side, twice:
+
+| per frame, main thread | default | v3 |
+|---|---|---|
+| lifted cycles | 74.4M / 74.5M | 61.4M / 60.7M (-18%) |
+| lifted instructions | 69.6M / 69.3M | 56.0M / 55.6M (-20%) |
+| main-thread CPU | 36.8 / 35.7 ms | 32.3 / 32.4 ms (-11%) |
+
+(load ~90, so the absolute ms are high.) Binary 656 MB -> 553 MB. Compile
+time about the same. Validation on that binary: test_ppu_lift 1533/0,
+test_ppu_local_regs and test_ppu_fast_mm pass; ALL_TRACKS 39/39 reach GO;
+run_all.sh 7/8 (main_menu, save_options, first_boot_fresh ... pass; festival
+failed inside its own first_race.sh run, see below).
+
+### Tried, measured, dropped
+
+- BOLT (bolt-18; relink with `--emit-relocs`; Zen3 has no LBR, so
+  `perf2bolt -nl`; ext-tsp, hfsort+, split-functions): iTLB misses -73%, but
+  lifted code 22% slower (96M vs 78M cycles a frame, twice).
+- `preserve_all` wrappers written in C (the clang bug above).

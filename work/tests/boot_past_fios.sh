@@ -23,6 +23,12 @@ ELF="$WORK/../disc/PS3_GAME/USRDIR/EBOOT.elf"
 SECS="${1:-45}"
 mkdir -p "$RUNS"
 LOG="$RUNS/boot_past_fios.log"
+# Its own save, gamedata and /dev_hdd1 (the seed hard-linked, ms3patch.py):
+# without them the game writes the player's gamedata/ and ROOT/hdd1.
+ROOTS="$RUNS/boot_past_fios_roots"; chmod -R u+w "$ROOTS" 2>/dev/null; rm -rf "$ROOTS"; mkdir -p "$ROOTS/save" "$ROOTS/gamedata"
+if [ -d "$WORK/runs/hdd1_seed" ]; then cp -al "$WORK/runs/hdd1_seed" "$ROOTS/hdd1" && find "$ROOTS/hdd1" -type d -exec chmod u+w {} +
+else mkdir -p "$ROOTS/hdd1"; fi
+export PS3_SAVEDATA_ROOT="$ROOTS/save" PS3_GAMEDATA_ROOT="$ROOTS/gamedata" PS3_HDD1_ROOT="$ROOTS/hdd1"
 
 [ -x "$BIN" ] || { echo "FAIL: no binary at $BIN (scripts/build.sh)"; exit 2; }
 SPURS_LFQ_LOG=1 SDL_NO_SIGNAL_HANDLERS=1 SDL_AUDIODRIVER=dummy SDL_VIDEODRIVER=dummy \

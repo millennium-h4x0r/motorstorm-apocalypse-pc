@@ -20,6 +20,7 @@
 # Usage: tests/save_options.sh     BIN=... RUNS=...
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export TESTS_DIR="$HERE"   # for the python below: ms3patch.hard_limit
 WORK="$(cd "$HERE/.." && pwd)"
 RUNS="${RUNS:-$WORK/runs}"; mkdir -p "$RUNS"
 BIN="${BIN:-$WORK/port/build-vk/MotorStormRecomp}"
@@ -29,6 +30,7 @@ OUT="$RUNS/save_options"
 rm -rf "$OUT"; mkdir -p "$OUT"
 
 python3 -I - "$BIN" "$ELF" "$OUT" "$HERE" <<'EOF'
+import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp; _mp.hard_limit(1500, "save_options")
 import os, re, shutil, signal, subprocess, sys, time
 from pathlib import Path
 BIN, ELF, OUT, HERE = os.path.abspath(sys.argv[1]), sys.argv[2], Path(sys.argv[3]).resolve(), Path(sys.argv[4])
@@ -50,7 +52,7 @@ BAD = re.compile(r"^\[null-call\]|unresolved indirect call|unresolved NID|"
 class Game:
     def __init__(self, name):
         self.dir = OUT / name; (self.dir / "d").mkdir(parents=True)
-        shutil.copytree(ROOT / "hdd1", self.dir / "hdd1")
+        mp.seed_hdd1(ROOT, self.dir / "hdd1")
         self.log, self.pad = self.dir / "log", self.dir / "pad"; self.set("")
         env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy", SDL_VIDEODRIVER="dummy",
                    PS3_SAVEDATA_ROOT=str(save), PS3_GAMEDATA_ROOT=str(OUT / "gamedata"), PS3_HDD1_ROOT=str(self.dir / "hdd1"),
@@ -58,7 +60,7 @@ class Game:
                    LD_FRAME_DUMP=str(self.dir / "d"), LD_FRAME_DUMP_EVERY="10")
         self.f = open(self.log, "wb")
         self.p = subprocess.Popen([BIN, ELF], cwd=ROOT, env=env, stdout=self.f,
-                                  stderr=subprocess.STDOUT, start_new_session=True)
+                                  stderr=subprocess.STDOUT, start_new_session=True, preexec_fn=mp.allow_ptrace)
     def set(self, held):
         t = self.pad.with_suffix(".tmp"); t.write_text(held + "\n"); os.replace(t, self.pad)
     def tap(self, b, wait=1.5):
@@ -69,11 +71,17 @@ class Game:
         if m: self.stop(); fail(f"{m.group(0)!r} in {self.log}")
         if self.p.poll() is not None: self.stop(); fail(f"the game exited ({self.log})")
     def frame(self, newer_than=0):
-        """The newest complete dump, at least newer_than seconds after now."""
+        """The newest complete dump, at least newer_than seconds after now.
+        No new dump for 120 s fails: the game stopped presenting (once it
+        froze on the OPTIONS screen while its cache writes went on, and this
+        waited 51 minutes)."""
         t0 = time.time()
         while True:
             fr = sorted((self.dir / "d").glob("frame_*.ppm"), key=os.path.getmtime)
             if len(fr) > 1 and os.path.getmtime(fr[-2]) >= t0 + newer_than: return fr[-2]
+            if time.time() - t0 > 120 + newer_than:
+                bt = self.dir / "hang.bt"; mp.host_backtrace(self.p.pid, bt)
+                self.stop(); fail(f"no new frame dump for 120 s: the game stopped presenting; host stacks in {bt} ({self.log})")
             self.check(); time.sleep(0.3)
     def until(self, cond, limit, what):
         end = time.time() + limit
