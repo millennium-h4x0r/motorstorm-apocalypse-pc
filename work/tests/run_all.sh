@@ -5,9 +5,11 @@
 # first_draw, first_frame, main_menu (milestone 3), and with SLOW=1
 # race_intro (the 3D world on screen in the Prologue intro: minutes),
 # first_race (milestone 4, a whole race: tens of minutes) and sim_speed (the
-# race clock keeps wall time, PS3_SIM_60: ~13 minutes). Add new ones as
+# race clock keeps wall time, PS3_SIM_60: ~13 minutes) and splitscreen (a
+# four-player split-screen race, milestone 5: ~8 minutes). Add new ones as
 # work/tests/<name>.sh.
-# Usage: tests/run_all.sh        SLOW=1 tests/run_all.sh
+# all_tracks (every track reaches GO, milestone 5: ~25 min) runs with ALL_TRACKS=1.
+# Usage: tests/run_all.sh        SLOW=1 tests/run_all.sh    ALL_TRACKS=1 SLOW=1 tests/run_all.sh
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 fail=0 n=0
@@ -15,7 +17,8 @@ for f in "$HERE"/*.sh; do
     [ -e "$f" ] || continue
     t="$(basename "$f" .sh)"
     [ "$t" = run_all ] && continue
-    case "$t" in first_race|race_intro|sim_speed) [ "${SLOW:-0}" = 1 ] || { echo "[$t] skipped (SLOW=1 runs it)"; continue; } ;; esac
+    case "$t" in all_tracks) [ "${ALL_TRACKS:-0}" = 1 ] || { echo "[$t] skipped (ALL_TRACKS=1 runs it: every track, ~25 min)"; continue; } ;; esac
+    case "$t" in first_race|race_intro|sim_speed|splitscreen) [ "${SLOW:-0}" = 1 ] || { echo "[$t] skipped (SLOW=1 runs it)"; continue; } ;; esac
     n=$((n + 1))
     out=$(bash "$f" 2>&1 | tail -1)
     echo "[$t] $out"

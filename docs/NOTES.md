@@ -1467,7 +1467,7 @@ passes when:
 - the log has no null call, unresolved call or NID.
 It keeps `<track>.png` and `summary.txt` under `$RUNS/all_tracks/`.
 
-Measured (fix1 copy, PAR=2, load ~40): 39 of 39 reach GO, the clock running
+Measured (fix1 copy, PAR=2, load ~40): 39 of 39 reach GO in two full runs, the clock running
 21-56 s after start. About 25 min for the whole list. The pictures still
 show the known black shadow shapes and, on dogpatch_v1 and pier_v2, an
 overexposed sky band.
@@ -1736,3 +1736,121 @@ top. Elsewhere upstream's code was taken and ours ported onto it.
   passed on its own afterwards). main_menu.sh 12 more times on that build,
   six with PS3_SPU_TASK_POOL=0: 5 of 6 PASS either way, each failure a menu
   press that moved the panel too little (DOWN 11 / 17), no freeze.
+
+## PPU/SPU performance, round 2 (2026-11-07)
+
+Measured on a host shared with other games and builds (load average 25-55),
+so frame rates are only comparable between runs made side by side. Scripts
+and runs: work/runs/ppu2 (measure2.sh boots with drive.py, retries a corrupt
+boot, then takes threads.py, perf of the process and perf --call-graph of
+the main thread; mt.py splits a thread's samples by kind).
+
+### Where a race frame goes
+
+- Main PPU thread ~45% busy. On CPU: lifted game code 81%, coherence 8.6%
+  (notify_spus, ll_take), dispatch 7.5% (ppu_lookup 3%, ps3_indirect_call
+  1.7%), no single hot game function (the top ones are 1-2% each).
+- Its waits (`PS3_MAIN_WAITPROF=1`, `PS3_LOCK_STATS=1`): the job-batch event
+  (the game's spinlock wait at 0xFF5AFC, via the batch's Wait 0x673AB8)
+  14-35% of wall time depending on load -- call sites 0x5D3100 (the most),
+  0x45ADA8, 0x614E9C, 0x662F44, 0x76538C; sys_event_queue_receive at
+  0x8C2294/0x8C18FC ~10%; usleep at 0x6BCB10/0x6BCB6C 2-5%. JobBatchHandler
+  (thread 3) finds finished batches by polling with usleep(50) (~175 us a
+  turn), so detection adds only ~1-2 ms a frame.
+- SPURS: the five SPU threads 47-57% busy (`SPURS_BUSY_STATS=1`). Job time:
+  renderablejob 19%, pvsjob 15%, vehiclephysics 8%, dxtblendjob 6%,
+  hierarchyevaluate 6%; runtime overhead in those threads ~16% (DMA copies,
+  overlay checks on GETs, dispatch).
+- `SPURS_IDLE_SPIN_US`: the idle spin does not show in race profiles;
+  `SPURS_IDLE_STATS=1`: 31k idle sleeps per 10 s, 5.5k ended by a notify,
+  6-17 by the 1 ms timeout with work waiting, 1.5k found while spinning.
+  0, 50 and 200 made no measurable difference; left at 200.
+
+### MultiStream: a livelock, not audio work
+
+The MultiStream core (task image 37) calls LS 0x21D20 (`bisl` at 0x6E28),
+which is in the task's bss: the core reads the firmware's
+/dev_flash/sys/external/flashMP3.pic into it at run time (vaddr 0 at LS
+0x1A880, its code segment 0x1A900..0x2A810, the entry 0x74A0 = 0x21D20;
+checked byte for byte against a local-store dump, `SPU_INTERP_LSDUMP_PC`).
+lift_spu.py had 0x21D20 as an extra task entry; lifted from the ELF it is an
+empty function, so spu_drain_call dispatched it, the pc did not move, and the
+thread spun in spu_drain_call / spu_lookup for good: 100% of a core and no
+audio mixed.
+
+- `SPU_LIFT_DISABLE_AT=<img>:<hex lsa>[,...]` (runtime): leave single lifted
+  entries to the interpreter (37:21D20 here). Interpreted, the decoder kept
+  the core busy (spu_step, and ~40% in spu_lookup misses).
+- lift_spu.py `FW_LIFTS` lifts flashMP3.pic from the user's dev_flash (found
+  as main.cpp finds it; skipped when absent) as image 263 at LS 0x1A900, and
+  registers it with `spu_overlay_register_bytes_at` (spu_channels.c): a
+  fixed-address lift whose reference bytes are a copy in the binary, since no
+  guest EA holds them. `SPU_FW_LIFT=1` makes it resident when its bytes are
+  loaded; it then owns 0x21D20. TASK_EXTRA_ENTRIES' 0x21D20 is to go once
+  that is the default (a check now rejects extra entries outside a task's
+  executable bytes; 0x21D20 is the one allowed exception).
+- `SPU_OVL_REVALIDATE=1`: the core reads each stream's 48-byte descriptor
+  over the head of the first DSP plugin (LS 0x37000), which evicts the
+  plugin's lift, and puts the head back from its own copy with stores, not a
+  DMA. A branch that misses inside a fixed-address lift's range now checks
+  whether local store holds the lift's bytes and makes it resident again.
+  Interpreted DSP code went from ~110M steps per 10 s to none. The plugins
+  are placed in consecutive slots from 0x37000 (text segments, 0x80-aligned),
+  so which plugin sits where depends on the effect chain; only i3dl2@0x37000,
+  multi_compressor_td@0x37480 and filter@0x39800 are lifted.
+- With all of it the core is still ~85-95% of a core, all lifted code now
+  (the filter plugin alone a quarter), in the headless runs. It is its own
+  thread, off the frame's critical path.
+
+### Job modules in a second code buffer
+
+The WWS job manager packs job modules into local store: jobmod_9c4578e272ec
+(52 KB, position-independent: `brsl` to get the pc, `ila` offsets) ran at LS
+0x8000 while another module held 0x4000. Its lift exists only at 0x4000, so
+those jobs ran on the interpreter, and an interpreted run inside a job module
+never came back to lifted code (spu_lifted_lookup did not look at the resident
+overlay): whole jobs interpreted, 8-12M SPU steps/s in the race, on the job
+batches the main thread waits for.
+
+- lift_spu.py `JOBMOD_ALT_BASES` lifts listed modules again at other buffers
+  (9c4578e272ec at 0x8000, image 264); registered by (signature, base)
+  (`spu_overlay_register_sig_at`), matched by the pc (`spu_overlay_match_pc_at`:
+  the PM's codeBase field at LS 0x1320 still says 0x4000). `SPU_WWS_ALT_BASE=1`.
+  `SPU_WWS_BASE_LOG=1` prints each (code buffer, module) pair a run uses.
+- `SPU_INTERP_REJOIN_OVL=1`: the interpreter rejoins the resident overlay's
+  lift, after checking that the module's head is in local store at its base.
+- Together (side by side, load 55): interpreted steps 8.1M/s -> 0.1M/s, SPURS
+  busy 56-57% -> 47-51% for the same work.
+
+### Smaller changes
+
+- `SPU_COH_WFILT=1`: watch counts per hashed line, so a notify for a line
+  nobody watches skips the watch list (40% of notify_spus was that walk:
+  one cold node per parked SPURS task).
+- `PPU_LKC_BITS=<8..16>` (default 11): the per-thread indirect-call cache is
+  heap-allocated now (was 32 KB of static TLS in every thread). 14 bits was
+  within noise of 11 (ppu_lookup 3.0% vs 3.4% of the main thread).
+- `PS3_MAIN_WAITPROF=<tid>`: a thread's wall time inside HLE imports and lv2
+  syscalls by (NID or syscall, lr), every 10 s. `PS3_LOCK_STATS` names the
+  caller of the job-batch Wait instead of the Wait.
+- Kept from round 1 after validation: ppu_loader.cpp's `g_resv_unnoted`
+  (`PPU_RESV_BREAK_LINE=1`: always scan) and the claim checks in the notify
+  loops (`SPU_COH_LIVE=0`: off).
+- Validation: main_menu.sh x2 and first_race.sh PASS with SPU_FW_LIFT=1
+  SPU_COH_WFILT=1 (work/runs/ppu2/v1_*: race over 745 s after the save);
+  main_menu.sh x2 PASS with all five switches above on (v2_*).
+
+### Open
+
+- 60 fps is not in reach by trimming: the main thread's own work is ~24-30 ms
+  a frame at these loads, spread over the whole game. What would move it: the
+  lifted PPU code itself (FPRs and vector registers live in ctx memory, every
+  store checks the coherence bitmap twice), and the SPU job code that the
+  main thread waits for (renderablejob, pvsjob).
+- More DSP plugins and job modules at the slots and buffers a run uses
+  (`SPU_INTERP_STATS=10` names the pages still interpreted).
+- Boots with an empty hdd1 corrupted the UI timer tree (func_005BE4C0 pushes
+  child/sibling links on a 33-slot stack at this+0x3A4 with no bound, so a bad
+  link fills memory up through OPD 0x01430BD0) in ~9 of 10 boots on the
+  00:24 tree; the 00:43 tree boots clean. With the hdd1 pre-filled (the four
+  fonts, empty cache/BCES00484439898/) it never happened.
