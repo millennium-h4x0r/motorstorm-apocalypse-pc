@@ -713,6 +713,13 @@ int main(int argc, char** argv)
     env_default("SPU_FW_LIFT", "1");
     /* notify_spus skips the coherence-watch walk for unwatched lines. */
     env_default("SPU_COH_WFILT", "1");
+    /* SPU lifts the game loads somewhere other than where they were lifted
+     * (docs/NOTES.md "PPU/SPU performance, round 2"): MultiStream's DSP plugin
+     * heads restored without a DMA, the WWS job module run from the 0x8000
+     * code buffer, and the interpreter rejoining a resident overlay's lift. */
+    env_default("SPU_OVL_REVALIDATE", "1");
+    env_default("SPU_WWS_ALT_BASE", "1");
+    env_default("SPU_INTERP_REJOIN_OVL", "1");
     /* Draw engine (docs/NOTES.md "Race rendering"): a pass sampling a sub-rect
      * of its own target reads a snapshot of it (the car AO boxes: without it,
      * black shadows), real 3D textures (the AO volumes), scissored clears,

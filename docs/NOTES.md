@@ -1467,6 +1467,18 @@ passes when:
 - the log has no null call, unresolved call or NID.
 It keeps `<track>.png` and `summary.txt` under `$RUNS/all_tracks/`.
 
+`PLAYERS=2|4` makes 2 or 4 local human players (split-screen), each a
+`viewport="i"` Player with its own virtual pad (`PS3_PAD_FILE_<i>`). The HUD
+and clock boxes move with the layout: 2 players are top/bottom views,
+pillarboxed (POS x 200..330 y 650..705, clock x 990..1075 y 14..40); 4
+players are quadrants (bottom-left POS x 25..110 y 650..700, top-right clock
+x 1170..1250 y 12..36). 3 players uses the 4-player boxes and is untested.
+`KEEP=1` keeps every frame dump. Checked: union_v1 and mainline_v1 reach GO
+with 2 players, and mainline_v1 with 4. union_v1 with 4 was still at 00:14
+on the race clock when a 300 s limit ran out (a dump every ~6 s at load
+~40), so keep the 600 s default for split-screen. (Black geometry seen in
+2-player on an older binary is gone with the shadow fix of 44b87d1.)
+
 Measured (fix1 copy, PAR=2, load ~40): 39 of 39 reach GO in two full runs, the clock running
 21-56 s after start. About 25 min for the whole list. The pictures still
 show the known black shadow shapes and, on dogpatch_v1 and pier_v2, an
@@ -1838,7 +1850,22 @@ batches the main thread waits for.
   loops (`SPU_COH_LIVE=0`: off).
 - Validation: main_menu.sh x2 and first_race.sh PASS with SPU_FW_LIFT=1
   SPU_COH_WFILT=1 (work/runs/ppu2/v1_*: race over 745 s after the save);
-  main_menu.sh x2 PASS with all five switches above on (v2_*).
+  with all five switches on: main_menu.sh x2 PASS (v2_*), first_race.sh
+  3 PASS (hC1, hC2, hW1) and 1 "physics stopped" (v2_fr).
+- The "physics stopped" hang (Havok tasks created by CreateTask, never
+  dispatched; everything else idle) came 5 times, every time with round 1's
+  uncommitted resv/claim changes on (bin_b x3, v2_fr, hA1); 0 of 3 races
+  without them (hB1, hB2, c4). Those changes are also what makes the main
+  thread cheap: side by side at load ~26, the main thread was 68-72% busy
+  with them off against ~45% with them on at similar loads. So the bug is
+  worth finding rather than the change dropped. `SPU_TS_WATCHDOG=<s>` dumps
+  every tracked taskset's bitsets, the runtime's run bits and the Taskset2
+  records when no task has started or exited for <s> s -- run races with it
+  until one hangs.
+- Side by side at load ~26, both without round 1's changes: defaults 17.8-20.1
+  fps, main thread 71.5% busy (~37 ms a frame); all five switches 16.7-18.6
+  fps, 68.4% (~39 ms), job-batch waits 11% of wall against 18%. The fps
+  difference is within the noise of this host.
 
 ### Open
 

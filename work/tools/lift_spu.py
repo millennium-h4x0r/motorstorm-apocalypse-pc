@@ -153,16 +153,14 @@ TASK_EXTRA_ENTRIES = {
         0x105A0, 0x105F8, 0x10668, 0x10838, 0x111F8,
         # second code segment (LS 0x38F00): targets of a table called from 0x3AB40
         0x3ACB8, 0x3ADA0, 0x3ADC0, 0x3ADF0, 0x3AE80, 0x3AEB0, 0x3AF40, 0x3AF70],
-    # 0x21D20 (the core's call at LS 0x6E28) is in the task's bss, where the
-    # MultiStream core loads the firmware's flashMP3.pic at run time (FW_LIFTS).
-    # Lifted from the ELF it is an empty function, and dispatching to it never
-    # moves the pc: the core's thread spins in spu_drain_call / spu_lookup for
-    # good (100% of a core, no audio mixed). SPU_LIFT_DISABLE_AT=37:21D20 (or
-    # SPU_FW_LIFT=1, whose resident lift owns the address) avoids it; the entry
-    # goes once that is validated.
-    "task_multistream_mp3_012BC500": [0x21D20],
+    # Not 0x21D20 (the core's call at LS 0x6E28): it is in the task's bss,
+    # where the MultiStream core loads the firmware's flashMP3.pic at run time
+    # (FW_LIFTS). Lifted from the ELF it was an empty function, and dispatching
+    # to it never moved the pc: the core's thread spun in spu_drain_call /
+    # spu_lookup for good (100% of a core, no audio mixed). Without the
+    # firmware lift it now runs on the interpreter.
 }
-TASK_EXTRA_OUTSIDE_TEXT = {("task_multistream_mp3_012BC500", 0x21D20)}   # see above; to be removed
+TASK_EXTRA_OUTSIDE_TEXT = set()   # (task, lsa) pairs exempt from the check below
 
 # Lifted functions a native replacement may take over (keyed by lifted
 # directory name -> LS addresses). None yet for this title.
@@ -728,6 +726,12 @@ def main():
                not any(sg["flags"] & 1 and sg["vaddr"] <= a < sg["vaddr"] + sg["filesz"] for sg in t["segments"]):
                 die(f"TASK_EXTRA_ENTRIES: {t['dir']} 0x{a:X} is not in an executable segment's file bytes")
     # build_spu_workloads.py numbers images in sorted file-name order.
+    ms_img = 0   # the MultiStream core's image: the only loader of the DSP / firmware code regions
+    for i, t in enumerate(sorted(tasks, key=lambda t: t["dir"])):
+        if t["name"] == "multistream_mp3":
+            ms_img = TASK_IMAGE_BASE + i
+    if not ms_img:
+        die("no MultiStream task image (the DSP and firmware lifts need its id)")
     for i, t in enumerate(sorted(tasks, key=lambda t: t["dir"])):
         prefix = re.sub(r"[^0-9A-Za-z_]", "_", t["dir"]) + "_"
         require_entry(spu, t["dir"], prefix, t["entry"])
@@ -796,7 +800,8 @@ def main():
     dsp_decl = "".join(f"extern void {nm}_spu_recomp_register(void);\n" for nm, *_ in dsp_lifted)
     dsp_reg = "".join(
         f"    spu_begin_image({img}); {nm}_spu_recomp_register();\n"
-        f"    spu_overlay_register_region_at(0x{ea:08X}u, 0x{lsa:X}u, 0x{n:X}u, {img});\n"
+        f"    spu_overlay_register_region_at(0x{ea:08X}u, 0x{lsa:X}u, 0x{n:X}u, {img});"
+        f" spu_overlay_owner_last({ms_img});\n"
         for nm, ea, lsa, n, img in dsp_lifted)
     fw_decl = "".join(f"extern void {nm}_spu_recomp_register(void);\n" for nm, *_ in fw_lifted)
     for nm, blob, lsa, img in fw_lifted:
@@ -804,7 +809,8 @@ def main():
         fw_decl += f"static const uint8_t {nm}_bytes[0x{len(blob):X}] = {{\n{rows}\n}};\n"
     fw_reg = "".join(
         f"    spu_begin_image({img}); {nm}_spu_recomp_register();\n"
-        f"    if (fw_lift_on()) spu_overlay_register_bytes_at({nm}_bytes, 0x{lsa:X}u, 0x{len(blob):X}u, {img});\n"
+        f"    if (fw_lift_on()) {{ spu_overlay_register_bytes_at({nm}_bytes, 0x{lsa:X}u, 0x{len(blob):X}u, {img});"
+        f" spu_overlay_owner_last({ms_img}); }}\n"
         for nm, blob, lsa, img in fw_lifted)
     alt_decl = "".join(f"extern void {nm}_spu_recomp_register(void);\n" for nm, *_ in alt_lifted)
     for nm, sig, b, n in alt_lifted:
@@ -825,6 +831,7 @@ def main():
 extern void spu_begin_image(int image_id);
 extern void spu_overlay_register_region_at(uint32_t content_ea, uint32_t lsa, uint32_t span, int image_id);
 extern void spu_overlay_register_bytes_at(const uint8_t* bytes, uint32_t lsa, uint32_t span, int image_id);
+extern void spu_overlay_owner_last(int owner);   /* only that task image loads it */
 extern char* getenv(const char*);
 /* SPU_FW_LIFT=1: the firmware code lifts below become resident when their
  * bytes are loaded at their address (default off until validated). */

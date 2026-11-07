@@ -28,6 +28,10 @@
 # Usage: tests/all_tracks.sh [track ...]    (default: every track below)
 #   BIN=<binary>  RUNS=<dir>  PAR=<n> games at once (default 1)
 #   LIMIT_S=<s> per track.  Track names are the worlds, e.g. union_v1.
+#   PLAYERS=<1..4> local human players (split-screen; one PS3_PAD_FILE_<n>
+#   per port, all tapped together).  KEEP=1 keeps every frame dump.
+#   MODE=race|eliminator|chase: the game mode (data/gamemodes/<MODE>.mode),
+#   the Quick Race modes besides FESTIVAL (= race with the track's gags).
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(cd "$HERE/.." && pwd)"
@@ -38,12 +42,15 @@ OUT="$RUNS/all_tracks"
 [ -x "$BIN" ] || { echo "FAIL: no binary at $BIN (scripts/build.sh)"; exit 2; }
 rm -rf "$OUT"; mkdir -p "$OUT"
 
-python3 -I - "$BIN" "$ELF" "$OUT" "${PAR:-1}" "${LIMIT_S:-600}" "$@" <<'EOF'
+python3 -I - "$BIN" "$ELF" "$OUT" "${PAR:-1}" "${LIMIT_S:-600}" "${PLAYERS:-1}" "${KEEP:-0}" "${MODE:-race}" "$@" <<'EOF'
 import hashlib, os, re, shutil, signal, struct, subprocess, sys, time, zlib
 from pathlib import Path
 
-BIN, ELF, OUT, PAR, LIMIT = sys.argv[1], sys.argv[2], Path(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
-WANT = sys.argv[6:]
+BIN, ELF, OUT, PAR, LIMIT = os.path.abspath(sys.argv[1]), sys.argv[2], Path(sys.argv[3]).resolve(), int(sys.argv[4]), int(sys.argv[5])
+PLAYERS, KEEP, MODE = int(sys.argv[6]), sys.argv[7] == "1", sys.argv[8]
+WANT = sys.argv[9:]
+assert MODE in ("race", "eliminator", "chase"), "MODE is race|eliminator|chase"
+assert 1 <= PLAYERS <= 4, "PLAYERS is 1..4"
 ROOT = Path(ELF).parents[3]
 PSARC = ROOT / "disc/PS3_GAME/USRDIR/ms3.psarc"
 
@@ -114,26 +121,40 @@ def psarc_write(out, name, data, BLK=65536):
 
 STOCK = psarc_read(PSARC, "/data/gamestate/gamestates.xml").decode("utf-8")
 
+# MODE -> (GameConfig replaced, state booted goes to, ticket prefix, AI?)
+ROUTE = {"race": ("quickrace", "QuickRacing", "", True),
+         "eliminator": ("quickrace", "QuickRacing", "", True),
+         "chase": ("quickrace", "QuickRacing", "", True)}
+# Time attack is not here: booted -> timeattackracing (noperkrace config,
+# ticket "Time Attack Infinite - Track NN") and QuickRacing with
+# timeattack.mode both dereference NULL in their first frame
+# (func_002A79D4, func_00ABCBDC): that controller wants state the challenge
+# lobby sets up.
+
 def gamestates(ticket, world):
+    config, state, tprefix, ai = ROUTE[MODE]
     env = "sky_" + world[len("track_"):]
     gags = ticket.lower().replace(" ", "_")
-    qr = f'''<GameConfig Name="quickrace" ticket="{ticket}">
+    humans = "\n".join(f'    <Player name="Player{i + 1}" vehicle="musclecar41_LV01" character="m_pro_04_LV01" '
+                       f'control="HUMAN" location="LOCAL" viewport="{i}"/>' for i in range(PLAYERS))
+    ais = """    <Player name="AI1" vehicle="buggy41_LV01" character="m_pro_09_LV01" control="AI" location="LOCAL" viewport="-1"/>
+    <Player name="AI2" vehicle="rallycar41_LV01" character="m_pro_01_LV01" control="AI" location="LOCAL" viewport="-1"/>
+    <Player name="AI3" vehicle="supercar41_LV01" character="m_pro_11_LV01" control="AI" location="LOCAL" viewport="-1"/>
+""" if ai else ""
+    qr = f'''<GameConfig Name="{config}" ticket="{tprefix}{ticket}">
     <GUIResource name="Art/UI_Art_BE.rpk"/>
     <LoadCommonPausedGUIResource setting="false"/>
     <IsRaceConfig setting="true"/>
-    <GameMode name="race.mode"/>
+    <GameMode name="{MODE}.mode"/>
     <World name="{world}"/>
     <Environment name="{env}"/>
     <Gags name="{gags}"/>
-    <Player name="AI1" vehicle="buggy41_LV01" character="m_pro_09_LV01" control="AI" location="LOCAL" viewport="-1"/>
-    <Player name="AI2" vehicle="rallycar41_LV01" character="m_pro_01_LV01" control="AI" location="LOCAL" viewport="-1"/>
-    <Player name="AI3" vehicle="supercar41_LV01" character="m_pro_11_LV01" control="AI" location="LOCAL" viewport="-1"/>
-    <Player name="Player" vehicle="musclecar41_LV01" character="m_pro_04_LV01" control="HUMAN" location="LOCAL" viewport="0"/>
+{ais}{humans}
     <RaceSettings racetype="Standard" laps="1"/>
   </GameConfig>'''
-    s, n1 = re.subn(r'<GameConfig Name="quickrace" base="race">.*?</GameConfig>', qr, STOCK, flags=re.S)
+    s, n1 = re.subn(rf'<GameConfig Name="{config}" base="race">.*?</GameConfig>', qr, STOCK, flags=re.S)
     s, n2 = re.subn(r'<Transition FromState="boot" Name="booted" ToState="mainmenu"[^>]*/>',
-                    '<Transition FromState="boot" Name="booted" ToState="QuickRacing"/>', s)
+                    f'<Transition FromState="boot" Name="booted" ToState="{state}"/>', s)
     assert n1 == 1 and n2 == 1, "gamestates.xml changed shape"
     return s.encode("utf-8")
 
@@ -148,18 +169,25 @@ def read_ppm(p):
     w, h = int(f[1]), int(f[2])
     return w, h, d[i + 1:i + 1 + w * h * 3]
 
+# Yellow 'POS' of the bottom (left) view, at 1280x720.
+POS = {2: (200, 330, 650, 705), 3: (25, 110, 650, 700), 4: (25, 110, 650, 700)}.get(PLAYERS, (40, 220, 560, 640))
 def hud(px, w, h):
     """Yellow 'POS' at the bottom left."""
     n = 0
-    for y in range(h * 560 // 720, h * 640 // 720, 2):
-        for x in range(w * 40 // 1280, w * 220 // 1280, 2):
+    x0, x1, y0, y1 = POS
+    for y in range(h * y0 // 720, h * y1 // 720, 2):
+        for x in range(w * x0 // 1280, w * x1 // 1280, 2):
             o = (y * w + x) * 3
             if px[o] > 200 and px[o+1] > 150 and px[o+2] < 90: n += 1
     return n > 25
 
+# The race clock's box at 1280x720: top right of the screen; with 2 players
+# the views are pillarboxed and the top one's clock sits further left.
+CLOCK = {2: (990, 1075, 14, 40), 3: (1170, 1250, 12, 36), 4: (1170, 1250, 12, 36)}.get(PLAYERS, (1080, 1190, 45, 75))
 def clock(px, w, h):
-    return bytes(px[(y * w + x) * 3] for y in range(h * 45 // 720, h * 75 // 720)
-                 for x in range(w * 1080 // 1280, w * 1190 // 1280))
+    x0, x1, y0, y1 = CLOCK
+    return bytes(px[(y * w + x) * 3] for y in range(h * y0 // 720, h * y1 // 720)
+                 for x in range(w * x0 // 1280, w * x1 // 1280))
 
 def write_png(p, w, h, px):
     rows = b"".join(b"\x00" + px[y * w * 3:(y + 1) * w * 3] for y in range(h))
@@ -179,10 +207,12 @@ class Run:
         (d / "save").mkdir(); (d / "d").mkdir()
         shutil.copytree(ROOT / "hdd1", d / "hdd1") if (ROOT / "hdd1").is_dir() else (d / "hdd1").mkdir()
         self.log, self.pad = d / "log", d / "pad"
+        self.pads = [self.pad] + [d / f"pad{i}" for i in range(1, PLAYERS)]
         self.set("")
         env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy", SDL_VIDEODRIVER="dummy",
                    PS3_SAVEDATA_ROOT=str(d / "save"), PS3_HDD1_ROOT=str(d / "hdd1"),
                    PS3_HDD0_ROOT=str(d / "hdd0"), PS3_PAD_FILE=str(self.pad),
+                   **{f"PS3_PAD_FILE_{i}": str(p) for i, p in enumerate(self.pads) if i},
                    LD_FRAME_DUMP=str(d / "d"), LD_FRAME_DUMP_EVERY="30")
         self.f = open(self.log, "wb")
         self.p = subprocess.Popen([BIN, ELF], cwd=ROOT, env=env, stdout=self.f,
@@ -191,7 +221,8 @@ class Run:
         self.seen = 0; self.hud_t = None; self.ticks = 0; self.last = None
         self.havok0 = None; self.result = None; self.shot = None
     def set(self, held):
-        tmp = self.pad.with_suffix(".tmp"); tmp.write_text(held + "\n"); os.replace(tmp, self.pad)
+        for p in self.pads:
+            tmp = p.with_suffix(".tmp"); tmp.write_text(held + "\n"); os.replace(tmp, p)
     def text(self):
         return self.log.read_bytes().decode("latin1")
     def havok(self, t):
@@ -204,7 +235,7 @@ class Run:
                 os.killpg(self.p.pid, signal.SIGKILL); self.p.wait()
         self.f.close()
         for fr in self.dir.joinpath("d").glob("*.ppm"):   # keep the disk use down
-            if str(fr) != self.shot: fr.unlink()
+            if str(fr) != self.shot and not KEEP: fr.unlink()
     def finish(self, result):
         self.result = result; self.stop()
         if self.shot:

@@ -38,14 +38,17 @@ OUT="$RUNS/sim_speed"
 [ -x "$BIN" ] || { echo "FAIL: no binary at $BIN (scripts/build.sh)"; exit 2; }
 rm -rf "$OUT"; mkdir -p "$OUT"
 
-OUT="$OUT/race" BIN="$BIN" LIMIT_S=3600 bash "$HERE/first_race.sh" > "$OUT/first_race.out" 2>&1 &
-RACE=$!
-
-python3 -I - "$BIN" "$OUT" "${SAMPLE_S:-300}" "${MIN_WINDOWS:-15}" "$RACE" <<'EOF'
+# The sampler starts first_race.sh itself: with kernel.yama.ptrace_scope=1 (the
+# default) only an ancestor of the game may read its /proc/<pid>/mem, and a
+# sampler beside the race got EPERM on every read ("ended after 0 s of race
+# clock" while the race itself passed).
+python3 -I - "$BIN" "$OUT" "${SAMPLE_S:-300}" "${MIN_WINDOWS:-15}" "$HERE/first_race.sh" <<'EOF'
 import os, signal, struct, subprocess, sys, time
 from pathlib import Path
-BIN, OUT, SAMPLE, MINW, RACE = sys.argv[1], Path(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+BIN, OUT, SAMPLE, MINW, FIRST_RACE = sys.argv[1], Path(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
 save = str(OUT / "race" / "save")
+RACE = subprocess.Popen(["bash", FIRST_RACE], stdout=open(OUT / "first_race.out", "wb"), stderr=subprocess.STDOUT,
+                        env=dict(os.environ, OUT=str(OUT / "race"), BIN=BIN, LIMIT_S="3600"))
 
 def fail(msg):
     print("FAIL: " + msg); sys.exit(1)
@@ -88,8 +91,7 @@ def stop(pid):
             time.sleep(0.2)
 
 def race_done():
-    try: os.kill(RACE, 0); return False
-    except ProcessLookupError: return True
+    return RACE.poll() is not None
 
 t0 = time.time(); pid = None
 while pid is None:
