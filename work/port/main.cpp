@@ -720,6 +720,13 @@ int main(int argc, char** argv)
     env_default("SPU_OVL_REVALIDATE", "1");
     env_default("SPU_WWS_ALT_BASE", "1");
     env_default("SPU_INTERP_REJOIN_OVL", "1");
+    /* SPU single precision as native float on the SPURS kernel threads
+     * (MXCSR round-toward-zero + FTZ + DAZ, edge lanes on the exact path):
+     * bit-identical to the exact double-based emulation, ~13% less SPU job
+     * time on CPUs without AVX-512 (docs/NOTES.md "SPU job speed"). */
+    env_default("SPU_FP_MXCSR", "1");
+    /* The same for taskset task threads (MultiStream's float DSP: audio). */
+    env_default("SPU_FP_MXCSR_TASKS", "1");
     /* Draw engine (docs/NOTES.md "Race rendering"): a pass sampling a sub-rect
      * of its own target reads a snapshot of it (the car AO boxes: without it,
      * black shadows), real 3D textures (the AO volumes), scissored clears,

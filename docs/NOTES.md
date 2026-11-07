@@ -1619,6 +1619,56 @@ for 120 s it writes every host thread's stack (gdb `thread apply all bt 40`;
 lifted functions are func_<addr>, so it is the guest chain too) to
 `<boot>/hang.bt` and fails.
 
+## The 0xD0000000 crash (func_00911128 packet lists)
+
+A host SIGSEGV seen in races, about 1 race in 10 in ppu2's hunts: a
+16-byte store (stvx) to guest EA exactly 0xD0000000, in func_00911128, on the
+main PPU thread.
+
+func_00911128 walks lists of packets:
+- The first list is arg r4: a size word at +0, packets from +16. The cursor
+  is r19; the end, list + size + 16, is kept at [r1+0xEB8].
+- Each packet's byte at +3 is its size in bytes, a multiple of 16. The copy
+  loops at 0x9113F8 and 0x911480 move (byte >> 4) quadwords, two per pass
+  (`r9 = n-1; ...; r3 -= 2; bne`). They stop only for counts 1..15.
+- With a count of 0, r3 runs -2, -4, ... and never reaches 0. That is a
+  runaway copy of 32 bytes a pass, upward through the flat guest window,
+  until the first page that cannot be written: the guard page under the
+  first guest thread stack (VM_STACK_BASE). So the EA is always exactly
+  0xD0000000, whatever the list. Everything from the copy's target up to
+  there, RSX local memory at 0xC0000000 included, is overwritten first.
+
+A zero header would be just as fatal on a PS3, so the list was read before
+whoever builds it had finished, or after a lost update (ppu2's coherence
+hunt).
+
+The guard: tools/ppu_native_entries.py NATIVE_BLOCKS puts a check at
+loc_00911378, the top of the per-packet loop.
+- A cursor at or past the end, or a header with a count of 0, sets r19 to
+  the list end and jumps to the function's own end-of-list check
+  (loc_00912348). The list is cut at the bad packet.
+- port/ppu_native.cpp ppu_pkt_guard logs `[pkt-guard]` with the cursor, the
+  end, 64 bytes there and the guest LR back-chain, for the first 16 distinct
+  (cursor, end) pairs, then a count at powers of two.
+- On by default. PS3_PKT_GUARD=0 turns it off (the crash returns).
+  PS3_PKT_GUARD=2 also calls spu_coh_dump() on the first hit.
+
+Not the cause: the 256 MB of VRAM cellGcmGetConfiguration used to report.
+A retail PS3 reports 0x0F900000; that is now reported
+(gcm_reported_local_size, GCM_LOCAL_SIZE overrides), and the crash happened
+with it too.
+
+work/tools/segv/segvdump.so is an LD_PRELOAD fault dumper. Its handler is
+installed from a constructor, under the runtime's chained ones, so it only
+sees the fatal fault. It writes the address and guest EA, every host
+register, 256 bytes from rsp and a func_ backtrace to $SEGVDUMP_FILE.
+
+A different segfault (fios scheduler 4, EA 0xD0076F40, in func_00ABDAB8, the
+CRT's printf) was that thread's 64 KB stack overflowing by 0xC0 bytes into
+its guard page. It happened in a run booted from the disc's stale
+union_v1_4player.cfg, which had already overrun the GUI object pool: not
+real play.
+
 ## Simulation pacing
 
 As shipped, the game steps its simulation a fixed 1/30 s every frame and
@@ -2024,3 +2074,114 @@ batches the main thread waits for.
   link fills memory up through OPD 0x01430BD0) in ~9 of 10 boots on the
   00:24 tree; the 00:43 tree boots clean. With the hdd1 pre-filled (the four
   fonts, empty cache/BCES00484439898/) it never happened.
+
+## SPU job speed (rsx2, 2026-11-07)
+
+Side-by-side 1P races (work/runs/rsx2/spu: `ab.sh` two races at once,
+`prof.sh` with perf, `tlan*.py` / `jobtime.py` read `PS3_TIMELINE`), load
+average 35-65 throughout, so only same-moment pairs are compared.
+
+### Where the RSX and the main thread wait
+
+- The RSX's 0x4B0/0x4C0 acquires come right after the frame's first two
+  blits: the RSX is waiting for the next frame's work, 60-135 ms a frame at
+  load ~55. Through those waits the five SPURS SPUs are 42-78% idle, so it is
+  a dependency chain, not SPU throughput.
+- Main-thread batch waits (`lkw0`/`lkw1` timeline events, work/port/ppu_native.cpp
+  nat_lock; on only with PS3_TIMELINE) and what the SPUs run in them:
+  0x662F44 -- renderablejob on all five SPUs (15-27 ms); 0x45ADA8 -- one
+  screenrushjob for ~15 ms with four SPUs idle, then pvsjob on all five;
+  0x614E9C -- one hierarchyevaluate, ~14 ms.
+- Hops (load ~55): kick -> SPU wake (knotify -> kwake) p50 108 us, p90 1.8 ms;
+  only one wake in the window came from the 1 ms idle timeout. Last job-list
+  row PUT -> main thread awake p50 0.5 ms, p90 6.9 ms. The tails are the host
+  scheduler at this load, not missed wakes.
+- `kspu` samples carry the instance in the top byte of `a`: a second SPURS
+  instance (0x1B74FB80, one SPU) shares SPU number 0 and its g_spurs_idle_mask
+  bit. Filter on it.
+
+### Changes
+
+- **SPU_FW_LIFT / SPU_WWS_ALT_BASE were never on.** spu_workloads.c reads them
+  in its static constructor, before main()'s env_default. lift_spu.py now
+  emits them as "unset = on" (=0 off). MultiStream went from 7M interpreted
+  SPU steps/s to 0.1M. Audit: of main.cpp's env_default names no other one is
+  read before main(); SPU_OVL_OWNER (read through spu_overlay_owner_last from
+  the same constructor) has the same trap but is not defaulted.
+- **`SPU_FP_MXCSR=1`** (default off; runtime/spu/spu_helpers.h `SPU_FP_MX`,
+  libs/spurs/spurs_kernel.c kspu_main). On AVX2 hosts without AVX-512 the
+  exact single-precision forms widen to double and back. With the switch each
+  SPURS kernel thread sets MXCSR to round toward zero + FTZ + DAZ and
+  fa/fs/fm/fma/fms/fnms run as native single-precision ops; a lane with an
+  exponent-255 operand or a result at/above FLT_MAX (the result shows it as
+  Inf/NaN/FLT_MAX) sends the vector to the exact path under round-to-nearest.
+  The double forms, frds and the csflt/cuflt fix-up put round-to-nearest back
+  around themselves (SPU_FP_RN_BEGIN/END), and the interpreter runs each step
+  under it (spu_interp.c spu_step). Other threads (PPU, task threads) are
+  never switched (`spu_fp_fast` is thread-local). Test:
+  runtime/spu/tests/test_spu_float_mx.c, 2M random+edge vectors per op
+  bit-identical to the exact forms (clang and GCC); micro-benchmark 5.2 vs
+  24.3 ns per four ops. In the race: SPU job time 67.5 -> 58.6 ms a frame
+  (vehiclephysics 5.8 -> 3.6, renderablejob 21.3 -> 18.4); frame time within
+  noise (main-thread bound). Validated: main_menu x4 (one attract-mode flake
+  also seen without it), SLOW race_intro, splitscreen.
+- `SPURS_NSPUS_MIN=8`: the extra SPUs (6, 7) spin at 100% and the game never
+  reaches a race -- the job manager takes at most 6. `=6`: no gain in two
+  swapped pairs (17.4/16.9 and 10.6/11.0 fps).
+
+### What is left
+
+- Per job the lifted code is register-pressure bound: in renderablejob's hot
+  functions ~35% of samples are xmm spills/reloads (128 SPU registers on 16
+  host ones), the rest LS loads/stores (one pshufb each) and shufb. The
+  SPURS-thread runtime overhead is ~33% (gm_copy_from 5% -- memory bound --,
+  lock-line reads 5%, overlay checks on GETs ~5%, dispatch ~5%).
+- The SPU MLAA tasks still run every frame with native MLAA on (~7% of the
+  process in their lifted code, more with their runtime): skipping their work
+  needs their completion protocol emulated (the barrier hang history).
+
+## Audio and controllers in real play (rsx2, 2026-11-07)
+
+### Audio
+
+- Tools: `AUDIO_WAV=<file>` (the final mix, raw f32le stereo 48 kHz),
+  `PS3_AUDIO_MUTE=1` (silent at the device, which still paces the mixer --
+  real PulseAudio/PipeWire runs without sound in the room), and new
+  `PS3_AUDIO_STATS=1` (cellAudio.c, every 5 s: blocks mixed, submits that found
+  under one block queued, min queue, longest mixer gap, port blocks the
+  producer left empty). work/runs/rsx2/spu/mscpu.sh: MultiStream's CPU per
+  produced block.
+- The game: port 0 is MultiStream (8 ch, 16 blocks, no notify queue -- it
+  paces off the read index); movies open port 1 (8 ch, 8 blocks) with a notify
+  queue. The mixer holds 187.5 blocks/s; device underruns are rare (0-4 per 5 s
+  at load 60-80).
+- Movies: complete (0-16% empty blocks during the intro movie).
+- Menu and race: chopped. MultiStream fills only part of its ring -- bursts of
+  ~20 blocks, then ~16 empty (menu: 42% empty; race: 60-70% at load 80). Its
+  task thread is at a full core in real work (DSP plugins 54%: filter, i3dl2
+  reverb, compressor; the MultiStream core 36%; no spinning): it is too slow,
+  not starved of wakes. At load ~60: 8.7 ms CPU per 5.33 ms block (163% of a
+  core); with `SPU_FP_MXCSR_TASKS=1` 6.1 ms (114%), side by side empty blocks
+  64% -> 45%. Whether a quiet host's full core covers it is still to measure.
+- `SPU_FP_MXCSR_TASKS=1` (with SPU_FP_MXCSR=1; runtime/spu/spu_workload.c
+  spu_async_run): taskset task threads switch to the fast single precision
+  too. Validated: main_menu x2, SLOW race_intro, splitscreen.
+- Next lever if a quiet host still falls short: the DSP kernels themselves
+  (msdsp_filter's FIR loop: load, fm, 2 shufb, 2 fma, store per 4 samples).
+
+### Controllers
+
+- cellPad's SDL path: a pad takes the first free port (0-3) in the order it
+  appears, a reconnected one gets its old port back (by GUID), a fifth waits
+  for a free port; triggers are pressure (SDL 0..32767 -> 0..255, digital bit
+  from ~9%), sticks 0..255. test: libs/input/tests/test_pad_sdl_virtual.c
+  (SDL >= 2.24 virtual game controllers through the real cellPad.c; it ignores
+  any real pad on the host with SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT --
+  this host has an Xbox 360 pad on js0, which every game run opens as player 1).
+  SDL virtual trigger axes span -32768..32767 (rest -32768).
+- The "Controller & saves" tab (work/port/ui.cpp) lists every pad with its
+  player number (`cellPad_port_of_instance`, cellPad.c), held buttons and
+  L2/R2 %, under SDL's joystick lock; on the start screen it starts SDL's
+  controller support itself (it showed "none found" there before).
+- `PS3RECOMP_UI_KEYS` also takes `click:X,Y` (window pixels); ImGui may need
+  it sent two or three times.

@@ -380,36 +380,63 @@ void page_mods(port_settings& s)
          "The options on this page take effect the next time the game starts.");
 }
 
+extern "C" int cellPad_port_of_instance(int instance_id);   /* libs/input/cellPad.c */
 void page_controller(port_settings& s)
 {
-    SDL_GameController* gc = nullptr;
-    for (int i = 0; i < SDL_NumJoysticks() && !gc; i++)
-        if (SDL_IsGameController(i)) gc = SDL_GameControllerFromInstanceID(SDL_JoystickGetDeviceInstanceID(i));
-    const char* name = gc ? SDL_GameControllerName(gc) : nullptr;
-    ImGui::Text("Controller: %s", name ? name : "none found (connect one before starting the game)");
-    if (gc) {
+    /* Every game controller SDL sees, with the player port the game gave it.
+     * One that is not open yet (the start screen, before the game has looked
+     * for pads) is opened here only to read it, and closed again. On the
+     * start screen nothing has started SDL's controller support yet. */
+    if (SDL_WasInit(SDL_INIT_GAMECONTROLLER) == 0) {
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");   /* as cellPad sets it */
+        SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+    }
+    int shown = 0;
+    /* Under SDL's joystick lock, as rsx_ui.cpp: cellPad opens and polls the
+     * same pads from the game's threads. */
+    SDL_LockJoysticks();
+    for (int i = 0; i < SDL_NumJoysticks(); i++) {
+        if (!SDL_IsGameController(i)) continue;
+        const SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(i);
+        SDL_GameController* gc = SDL_GameControllerFromInstanceID(id);
+        const bool ours = gc == nullptr;
+        if (ours) gc = SDL_GameControllerOpen(i);
+        if (!gc) continue;
+        const int port = cellPad_port_of_instance((int)id);
+        const char* name = SDL_GameControllerName(gc);
+        if (port >= 0) ImGui::Text("Player %d: %s", port + 1, name ? name : "controller");
+        else           ImGui::Text("%s (%s)", name ? name : "controller",
+                                   ours ? "the game picks it up when it starts" : "no free player slot: four are in use");
         static const struct { SDL_GameControllerButton b; const char* n; } k[] = {
             { SDL_CONTROLLER_BUTTON_A, "Cross/A" }, { SDL_CONTROLLER_BUTTON_B, "Circle/B" },
             { SDL_CONTROLLER_BUTTON_X, "Square/X" }, { SDL_CONTROLLER_BUTTON_Y, "Triangle/Y" },
             { SDL_CONTROLLER_BUTTON_LEFTSHOULDER, "L1" }, { SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, "R1" },
             { SDL_CONTROLLER_BUTTON_BACK, "Select" }, { SDL_CONTROLLER_BUTTON_START, "Start" },
             { SDL_CONTROLLER_BUTTON_LEFTSTICK, "L3" }, { SDL_CONTROLLER_BUTTON_RIGHTSTICK, "R3" },
+            { SDL_CONTROLLER_BUTTON_DPAD_UP, "Up" }, { SDL_CONTROLLER_BUTTON_DPAD_DOWN, "Down" },
+            { SDL_CONTROLLER_BUTTON_DPAD_LEFT, "Left" }, { SDL_CONTROLLER_BUTTON_DPAD_RIGHT, "Right" },
         };
         std::string held;
         for (const auto& e : k)
             if (SDL_GameControllerGetButton(gc, e.b)) { held += held.empty() ? "" : "  "; held += e.n; }
-        ImGui::Text("Held: %s", held.empty() ? "none" : held.c_str());
+        const int l2 = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT) * 100 / 32767;
+        const int r2 = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) * 100 / 32767;
+        ImGui::Text("    Held: %s   L2 %d%%  R2 %d%% (R2 is the throttle)", held.empty() ? "none" : held.c_str(), l2, r2);
+        if (ours) SDL_GameControllerClose(gc);
+        shown++;
     }
+    SDL_UnlockJoysticks();
+    if (!shown)
+        ImGui::Text("No controller found. Plug one in at any time: the game picks it up; up to four play split screen.");
     ImGui::Separator();
     if (ImGui::Button("Open the saves folder")) open_folder(saves_dir());
     ImGui::SameLine();
     if (ImGui::Button("Back up the saves")) backup_saves();
-    ImGui::SameLine();
     if (ImGui::Button("Open the logs folder")) open_folder("work/runs");
     if (!g_last_backup.empty()) hint(g_last_backup.c_str());
     ImGui::Separator();
     bool b = s.skip_launcher;
-    if (ImGui::Checkbox("Skip the start screen when the game opens (F1 opens the options in game)", &b)) { s.skip_launcher = b; save(); }
+    if (ImGui::Checkbox("Skip the start screen (F1 opens the options in game)", &b)) { s.skip_launcher = b; save(); }
 }
 
 /* The options' pages, as tabs: the in-game menu and the start screen's
