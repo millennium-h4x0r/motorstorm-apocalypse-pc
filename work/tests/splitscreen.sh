@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 # Milestone 5: a four-player split-screen race renders.
 #
-#   1. first boot on a fresh save root: tap CROSS until the first-boot save
-#      ("[cellSaveData] SAVE complete"), then stop;
-#   2. second boot on that save, four virtual pads (PS3_PAD_FILE_0..3): CROSS
-#      through the intro movies and the title, main menu -> WRECKREATION ->
-#      QUICK RACE, START on ports 1, 2, 3 (each join is a
-#      cellUserInfoSelectUser_ListType), START RACE, CROSS at the fly-by,
-#      then full throttle on all four pads.
+# Default route: work/tests/all_tracks.sh with PLAYERS=4 on TRACK (default
+# mainline_v1) -- a patched gamestates.xml boots straight into a quick race
+# with four local humans (virtual pads PS3_PAD_FILE_0..3), no movies, menus
+# or save; that script's own verdict says the race reached GO (HUD up, race
+# clock running). Then the last race frame it kept must show a picture in
+# each of the four quadrant views (x 20..640 / 640..1260, y 20..360 /
+# 360..700 of 1280x720): luma mean in [12, 235], standard deviation >= 10.
+# The frame is saved as work/runs/splitscreen.png.
 #
-# PASS: three players joined, and in a frame dumped once the race clock
-# runs, each of the four quadrant views (x 20..640 / 640..1260, y 20..360 /
-# 360..700 of 1280x720) shows a picture -- luma mean in [12, 235], standard
-# deviation >= 10 -- and the race clock (float at guest 0x014FC348, as
-# sim_speed.sh reads it) moved by at least 3 s over 10 s of wall time. The
-# frame is saved as work/runs/splitscreen.png.
+# MENU=1: the older route through the menus instead -- first boot for the
+# save, then a second boot: intro movies, title, main menu -> WRECKREATION ->
+# QUICK RACE, START on ports 1-3 (each join is a
+# cellUserInfoSelectUser_ListType), START RACE, CROSS at the fly-by, full
+# throttle; PASS when three players joined, the race clock (float at guest
+# 0x014FC348, as sim_speed.sh reads it) moved >= 3 s in 10 s, and the four
+# views show a picture.
 #
 # Slow (5-10 minutes): run_all.sh runs it only with SLOW=1.
-# Usage: tests/splitscreen.sh     BIN=..., RUNS=<dir>.
+# Usage: tests/splitscreen.sh     BIN=..., RUNS=<dir>, TRACK=<world>, MENU=1.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(cd "$HERE/.." && pwd)"
@@ -27,6 +29,48 @@ ELF="$WORK/../disc/PS3_GAME/USRDIR/EBOOT.elf"
 OUT="$RUNS/splitscreen"
 [ -x "$BIN" ] || { echo "FAIL: no binary at $BIN (scripts/build.sh)"; exit 2; }
 rm -rf "$OUT"; mkdir -p "$OUT"
+
+if [ "${MENU:-0}" != 1 ]; then
+    TRACK="${TRACK:-mainline_v1}"
+    out=$(PLAYERS=4 KEEP=1 RUNS="$OUT" BIN="$BIN" bash "$HERE/all_tracks.sh" "$TRACK" 2>&1 | tee "$OUT/all_tracks.out" | tail -1)
+    case "$out" in PASS*) ;; *) echo "FAIL: all_tracks.sh PLAYERS=4 $TRACK: $out ($OUT/all_tracks.out)"; exit 1 ;; esac
+    exec python3 -I - "$OUT/all_tracks/$TRACK/d" "$RUNS/splitscreen.png" "$out" <<'PYEOF'
+import sys, struct, zlib
+from pathlib import Path
+D, PNG, VERDICT = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+def read_ppm(p):
+    d = Path(p).read_bytes(); i, f = 0, []
+    while len(f) < 4:
+        while d[i] in b" \t\r\n": i += 1
+        j = i
+        while d[j] not in b" \t\r\n": j += 1
+        f.append(d[i:j]); i = j
+    w, h = int(f[1]), int(f[2])
+    return w, h, d[i + 1:i + 1 + w * h * 3]
+def stats(w, h, px, x0, x1, y0, y1):
+    x0, x1, y0, y1 = w * x0 // 1280, w * x1 // 1280, h * y0 // 720, h * y1 // 720
+    s = s2 = n = 0
+    for y in range(y0, y1, 3):
+        for x in range(x0, x1, 3):
+            o = (y * w + x) * 3; l = 0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]
+            s += l; s2 += l * l; n += 1
+    m = s / n
+    return m, max(0.0, s2 / n - m * m) ** 0.5
+frames = sorted(D.glob("*.ppm"))
+if not frames: print(f"FAIL: no frames kept in {D}"); sys.exit(1)
+w, h, px = read_ppm(frames[-1])
+boxes = [(20, 640, 20, 360), (640, 1260, 20, 360), (20, 640, 360, 700), (640, 1260, 360, 700)]
+st = [stats(w, h, px, *b) for b in boxes]
+rows = b"".join(b"\x00" + px[y * w * 3:(y + 1) * w * 3] for y in range(h))
+ch = lambda t, b: struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b))
+PNG.write_bytes(b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                + ch(b"IDAT", zlib.compress(rows, 6)) + ch(b"IEND", b""))
+desc = ", ".join(f"P{i+1} {m:.0f}/{sd:.0f}" for i, (m, sd) in enumerate(st))
+bad = [i + 1 for i, (m, sd) in enumerate(st) if not (12 <= m <= 235 and sd >= 10)]
+if bad: print(f"FAIL: views {bad} show no picture (luma mean/sd {desc}) in {frames[-1].name} ({PNG})"); sys.exit(1)
+print(f"PASS: 4-player race reached GO ({VERDICT}); views luma mean/sd {desc} ({frames[-1].name} -> {PNG})")
+PYEOF
+fi
 
 python3 -I - "$BIN" "$ELF" "$OUT" "$RUNS/splitscreen.png" <<'EOF'
 import os, re, signal, struct, subprocess, sys, time, zlib, shutil
@@ -175,6 +219,22 @@ try:
     wait_frame(is_sub, 20, "WRECKREATION screen")
     time.sleep(2.0)
     g.tap("CROSS", after=3.0)                      # QUICK RACE (first item)
+    # QUICK RACE shows the track's picture in the right-hand panel (bright);
+    # WRECKREATION a dark description box there. A CROSS that came too early
+    # for the menu is pressed again.
+    def lum(f, x0, x1, y0, y1):
+        w, h, px = read_ppm(f)
+        x0, x1, y0, y1 = w * x0 // 1280, w * x1 // 1280, h * y0 // 720, h * y1 // 720
+        s = n = 0
+        for y in range(y0, y1, 4):
+            for x in range(x0, x1, 6):
+                o = (y * w + x) * 3; s += px[o] + px[o + 1] + px[o + 2]; n += 3
+        return s / max(n, 1)
+    for k in range(8):
+        fr = g.frames()
+        if fr and is_sub(fr[-1]) and lum(fr[-1], 780, 1160, 270, 390) > 70: break
+        if fr and is_sub(fr[-1]) and k >= 2: g.tap("CROSS", after=3.0)
+        else: time.sleep(2.0)
     joins = lambda: len(re.findall(r"SelectUser_ListType", g.text()))
     for port in (1, 2, 3):                         # players 2-4 join
         want = port

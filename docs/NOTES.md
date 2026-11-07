@@ -1385,6 +1385,31 @@ Driver: work/runs/rsx2/mp/ -- launch.py (PADS=n virtual file pads,
 optional seeded save), nav.py (second boot -> Quick Race), tap.py (presses
 and a snapshot of the last frame).
 
+**Performance** (seeded race, 60 s, `PS3RECOMP_VK_HITCH=1` every frame,
+averaged by work/runs/rsx2/mp/stats.py; host loaded by another project, so
+compare components, not fps). Before: 2P 57-95 ms a frame, 6 submit-and-waits
+(12 write-backs of the tonemap target for the SPU MLAA), 16-36 image
+allocations, 166 snapshots (6-18 ms). 4P 89 ms, 6 flushes, 18 write-backs.
+Three new switches (default off until integration):
+- `PS3RECOMP_ENG_MLAA_VIEWS=1`: native MLAA holds one state per view (up to
+  4). Each view's buffer copy and display copy are matched by where they sit
+  in the buffer. Before this, every view after the first fell back to the
+  SPU path with a write-back and a wait. Now there is 1 flush a frame and no
+  write-backs.
+- `PS3RECOMP_VK_MEMPOOL=1`: image memory (`vk_create_image_levels`) comes
+  from power-of-two size-class free lists. Textures are not pooled.
+- `PS3RECOMP_VK_SNAPCACHE=1`: `color_snapshot_rect` keeps four copies per
+  target, one per size, instead of one remade at every change of view size.
+2P with all three: 1 flush, 0 allocations, snapshots 1.6 ms, RSX thread
+~50 ms a frame (was ~70). 4P: 85 ms a frame, RSX thread ~70 ms. What is
+left is per draw, not per view: `PS3RECOMP_ENG_DRAWSTATS` at 4P (~11900
+draws a frame) shows backend draw 28.7 ms, textures 7.7, layout 5.8,
+constants+binds 5.2, pipeline 4.6. It also shows 64 MB of vertex constants
+staged a frame (5.4 KB a draw, unchanged in only 148 of 11900 draws). That is
+the next target, for 1P as much as split-screen.
+work/tests/splitscreen.sh (SLOW) is the regression: 4 players join, the race
+clock runs, 4 views with a picture.
+
 ### Tools
 
 - `PS3RECOMP_ENG_DRAWTRACE=<world frame>,<dir>[,fs|,vp|,<first>,<last>]` with

@@ -728,6 +728,12 @@ int main(int argc, char** argv)
     env_default("PS3RECOMP_ENG_TEX3D", "1");
     env_default("PS3RECOMP_ENG_RECT_CLEAR", "1");
     env_default("PS3RECOMP_ENG_USER_CLIP", "1");
+    /* Split-screen (docs/NOTES.md "Split-screen"): native MLAA per view, a
+     * size-class pool for image memory, and per-size snapshot copies, so each
+     * view no longer forces a GPU write-back, allocations and snapshot churn. */
+    env_default("PS3RECOMP_ENG_MLAA_VIEWS", "1");
+    env_default("PS3RECOMP_VK_MEMPOOL", "1");
+    env_default("PS3RECOMP_VK_SNAPCACHE", "1");
     if (atoi(getenv("PS3_SIM_60")) != 0) env_default("GCM_VBLANK_EACH", "1");
     /* inFAMOUS 2 built its frames on the SPU: the FIFO parked at the end of
      * what was ready and the title patched the park with the rest. Wait at a

@@ -430,6 +430,23 @@ static int nat_clock_recompute(ppu_context* c) /* 0x5EE178(this r3) */
 /* Add MotorStorm entries here (and their addresses to
  * tools/ppu_native_entries.py NATIVE_ENTRIES). The last row is an end marker
  * that keeps the array non-empty; the registry skips it (no fn). */
+/* The race's dt clamp, func_001DA398(this r3, dt f1 in seconds): counts the
+ * frame time it takes and the part the clamp (0x1DA384) cuts off, so a test
+ * (tests/sim_speed.sh reads these two symbols from /proc/<pid>/mem) can tell a
+ * slow race clock from frames the clamp shortened. Always declines. */
+extern "C" { volatile uint64_t g_sim_dt_us, g_sim_clamped_us; }
+static int nat_dt_clamp_note(ppu_context* c)
+{
+    const double dt = c->fpr[1];
+    if (!(dt > 0.0 && dt < 10.0)) return 0;
+    const uint32_t w = vm_read32(0x1DA384u);
+    float clamp; memcpy(&clamp, &w, 4);
+    __atomic_fetch_add(&g_sim_dt_us, (uint64_t)(dt * 1e6), __ATOMIC_RELAXED);
+    if (dt > (double)clamp)
+        __atomic_fetch_add(&g_sim_clamped_us, (uint64_t)((dt - (double)clamp) * 1e6), __ATOMIC_RELAXED);
+    return 0;
+}
+
 static const ppu_native_desc s_funcs[] = {
     /* no compare (lifted = null): the lifted reset is the deadlock */
     { 0x00FF5B40u, "event_set", nat_event_set, nullptr, nullptr, 0u },
@@ -439,6 +456,8 @@ static const ppu_native_desc s_funcs[] = {
     /* PS3_SIM_60: both always decline after patching the clock's fields */
     { 0x005EE2A4u, "clock_ctor", nat_clock_ctor, nullptr, nullptr, 0u },
     { 0x005EE178u, "clock_recompute", nat_clock_recompute, nullptr, nullptr, 0u },
+    /* counts frame time and the time the dt clamp cuts; declines */
+    { 0x001DA398u, "dt_clamp_note", nat_dt_clamp_note, nullptr, nullptr, 0u },
     { 0u, nullptr, nullptr, nullptr, nullptr, 0u },
 };
 

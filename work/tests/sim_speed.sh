@@ -23,6 +23,11 @@
 # must be in range (a hitch of a second inside a window is not the pacing's
 # fault), and the dt the game read must follow the wall frame time: no more
 # than half the samples may be exactly 33333 us, the stock fixed step.
+# A binary with the port's counters (g_sim_dt_us, g_sim_clamped_us: the frame
+# time func_001DA398 got and the part its clamp cut off, ppu_native.cpp) is
+# held to them instead: in each window the clock must advance by that frame
+# time minus the clamped part, within 5%, so a host hitch the clamp cut is not
+# counted against the pacing.
 # PASS: at least MIN_WINDOWS windows, those checks, and the vblank handler
 # running 50..70 times a second on average (GCM_VBLANK_EACH).
 #
@@ -66,8 +71,8 @@ def find_game():
 
 class G:
     def __init__(self, pid):
-        sym = int([l for l in subprocess.run(["nm", BIN], capture_output=True, text=True).stdout.splitlines()
-                   if l.endswith(" B vm_base")][0].split()[0], 16)
+        nm_lines = subprocess.run(["nm", BIN], capture_output=True, text=True).stdout.splitlines()
+        sym = int([l for l in nm_lines if l.endswith(" B vm_base")][0].split()[0], 16)
         base = None
         for l in open(f"/proc/{pid}/maps"):
             f = l.split()
@@ -75,6 +80,14 @@ class G:
                 base = int(f[0].split("-")[0], 16); break
         self.mem = open(f"/proc/{pid}/mem", "rb", buffering=0)
         self.vm = struct.unpack("<Q", self.hr(base + sym, 8))[0]
+        # the port's counts of frame time and of the part the dt clamp cut
+        # (ppu_native.cpp nat_dt_clamp_note); absent in older binaries
+        syms = {l.split()[2]: int(l.split()[0], 16) for l in nm_lines
+                if len(l.split()) == 3 and l.split()[2] in ("g_sim_dt_us", "g_sim_clamped_us")}
+        self.cnt = (base + syms["g_sim_dt_us"], base + syms["g_sim_clamped_us"]) if len(syms) == 2 else None
+    def counts(self):
+        if not self.cnt: return (None, None)
+        return tuple(struct.unpack("<Q", self.hr(a, 8))[0] for a in self.cnt)
     def hr(self, a, n): self.mem.seek(a); return self.mem.read(n)
     def rd(self, ea, n): return self.hr(self.vm + ea, n)
     def r32(self, ea): return struct.unpack(">I", self.rd(ea, 4))[0]
@@ -114,7 +127,7 @@ while moved < SAMPLE:
         tm = g.r32(g.r32(g.r32(g.r32(0x144FB4C) + 0x29C) + 0x294))
         if not dev or not tm: continue
         s = (time.time(), g.r32(dev + 0x270), g.r32(obj + 0x6C), g.rf(0x14FC348),
-             struct.unpack(">q", g.rd(tm + 0x78, 8))[0])
+             struct.unpack(">q", g.rd(tm + 0x78, 8))[0]) + g.counts()
     except (OSError, IndexError, struct.error, TypeError):
         continue
     print(*s, file=log, flush=True)
@@ -141,11 +154,22 @@ for i in range(0, len(samples) - 8, 8):
     vbl.append((w[-1][2] - w[0][2]) / T)
     n += 1
     e = min(1.0, clamp * fps)
-    lo = 0.95 if e >= 1.0 else 0.70 * e
-    good = lo <= ratio <= (1.05 if e >= 1.0 else 1.10 * e)
-    if e >= 1.0: ok_real.append(ratio)
+    if w[0][5] is not None:
+        # With the port's counters: the clock must advance by the frame time
+        # the game read minus what the clamp cut off, whatever the frame rate
+        # (a host hitch is clamped time, not a pacing fault).
+        dtsum = (w[-1][5] - w[0][5]) / 1e6; cut = (w[-1][6] - w[0][6]) / 1e6
+        e = (dtsum - cut) / T if T > 0 else 1.0
+        good = dtsum > 0 and 0.95 * e <= ratio <= 1.05 * e
+        if cut == 0: ok_real.append(ratio)
+        extra = f" dt/wall={dtsum / T:4.2f} clamped={cut:5.2f}s"
+    else:
+        lo = 0.95 if e >= 1.0 else 0.70 * e
+        good = lo <= ratio <= (1.05 if e >= 1.0 else 1.10 * e)
+        if e >= 1.0: ok_real.append(ratio)
+        extra = ""
     line = (f"t={w[0][0] - samples[0][0]:6.1f} fps={fps:5.1f} clock/wall={ratio:5.2f} expected={e:4.2f} "
-            f"dt={dts[len(dts) // 2]:6d} vbl/s={vbl[-1]:5.1f}")
+            f"dt={dts[len(dts) // 2]:6d} vbl/s={vbl[-1]:5.1f}{extra}")
     print(line + ("" if good else "  OFF"), flush=True)
     if not good: bad.append(line)
 fixed = sum(1 for x in samples if x[4] == 33333) / len(samples)

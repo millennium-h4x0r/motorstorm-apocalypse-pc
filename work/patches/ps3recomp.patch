@@ -26221,7 +26221,7 @@ index 130b1ca4..e8277e82 100644
   * program start). Branch targets are absolute slots; this makes them relative
   * to the ucode pointer handed in. Defaults to 0. */
 diff --git a/libs/video/rsx_vulkan_backend.c b/libs/video/rsx_vulkan_backend.c
-index db64302e..0aa1cba2 100644
+index db64302e..3793e98a 100644
 --- a/libs/video/rsx_vulkan_backend.c
 +++ b/libs/video/rsx_vulkan_backend.c
 @@ -38,18 +38,24 @@
@@ -26448,7 +26448,7 @@ index db64302e..0aa1cba2 100644
 + * image is gone, so the GPU is done with it (vk_defer_image) -- waits in its
 + * class's list for the next image that fits. */
 +#define VK_POOL_CLASSES 16          /* 256 KB .. 8 GB */
-+#define VK_POOL_KEEP    12          /* free blocks kept per class and type */
++#define VK_POOL_KEEP    64          /* free blocks kept per class and type */
 +#define VK_POOL_MAP     8192
 +static struct {
 +    pthread_mutex_t lock;
@@ -28452,7 +28452,7 @@ index db64302e..0aa1cba2 100644
  }
  
  /* ---------------------------------------------------------------------------
-@@ -2077,27 +3326,38 @@ static void vk_cb_present(void* ud, u32 buffer_id)
+@@ -2077,27 +3326,40 @@ static void vk_cb_present(void* ud, u32 buffer_id)
   * Pipelines, draws and textures are the next stages; until then
   * pipeline_create reports 0, which the engine caches as "cannot build".
   * -------------------------------------------------------------------------*/
@@ -28482,6 +28482,8 @@ index db64302e..0aa1cba2 100644
 +    u8       mips;                   /* TEXTURE: mip levels the image has    */
 +    u32      snap_stencil;           /* DEPTH: its stencil copy (R8_UINT)    */
 +    u32      snap_rect;              /* COLOR: its color_snapshot_rect texture */
++    u32      snap_rect_x[3];         /* COLOR: more of them, one a size (PS3RECOMP_VK_SNAPCACHE) */
++    u8       snap_rect_next;         /* COLOR: the next of the four to replace */
 +    VkFramebuffer fb;                /* TEXTURE drawn into (depth as RGBA8)  */
 +    u8       readable;               /* TEXTURE: has TRANSFER_SRC (readback)  */
 +    u8       viewed;                 /* COLOR/TEXTURE: a VIEW of it was made  */
@@ -28497,7 +28499,7 @@ index db64302e..0aa1cba2 100644
  static void vk_eng2_shutdown(void* user);
  
  static struct {
-@@ -2123,27 +3383,25 @@ static VkFormat vk_eng_format(rsx_be_format f, u32* bpp)
+@@ -2123,27 +3385,25 @@ static VkFormat vk_eng_format(rsx_be_format f, u32* bpp)
      }
  }
  
@@ -28542,7 +28544,7 @@ index db64302e..0aa1cba2 100644
      VK_LOG("engine: object table full (%d)\n", VK_ENG_MAX_OBJ);
      return 0;
  }
-@@ -2155,65 +3413,31 @@ static vk_eng_obj* vk_eng_get(u32 handle, int kind)
+@@ -2155,65 +3415,31 @@ static vk_eng_obj* vk_eng_get(u32 handle, int kind)
      return (o->kind == kind) ? o : NULL;
  }
  
@@ -28620,7 +28622,7 @@ index db64302e..0aa1cba2 100644
  static int vk_eng_upload(VkImage img, u32 layer, u32 mip, u32 w, u32 h, u32 bpp,
                           const void* src, u32 row_bytes)
  {
-@@ -2243,8 +3467,8 @@ static VkComponentMapping vk_remap(u32 remap, u32 rsx_fmt)
+@@ -2243,8 +3469,8 @@ static VkComponentMapping vk_remap(u32 remap, u32 rsx_fmt)
                               vk_remap_sel(sel[3]), vk_remap_sel(sel[0]) };
      return m;
  }
@@ -28631,7 +28633,7 @@ index db64302e..0aa1cba2 100644
  {
      VkImageViewCreateInfo vci = {
          .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = img,
-@@ -2254,25 +3478,42 @@ static int vk_eng_make_view(VkImage img, VkFormat fmt, u32 levels, VkComponentMa
+@@ -2254,25 +3480,42 @@ static int vk_eng_make_view(VkImage img, VkFormat fmt, u32 levels, VkComponentMa
      };
      return pvkCreateImageView(s_vk.device, &vci, NULL, out) == VK_SUCCESS ? 0 : -1;
  }
@@ -28677,7 +28679,7 @@ index db64302e..0aa1cba2 100644
                  memset(&s_eobj[i], 0, sizeof s_eobj[i]);
              }
      if (s_eobj[handle].kind == VK_ENG_DEPTH && s_eobj[handle].surface) {
-@@ -2280,45 +3521,157 @@ static void vk_eng_release(void* user, u32 handle)
+@@ -2280,45 +3523,164 @@ static void vk_eng_release(void* user, u32 handle)
          s_eobj[handle].surface = 0;
          if (vk_eng_get(snap, VK_ENG_TEXTURE)) vk_eng_release(user, snap);
      }
@@ -28691,7 +28693,7 @@ index db64302e..0aa1cba2 100644
 +        const u32 snap = s_eobj[handle].snap_stencil;
 +        s_eobj[handle].snap_stencil = 0;
 +        if (vk_eng_get(snap, VK_ENG_TEXTURE)) vk_eng_release(user, snap);
-+    }
+     }
 +    if (s_eobj[handle].fb) {
 +        vk_defer_fb(s_eobj[handle].fb);
 +        s_eobj[handle].fb = VK_NULL_HANDLE;
@@ -28706,7 +28708,14 @@ index db64302e..0aa1cba2 100644
 +        const u32 snap = s_eobj[handle].snap_rect;
 +        s_eobj[handle].snap_rect = 0;
 +        if (vk_eng_get(snap, VK_ENG_TEXTURE)) vk_eng_release(user, snap);
-     }
++    }
++    if (s_eobj[handle].kind == VK_ENG_COLOR)
++        for (int k = 0; k < 3; k++)
++            if (s_eobj[handle].snap_rect_x[k]) {
++                const u32 snap = s_eobj[handle].snap_rect_x[k];
++                s_eobj[handle].snap_rect_x[k] = 0;
++                if (vk_eng_get(snap, VK_ENG_TEXTURE)) vk_eng_release(user, snap);
++            }
      if (s_eobj[handle].kind == VK_ENG_COLOR || s_eobj[handle].kind == VK_ENG_DEPTH)
 -        vk_eng_drop_framebuffers();
 -    vk_destroy_image(&s_eobj[handle].im);      /* idle: submissions are waited on */
@@ -28853,7 +28862,7 @@ index db64302e..0aa1cba2 100644
          VK_LOG("engine: colour target format %d %ux%u not supported yet\n", (int)fmt, w, h);
          return 0;
      }
-@@ -2331,24 +3684,241 @@ static u32 vk_eng_color_target_create(void* user, rsx_be_format fmt, u32 w, u32
+@@ -2331,24 +3693,241 @@ static u32 vk_eng_color_target_create(void* user, rsx_be_format fmt, u32 w, u32
                          VK_IMAGE_ASPECT_COLOR_BIT)) {
          vk_destroy_image(&o->im); return 0;
      }
@@ -29101,7 +29110,7 @@ index db64302e..0aa1cba2 100644
      const u32 hd = vk_eng_alloc();
      if (!hd) return 0;
      vk_eng_obj* o = &s_eobj[hd];
-@@ -2358,19 +3928,20 @@ static u32 vk_eng_depth_target_create(void* user, u32 w, u32 h)
+@@ -2358,19 +3937,20 @@ static u32 vk_eng_depth_target_create(void* user, u32 w, u32 h)
                          s_vk.depth_aspect)) {
          vk_destroy_image(&o->im); return 0;
      }
@@ -29125,7 +29134,7 @@ index db64302e..0aa1cba2 100644
      (void)user;
      if (count > RSX_BE_MAX_COLOR_TARGETS) count = RSX_BE_MAX_COLOR_TARGETS;
      for (u32 i = 0; i < RSX_BE_MAX_COLOR_TARGETS; i++)
-@@ -2381,6 +3952,7 @@ static void vk_eng_bind_targets(void* user, const u32* surfaces, u32 count, u32
+@@ -2381,6 +3961,7 @@ static void vk_eng_bind_targets(void* user, const u32* surfaces, u32 count, u32
  
  static void vk_eng_clear_color(void* user, u32 surface, const float rgba[4])
  {
@@ -29133,7 +29142,7 @@ index db64302e..0aa1cba2 100644
      (void)user;
      /* The debug hook reports the last colour asked for, as Metal's does. */
      s_vk.clear_argb = ((u32)(rgba[3] * 255.0f + 0.5f) << 24) |
-@@ -2388,140 +3960,349 @@ static void vk_eng_clear_color(void* user, u32 surface, const float rgba[4])
+@@ -2388,140 +3969,349 @@ static void vk_eng_clear_color(void* user, u32 surface, const float rgba[4])
                        ((u32)(rgba[1] * 255.0f + 0.5f) <<  8) |
                         (u32)(rgba[2] * 255.0f + 0.5f);
      vk_eng_obj* o = vk_eng_get(surface, VK_ENG_COLOR);
@@ -29409,10 +29418,10 @@ index db64302e..0aa1cba2 100644
              for (u32 row = 0; row < h; row++)
 -                memcpy((u8*)out + (size_t)row * out_pitch, (const u8*)st->ptr + (size_t)row * tight, tight);
 +                memcpy((u8*)out + (size_t)row * out_pitch, (const u8*)st.ptr + (size_t)row * tight, tight);
-+        }
-+    }
-+}
-+
+         }
+     }
+ }
+ 
 +/* rsx_draw_backend.readback_deferred: the same copy (guest pixels, top-left
 + * w x h), recorded into the batch and handed to `done` when the batch has
 + * completed -- with frame pipelining, about a frame later -- instead of
@@ -29454,7 +29463,7 @@ index db64302e..0aa1cba2 100644
 +                        .imageOffset = { (int32_t)(x * sc + sc / 2u), (int32_t)(y * sc + sc / 2u), 0 },
 +                        .imageExtent = { 1, 1, 1 } };
 +            pvkCmdCopyImageToBuffer(s_vk.cmd, o->im.img, VK_IMAGE_LAYOUT_GENERAL, s_rring.b.buf, w * h, rg);
-         }
++        }
 +        VkBufferMemoryBarrier hb = {
 +            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
 +            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
@@ -29477,7 +29486,7 @@ index db64302e..0aa1cba2 100644
 +    if (sc > 1) {
 +        vk_scale_blit(o->im.img, 0, 0, w * sc, h * sc, s_sctmp.img, 0, 0, w, h, VK_FILTER_NEAREST);
 +        src = s_sctmp.img;
-     }
++    }
 +    VkBufferImageCopy region = { .bufferOffset = off,
 +                                 .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
 +                                 .imageExtent = { w, h, 1 } };
@@ -29493,8 +29502,8 @@ index db64302e..0aa1cba2 100644
 +    s_rb[s_nrb++] = (vk_rb){ done, cookie, off, w * 4u };
 +    vk_op_end();
 +    return 0;
- }
- 
++}
++
  /* ---- E3: textures ---------------------------------------------------------
   * The engine decodes every level to host rows (rsx_texture_decode) and hands
   * them over one upload each; the crossbar is a property of the view, so it
@@ -29554,7 +29563,7 @@ index db64302e..0aa1cba2 100644
          .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
          .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
          .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
-@@ -2533,16 +4314,68 @@ static u32 vk_eng_texture_create(void* user, rsx_be_format fmt, u32 w, u32 h,
+@@ -2533,16 +4323,68 @@ static u32 vk_eng_texture_create(void* user, rsx_be_format fmt, u32 w, u32 h,
          vk_find_memory_type(req.memoryTypeBits, 0, &type)) goto fail;
      VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                                   .allocationSize = req.size, .memoryTypeIndex = type };
@@ -29629,7 +29638,7 @@ index db64302e..0aa1cba2 100644
      return hd;
  fail:
      vk_destroy_image(&o->im);
-@@ -2550,136 +4383,1774 @@ fail:
+@@ -2550,136 +4392,1795 @@ fail:
      return 0;
  }
  
@@ -29675,12 +29684,7 @@ index db64302e..0aa1cba2 100644
  {
 +    VK_CS(CS_TEXTURE_CREATE);
 +    RSX_HS_SCOPE(HS_TEX_CREATE);
-     (void)user;
--    vk_eng_obj* t = vk_eng_get(surface, VK_ENG_COLOR);
--    if (!t) return 0;
--    for (u32 i = 1; i < VK_ENG_MAX_OBJ; i++)
--        if (s_eobj[i].kind == VK_ENG_VIEW && s_eobj[i].surface == surface &&
--            s_eobj[i].remap == remap && s_eobj[i].rsx_fmt == rsx_format)
++    (void)user;
 +    if (!hd || hd >= VK_ENG_MAX_OBJ || s_eobj[hd].kind != VK_ENG_RESERVED) return -1;
 +    vk_eng_obj o;
 +    if (vk_eng_texture_objects(hd, fmt, w, h, mips, faces, remap, rsx_fmt, &o)) {
@@ -29789,8 +29793,9 @@ index db64302e..0aa1cba2 100644
 +static u32 vk_eng_surface_view(void* user, u32 surface, u32 remap, u32 rsx_format)
 +{
 +    VK_CS(CS_SURFACE_VIEW);
-+    (void)user;
-+    vk_eng_obj* t = vk_eng_get(surface, VK_ENG_COLOR);
+     (void)user;
+     vk_eng_obj* t = vk_eng_get(surface, VK_ENG_COLOR);
+-    if (!t) return 0;
 +    if (!t) {
 +        t = vk_eng_get(surface, VK_ENG_TEXTURE);
 +        if (!t || t->cube || t->block) return 0;
@@ -29805,8 +29810,9 @@ index db64302e..0aa1cba2 100644
 +      if (c && c < VK_ENG_MAX_OBJ && s_eobj[c].kind == VK_ENG_VIEW && s_eobj[c].surface == surface &&
 +          s_eobj[c].remap == remap && s_eobj[c].rsx_fmt == rsx_format)
 +          return c; }
-+    for (u32 i = 1; i < VK_ENG_MAX_OBJ; i++)
-+        if (s_eobj[i].kind == VK_ENG_VIEW && s_eobj[i].surface == surface &&
+     for (u32 i = 1; i < VK_ENG_MAX_OBJ; i++)
+         if (s_eobj[i].kind == VK_ENG_VIEW && s_eobj[i].surface == surface &&
+-            s_eobj[i].remap == remap && s_eobj[i].rsx_fmt == rsx_format)
 +            s_eobj[i].remap == remap && s_eobj[i].rsx_fmt == rsx_format) {
 +            s_view_cache[ci] = i;
              return i;
@@ -29893,10 +29899,11 @@ index db64302e..0aa1cba2 100644
 +            memcpy(out, st.ptr, (size_t)w * h * bpp);
 +            rc = 0;
 +        }
-+    }
+     }
 +    return rc;
-+}
-+
+ }
+ 
+-static void vk_eng_snapshot_pool_drain(void)
 +/* rsx_draw_backend.depth_readback: the depth values themselves, for a CPU-side
 + * copy out of the depth buffer (rsx_draw_engine_writeback). 32-bit float depth
 + * only, like the snapshot below. */
@@ -29905,7 +29912,10 @@ index db64302e..0aa1cba2 100644
 + * values no draw wrote. */
 +static int vk_eng_aspect_readback_guest(u32 depth, VkImageAspectFlags aspect, u32 bpp,
 +                                        u32 w, u32 h, void* out)
-+{
+ {
+-    for (u32 i = 0; i < s_snap_pool_n; i++) vk_destroy_image(&s_snap_pool[i].im);
+-    s_snap_pool_n = 0;
+-    vk_destroy_buffer(&s_snap_st);
 +    vk_eng_obj* z = vk_eng_get(depth, VK_ENG_DEPTH);
 +    const u32 sc = (z && z->sc > 1) ? z->sc : 1;
 +    if (sc == 1) return vk_eng_aspect_readback(depth, aspect, bpp, w, h, out);
@@ -29915,7 +29925,7 @@ index db64302e..0aa1cba2 100644
 +        u8* n = (u8*)realloc(big, need);
 +        if (!n) return -1;
 +        big = n; big_cap = need;
-     }
++    }
 +    if (vk_eng_aspect_readback(depth, aspect, bpp, w * sc, h * sc, big)) return -1;
 +    const size_t row = (size_t)w * sc * bpp;
 +    for (u32 y = 0; y < h; y++) {
@@ -29926,20 +29936,16 @@ index db64302e..0aa1cba2 100644
 +    return 0;
  }
  
--static void vk_eng_snapshot_pool_drain(void)
+-static u32 vk_eng_color_snapshot(void* user, u32 surface)
 +static int vk_eng_depth_readback(void* user, u32 depth, u32 w, u32 h, float* out)
- {
--    for (u32 i = 0; i < s_snap_pool_n; i++) vk_destroy_image(&s_snap_pool[i].im);
--    s_snap_pool_n = 0;
--    vk_destroy_buffer(&s_snap_st);
++{
 +    VK_CS(CS_DEPTH_READBACK);
 +    RSX_HS_SCOPE(HS_READBACK);
 +    (void)user;
 +    if (!vk_depth_is_f32(s_vk.depth_format)) return -1;
 +    return vk_eng_aspect_readback_guest(depth, VK_IMAGE_ASPECT_DEPTH_BIT, 4u, w, h, out);
- }
- 
--static u32 vk_eng_color_snapshot(void* user, u32 surface)
++}
++
 +/* rsx_draw_backend.stencil_readback: the stencil bytes, when the depth format
 + * has a stencil. */
 +static int vk_eng_stencil_readback(void* user, u32 depth, u32 w, u32 h, u8* out)
@@ -30011,13 +30017,34 @@ index db64302e..0aa1cba2 100644
 +    const u32 sc = c->sc > 1 ? c->sc : 1;
 +    const u32 iw = w * sc, ih = h * sc;
 +    if (iw > c->w || ih > c->h) return 0;
-+    u32 snap = c->snap_rect;
++    /* PS3RECOMP_VK_SNAPCACHE=1: four copies a target, one a size. Split-screen
++     * samples one target at two or four view sizes in turn, and a single copy
++     * was made again at each change of size -- 36 image allocations a frame
++     * at 2 players. */
++    static int multi = -1;
++    if (multi < 0) { const char* e = getenv("PS3RECOMP_VK_SNAPCACHE"); multi = e && e[0] == '1'; }
++    u32* slotp = &c->snap_rect;
++    if (multi) {
++        u32* cand[4] = { &c->snap_rect, &c->snap_rect_x[0], &c->snap_rect_x[1], &c->snap_rect_x[2] };
++        int k = 0;
++        for (; k < 4; k++) {
++            const vk_eng_obj* q = vk_eng_get(*cand[k], VK_ENG_TEXTURE);
++            if (q && q->w == iw && q->h == ih && q->fmt == c->fmt) break;
++        }
++        if (k == 4) {
++            for (k = 0; k < 4 && vk_eng_get(*cand[k], VK_ENG_TEXTURE); k++) ;
++            if (k == 4) { k = c->snap_rect_next; c->snap_rect_next = (u8)((k + 1) & 3); }
++        }
++        slotp = cand[k];
++    }
++    u32 snap = *slotp;
 +    vk_eng_obj* t = vk_eng_get(snap, VK_ENG_TEXTURE);
 +    if (!t || t->w != iw || t->h != ih || t->fmt != c->fmt) {
 +        if (t) vk_eng_release(user, snap);
-+        c->snap_rect = 0;
++        *slotp = 0;
 +        snap = vk_eng_alloc();
 +        if (!snap) return 0;
++        c = vk_eng_get(surface, VK_ENG_COLOR);   /* (the table does not move; kept for clarity) */
 +        t = &s_eobj[snap];
 +        if (vk_create_image(&t->im, c->fmt, iw, ih,
 +                            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
@@ -30025,7 +30052,7 @@ index db64302e..0aa1cba2 100644
 +            vk_destroy_image(&t->im); memset(t, 0, sizeof *t); return 0;
 +        }
 +        t->kind = VK_ENG_TEXTURE; t->fmt = c->fmt; t->bpp = c->bpp; t->w = iw; t->h = ih;
-+        c->snap_rect = snap;
++        *slotp = snap;
 +    }
 +    if (vk_op_begin()) return 0;
 +    vk_barrier_image(c->im.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL);
@@ -31495,7 +31522,7 @@ index db64302e..0aa1cba2 100644
          static int warned_fmt;
          if (!warned_fmt) { VK_LOG("engine: depth snapshots need D32_SFLOAT, this device uses %d\n",
                                    (int)s_vk.depth_format); warned_fmt = 1; }
-@@ -2705,30 +6176,20 @@ static u32 vk_eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
+@@ -2705,30 +6206,20 @@ static u32 vk_eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
          t->kind = VK_ENG_TEXTURE; t->fmt = VK_FORMAT_R32_SFLOAT; t->bpp = 4; t->w = w; t->h = h;
          z = vk_eng_get(depth, VK_ENG_DEPTH);          /* same slot; reload for clarity */
          z->surface = snap;
@@ -31537,7 +31564,7 @@ index db64302e..0aa1cba2 100644
          vk_barrier_image(z->im.img, s_vk.depth_aspect, VK_IMAGE_LAYOUT_GENERAL);
          vk_barrier_image(t->im.img, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL);
          VkBufferImageCopy out = { .imageSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 },
-@@ -2744,53 +6205,10 @@ static u32 vk_eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
+@@ -2744,53 +6235,10 @@ static u32 vk_eng_depth_snapshot(void* user, u32 depth, u32 w, u32 h)
          VkBufferImageCopy in = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                                   .imageExtent = { w, h, 1 } };
          pvkCmdCopyBufferToImage(s_vk.cmd, st.buf, t->im.img, VK_IMAGE_LAYOUT_GENERAL, 1, &in);
@@ -31592,7 +31619,7 @@ index db64302e..0aa1cba2 100644
  /* ---- E2: pipelines and draws ---------------------------------------------
   * A pipeline handle carries the two translated modules and the render state
   * the engine keyed it on. Topology is not part of that key (Metal sets it on
-@@ -2802,38 +6220,40 @@ static int vk_eng_depth_readback(void* user, u32 depth, u32 x, u32 y, u32 w, u32
+@@ -2802,38 +6250,40 @@ static int vk_eng_depth_readback(void* user, u32 depth, u32 x, u32 y, u32 w, u32
   * vtable guest path already creates. Vertex inputs are the engine's compact
   * layout: slot n is a float4 at n*16, at location n, as Metal reads it.
   * Known gaps, stated rather than guessed: vertex-texture units (their
@@ -31644,7 +31671,7 @@ index db64302e..0aa1cba2 100644
      u32          tex[RSX_BE_MAX_TEXTURES];
      rsx_be_sampler_desc samp[RSX_BE_MAX_TEXTURES];
      u32          tex_mask;
-@@ -2841,39 +6261,363 @@ static struct {
+@@ -2841,39 +6291,363 @@ static struct {
      u32          sc[4];
      int          have_vp, have_sc;
      u32          stencil_ref;
@@ -32025,7 +32052,7 @@ index db64302e..0aa1cba2 100644
      VkAttachmentDescription att[RSX_BE_MAX_COLOR_TARGETS + 1];
      VkAttachmentReference   cref[RSX_BE_MAX_COLOR_TARGETS];
      for (u32 i = 0; i <= n; i++) {
-@@ -2881,11 +6625,8 @@ static VkRenderPass vk_eng_render_pass(VkFormat cf, u32 n)
+@@ -2881,11 +6655,8 @@ static VkRenderPass vk_eng_render_pass(VkFormat cf, u32 n)
              .format = (i < n) ? cf : s_vk.depth_format,
              .samples = VK_SAMPLE_COUNT_1_BIT,
              .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -32039,7 +32066,7 @@ index db64302e..0aa1cba2 100644
              .initialLayout = VK_IMAGE_LAYOUT_GENERAL, .finalLayout = VK_IMAGE_LAYOUT_GENERAL };
          if (i < n) cref[i] = (VkAttachmentReference){ i, VK_IMAGE_LAYOUT_GENERAL };
      }
-@@ -2896,9 +6637,28 @@ static VkRenderPass vk_eng_render_pass(VkFormat cf, u32 n)
+@@ -2896,9 +6667,28 @@ static VkRenderPass vk_eng_render_pass(VkFormat cf, u32 n)
      VkRenderPassCreateInfo rci = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
                                     .attachmentCount = n + 1, .pAttachments = att,
                                     .subpassCount = 1, .pSubpasses = &sub };
@@ -32071,7 +32098,7 @@ index db64302e..0aa1cba2 100644
  }
  
  /* Tables carried from the Metal backend, itself copied from the D3D12 live
-@@ -2917,6 +6677,10 @@ static VkBlendFactor vk_gcm_blend_factor(u32 f)
+@@ -2917,6 +6707,10 @@ static VkBlendFactor vk_gcm_blend_factor(u32 f)
      case 0x0306: return VK_BLEND_FACTOR_DST_COLOR;
      case 0x0307: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
      case 0x0308: return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
@@ -32082,7 +32109,7 @@ index db64302e..0aa1cba2 100644
      default:     return VK_BLEND_FACTOR_ONE;
      }
  }
-@@ -2958,111 +6722,275 @@ static VkStencilOpState vk_gcm_stencil_face(u32 func, u32 fail, u32 zfail, u32 z
+@@ -2958,111 +6752,275 @@ static VkStencilOpState vk_gcm_stencil_face(u32 func, u32 fail, u32 zfail, u32 z
      return s;
  }
  
@@ -32431,7 +32458,7 @@ index db64302e..0aa1cba2 100644
      P->used = 1;
      return slot + 1u;
  }
-@@ -3070,14 +6998,16 @@ static u32 vk_eng_pipeline_create(void* user, const char* vs_hlsl, const char* p
+@@ -3070,14 +7028,16 @@ static u32 vk_eng_pipeline_create(void* user, const char* vs_hlsl, const char* p
  static void vk_eng_pipeline_release(void* user, u32 pipeline)
  {
      (void)user;
@@ -32449,7 +32476,7 @@ index db64302e..0aa1cba2 100644
      if (s_e2.pipeline == pipeline) s_e2.pipeline = 0;
  }
  
-@@ -3088,10 +7018,8 @@ static VkPipeline vk_eng_variant(vk_eng_pipe* P, u32 topo_idx)
+@@ -3088,10 +7048,8 @@ static VkPipeline vk_eng_variant(vk_eng_pipe* P, u32 topo_idx)
          VK_PRIMITIVE_TOPOLOGY_LINE_STRIP, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
          VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP };
      if (P->variant[topo_idx]) return P->variant[topo_idx];
@@ -32461,7 +32488,7 @@ index db64302e..0aa1cba2 100644
      const rsx_be_render_state* rs = &P->rs;
  
      VkPipelineShaderStageCreateInfo st[2] = {
-@@ -3105,7 +7033,8 @@ static VkPipeline vk_eng_variant(vk_eng_pipe* P, u32 topo_idx)
+@@ -3105,7 +7063,8 @@ static VkPipeline vk_eng_variant(vk_eng_pipe* P, u32 topo_idx)
          va[s] = (VkVertexInputAttributeDescription){ s, 0, VK_FORMAT_R32G32B32A32_SFLOAT, s * 16u };
      VkPipelineVertexInputStateCreateInfo vi = {
          .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -32471,7 +32498,7 @@ index db64302e..0aa1cba2 100644
          .vertexAttributeDescriptionCount = P->nslots, .pVertexAttributeDescriptions = va };
      VkPipelineInputAssemblyStateCreateInfo ia = {
          .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-@@ -3125,6 +7054,8 @@ static VkPipeline vk_eng_variant(vk_eng_pipe* P, u32 topo_idx)
+@@ -3125,6 +7084,8 @@ static VkPipeline vk_eng_variant(vk_eng_pipe* P, u32 topo_idx)
                                                                             : VK_CULL_MODE_BACK_BIT,
          .frontFace = (rs->front_face == 0x0901u) ? VK_FRONT_FACE_COUNTER_CLOCKWISE
                                                   : VK_FRONT_FACE_CLOCKWISE,
@@ -32480,7 +32507,7 @@ index db64302e..0aa1cba2 100644
          .lineWidth = 1.0f };
      VkPipelineMultisampleStateCreateInfo ms = {
          .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-@@ -3141,76 +7072,67 @@ static VkPipeline vk_eng_variant(vk_eng_pipe* P, u32 topo_idx)
+@@ -3141,76 +7102,67 @@ static VkPipeline vk_eng_variant(vk_eng_pipe* P, u32 topo_idx)
          .depthWriteEnable = (rs->depth_test && rs->depth_write) ? VK_TRUE : VK_FALSE,
          .depthCompareOp = vk_gcm_compare(rs->depth_func),
          .stencilTestEnable = rs->stencil_enable ? VK_TRUE : VK_FALSE,
@@ -32588,7 +32615,7 @@ index db64302e..0aa1cba2 100644
      return P->variant[topo_idx];
  }
  
-@@ -3218,49 +7140,91 @@ static void vk_eng_bind_pipeline(void* user, u32 pipeline) { (void)user; s_e2.pi
+@@ -3218,49 +7170,91 @@ static void vk_eng_bind_pipeline(void* user, u32 pipeline) { (void)user; s_e2.pi
  
  static void vk_eng2_shutdown(void* user)
  {
@@ -32706,7 +32733,7 @@ index db64302e..0aa1cba2 100644
      s_e2.ps_bytes = bytes;
  }
  static void vk_eng_bind_textures(void* user, const u32* textures,
-@@ -3280,31 +7244,28 @@ static void vk_eng_bind_vertex_textures(void* user, const u32* textures,
+@@ -3280,31 +7274,28 @@ static void vk_eng_bind_vertex_textures(void* user, const u32* textures,
      (void)user; (void)textures; (void)samplers;
      if (mask && !(s_e2.warned & 8u)) { VK_LOG("engine: vertex textures not supported yet\n"); s_e2.warned |= 8u; }
  }
@@ -32748,7 +32775,7 @@ index db64302e..0aa1cba2 100644
  }
  
  static VkFramebuffer vk_eng_framebuffer(VkRenderPass rp, const u32* rt, u32 n, VkImageView dview,
-@@ -3313,9 +7274,19 @@ static VkFramebuffer vk_eng_framebuffer(VkRenderPass rp, const u32* rt, u32 n, V
+@@ -3313,9 +7304,19 @@ static VkFramebuffer vk_eng_framebuffer(VkRenderPass rp, const u32* rt, u32 n, V
      u32 key[RSX_BE_MAX_COLOR_TARGETS + 1] = { 0 };
      for (u32 i = 0; i < n; i++) key[i] = rt[i];
      key[RSX_BE_MAX_COLOR_TARGETS] = dkey;
@@ -32771,7 +32798,7 @@ index db64302e..0aa1cba2 100644
      VkImageView views[RSX_BE_MAX_COLOR_TARGETS + 1];
      for (u32 i = 0; i < n; i++) views[i] = s_eobj[rt[i]].im.view;
      views[n] = dview;
-@@ -3326,6 +7297,8 @@ static VkFramebuffer vk_eng_framebuffer(VkRenderPass rp, const u32* rt, u32 n, V
+@@ -3326,6 +7327,8 @@ static VkFramebuffer vk_eng_framebuffer(VkRenderPass rp, const u32* rt, u32 n, V
      if (pvkCreateFramebuffer(s_vk.device, &fci, NULL, &fb) != VK_SUCCESS) return VK_NULL_HANDLE;
      memcpy(s_e2.fb[s_e2.fb_count].key, key, sizeof key);
      s_e2.fb[s_e2.fb_count++].fb = fb;
@@ -32780,7 +32807,7 @@ index db64302e..0aa1cba2 100644
      return fb;
  }
  
-@@ -3336,16 +7309,17 @@ static VkImageView vk_eng_scratch_depth(u32 w, u32 h)
+@@ -3336,16 +7339,17 @@ static VkImageView vk_eng_scratch_depth(u32 w, u32 h)
      if (s_e2.scratch_depth.view && s_e2.scratch_w >= w && s_e2.scratch_h >= h)
          return s_e2.scratch_depth.view;
      vk_eng_drop_framebuffers();
@@ -32800,7 +32827,7 @@ index db64302e..0aa1cba2 100644
      s_e2.scratch_w = w; s_e2.scratch_h = h;
      return s_e2.scratch_depth.view;
  }
-@@ -3366,12 +7340,31 @@ static VkSampler vk_eng_sampler(const rsx_be_sampler_desc* d)
+@@ -3366,12 +7370,31 @@ static VkSampler vk_eng_sampler(const rsx_be_sampler_desc* d)
  {
      u32 lo, hi;
      memcpy(&lo, &d->min_lod, 4); memcpy(&hi, &d->max_lod, 4);
@@ -32835,7 +32862,7 @@ index db64302e..0aa1cba2 100644
      float min_lod = d->min_lod, max_lod = d->mip_present ? d->max_lod : d->min_lod;
      if (max_lod < min_lod) max_lod = min_lod;
      VkSamplerCreateInfo sci = {
-@@ -3382,242 +7375,225 @@ static VkSampler vk_eng_sampler(const rsx_be_sampler_desc* d)
+@@ -3382,242 +7405,225 @@ static VkSampler vk_eng_sampler(const rsx_be_sampler_desc* d)
          .addressModeU = vk_gcm_wrap(d->wrap_s), .addressModeV = vk_gcm_wrap(d->wrap_t),
          .addressModeW = vk_gcm_wrap(d->wrap_r),
          .minLod = min_lod, .maxLod = max_lod,
@@ -33265,7 +33292,7 @@ index db64302e..0aa1cba2 100644
  
      /* Targets: every member of a set is target A's size (engine contract). */
      const u32 n = s_eng_bound.nrt;
-@@ -3626,103 +7602,182 @@ static void vk_eng_draw(void* user, rsx_topology topology, const void* vertices,
+@@ -3626,103 +7632,182 @@ static void vk_eng_draw(void* user, rsx_topology topology, const void* vertices,
          return;
      }
      vk_eng_obj* rt0 = vk_eng_get(s_eng_bound.rt[0], VK_ENG_COLOR);
@@ -33526,7 +33553,7 @@ index db64302e..0aa1cba2 100644
          if (x1 > w) x1 = w;
          if (y1 > h) y1 = h;
          sc.offset.x = (int32_t)x0; sc.offset.y = (int32_t)y0;
-@@ -3731,23 +7786,135 @@ static void vk_eng_draw(void* user, rsx_topology topology, const void* vertices,
+@@ -3731,23 +7816,135 @@ static void vk_eng_draw(void* user, rsx_topology topology, const void* vertices,
      pvkCmdSetViewport(s_vk.cmd, 0, 1, &vp);
      pvkCmdSetScissor(s_vk.cmd, 0, 1, &sc);
      pvkCmdSetStencilReference(s_vk.cmd, VK_STENCIL_FACE_FRONT_AND_BACK, s_e2.stencil_ref & 0xFFu);
@@ -33675,7 +33702,7 @@ index db64302e..0aa1cba2 100644
  
  static const rsx_draw_backend s_vk_engine_backend = {
      .user                 = NULL,
-@@ -3755,37 +7922,68 @@ static const rsx_draw_backend s_vk_engine_backend = {
+@@ -3755,37 +7952,68 @@ static const rsx_draw_backend s_vk_engine_backend = {
      .shutdown             = vk_eng_shutdown,
      .submit_and_wait      = vk_eng_submit_and_wait,
      .texture_create       = vk_eng_texture_create,
@@ -33750,7 +33777,7 @@ index db64302e..0aa1cba2 100644
  };
  
  static rsx_backend s_vulkan_backend = {
-@@ -3805,16 +8003,21 @@ static rsx_backend s_vulkan_backend = {
+@@ -3805,16 +8033,21 @@ static rsx_backend s_vulkan_backend = {
   * -------------------------------------------------------------------------*/
  static int vk_init_all(u32 width, u32 height, const char* title)
  {
@@ -33779,7 +33806,7 @@ index db64302e..0aa1cba2 100644
  
      vk_window_open(title);           /* no-op unless PS3RECOMP_VK_WINDOW is set */
      if (vk_load_library()) return -1;
-@@ -3864,17 +8067,34 @@ static int vk_init_all(u32 width, u32 height, const char* title)
+@@ -3864,17 +8097,34 @@ static int vk_init_all(u32 width, u32 height, const char* title)
      pvkGetPhysicalDeviceFeatures(s_vk.phys, &have);
      want.textureCompressionBC = have.textureCompressionBC;
      /* User clip planes (rsx_vp_apply_user_clip) write ClipDistance. */
@@ -33821,7 +33848,7 @@ index db64302e..0aa1cba2 100644
      VkDeviceCreateInfo dci = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
                                 .queueCreateInfoCount = 1, .pQueueCreateInfos = &qci,
                                 .enabledExtensionCount = s_vk.windowed ? 1u : 0u,
-@@ -3882,6 +8102,7 @@ static int vk_init_all(u32 width, u32 height, const char* title)
+@@ -3882,6 +8132,7 @@ static int vk_init_all(u32 width, u32 height, const char* title)
                                 .pEnabledFeatures = &want };
      VK_CHECK(pvkCreateDevice(s_vk.phys, &dci, NULL, &s_vk.device), "vkCreateDevice");
      if (vk_load_device_functions()) return -1;
@@ -33829,7 +33856,7 @@ index db64302e..0aa1cba2 100644
      if (s_vk.windowed && vk_load_wsi_device_functions())
          vk_window_drop("the driver has no swapchain functions");
      pvkGetDeviceQueue(s_vk.device, s_vk.queue_family, 0, &s_vk.queue);
-@@ -3894,15 +8115,15 @@ static int vk_init_all(u32 width, u32 height, const char* title)
+@@ -3894,15 +8145,15 @@ static int vk_init_all(u32 width, u32 height, const char* title)
                                          .commandPool = s_vk.pool,
                                          .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                                          .commandBufferCount = 1 };
@@ -33852,7 +33879,7 @@ index db64302e..0aa1cba2 100644
  
      if (vk_pick_depth_format()) return -1;
      if (vk_create_image(&s_vk.color, VK_FORMAT_R8G8B8A8_UNORM, s_vk.width, s_vk.height,
-@@ -3911,8 +8132,8 @@ static int vk_init_all(u32 width, u32 height, const char* title)
+@@ -3911,8 +8162,8 @@ static int vk_init_all(u32 width, u32 height, const char* title)
      if (vk_create_image(&s_vk.depth, s_vk.depth_format, s_vk.width, s_vk.height,
                          VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, s_vk.depth_aspect)) return -1;
@@ -33863,7 +33890,7 @@ index db64302e..0aa1cba2 100644
      if (vk_create_render_pass()) return -1;
      if (vk_create_pipeline_objects()) return -1;
      if (vk_guest_init()) {
-@@ -3937,8 +8158,14 @@ static int vk_init_all(u32 width, u32 height, const char* title)
+@@ -3937,8 +8188,14 @@ static int vk_init_all(u32 width, u32 height, const char* title)
      if (vk_submit_and_wait()) return -1;
  
      if (s_vk.windowed) {
@@ -33878,7 +33905,7 @@ index db64302e..0aa1cba2 100644
              vk_create_swapchain())
              vk_window_drop("the swapchain could not be created");
      }
-@@ -3975,7 +8202,6 @@ int rsx_vulkan_backend_init(u32 width, u32 height, const char* title)
+@@ -3975,7 +8232,6 @@ int rsx_vulkan_backend_init(u32 width, u32 height, const char* title)
  
  void rsx_vulkan_backend_shutdown(void)
  {
@@ -33886,7 +33913,7 @@ index db64302e..0aa1cba2 100644
      if (rsx_get_backend() == &s_vulkan_backend) rsx_set_backend(NULL);
      if (s_vk.eng_active) { rsx_draw_engine_shutdown(); s_vk.eng_active = 0; }
      rsx_draw_engine_set_backend(NULL);
-@@ -3990,8 +8216,9 @@ void rsx_vulkan_backend_shutdown(void)
+@@ -3990,8 +8246,9 @@ void rsx_vulkan_backend_shutdown(void)
      }
      if (s_vk.windowed || s_vk.window) vk_window_drop(NULL);
      if (s_vk.device) {
@@ -33897,7 +33924,7 @@ index db64302e..0aa1cba2 100644
          for (int i = 0; i < VK_PIPELINE_SLOTS; i++)
              if (s_vk.pipelines[i]) pvkDestroyPipeline(s_vk.device, s_vk.pipelines[i], NULL);
          if (s_vk.pipe_layout) pvkDestroyPipelineLayout(s_vk.device, s_vk.pipe_layout, NULL);
-@@ -4008,56 +8235,106 @@ void rsx_vulkan_backend_shutdown(void)
+@@ -4008,56 +8265,106 @@ void rsx_vulkan_backend_shutdown(void)
          vk_destroy_image(&s_vk.dummy);
          vk_destroy_image(&s_vk.depth);
          vk_destroy_image(&s_vk.color);
@@ -34019,7 +34046,7 @@ index db64302e..0aa1cba2 100644
  }
  
  u32 rsx_vulkan_backend_presented_center(void)
-@@ -4065,6 +8342,11 @@ u32 rsx_vulkan_backend_presented_center(void)
+@@ -4065,6 +8372,11 @@ u32 rsx_vulkan_backend_presented_center(void)
      return s_vk.presented ? (0xFF000000u | s_vk.last_center) : 0u;
  }
  
@@ -34031,7 +34058,7 @@ index db64302e..0aa1cba2 100644
  u32 rsx_vulkan_backend_debug_color(void) { return s_vk.clear_argb; }
  
  u32 rsx_vulkan_backend_readback_center(void)
-@@ -4078,9 +8360,4 @@ u32 rsx_vulkan_backend_guest_draws(void)
+@@ -4078,9 +8390,4 @@ u32 rsx_vulkan_backend_guest_draws(void)
      return s_vk.eng_active ? rsx_draw_engine_guest_draws() : s_g.last_draws;
  }
  
@@ -38111,7 +38138,7 @@ index f73907c2..ce002211 100644
      }
      if (getenv("PS3_FSLOG"))
 diff --git a/runtime/ppu/ppu_hle.cpp b/runtime/ppu/ppu_hle.cpp
-index 15d4ef60..0d98e1a3 100644
+index 15d4ef60..8b1a2fbc 100644
 --- a/runtime/ppu/ppu_hle.cpp
 +++ b/runtime/ppu/ppu_hle.cpp
 @@ -42,13 +42,60 @@ extern "C" void ps3_hle_register(uint32_t nid, const char* name, void* handler)
@@ -38246,7 +38273,7 @@ index 15d4ef60..0d98e1a3 100644
  
  /* PS3_HLE_TOP=<seconds>: the most-called HLE imports over each window, with
   * the guest thread and caller of the last call. PS3_HLE_TRACE logs the first N
-@@ -252,8 +293,76 @@ static void hle_top_note(uint32_t nid, const char* name, const ppu_context* ctx,
+@@ -252,8 +293,112 @@ static void hle_top_note(uint32_t nid, const char* name, const ppu_context* ctx,
      for (int j = 0; j < ht_used; j++) ht_n[j] = 0;
  }
  extern "C" uint32_t ppu_prof_resolve_host(void* ra);
@@ -38295,14 +38322,50 @@ index 15d4ef60..0d98e1a3 100644
 +    for (int j = 0; j < N; j++) { k_[j] = 0; n_[j] = 0; t_[j] = 0; }
 +    total = 0; win0 = now;
 +}
++/* PS3_CURCALL=1 (SPU_TS_WATCHDOG turns it on too): every guest thread's
++ * current HLE import / lv2 syscall (key, lr, r3, r4, since when), so a hang
++ * dump (ppu_curcall_dump, called by spu_workload.c's taskset watchdog) can
++ * say what each PPU thread is blocked in. */
++static int s_cc = -1;
++struct cc_slot { std::atomic<uint32_t> key; uint32_t lr, a3, a4; uint64_t t0; };
++static cc_slot s_cc_tab[256];
++static thread_local int t_cc_depth;
++static inline int cc_on(void)
++{
++    if (__builtin_expect(s_cc < 0, 0)) s_cc = (getenv("PS3_CURCALL") || getenv("SPU_TS_WATCHDOG")) ? 1 : 0;
++    return s_cc;
++}
++extern "C" void ppu_curcall_dump(void)
++{
++    if (!cc_on()) return;
++    const uint64_t now = mwp_now_ns();
++    for (int t = 0; t < 256; t++) {
++        const uint32_t k = s_cc_tab[t].key.load(std::memory_order_acquire);
++        if (!k) continue;
++        if (k >= 0x10000u && k < 0x20000u)
++            fprintf(stderr, "[curcall] tid %d in syscall %u lr=0x%08X r3=0x%08X r4=0x%08X for %.1f s\n", t, k - 0x10000u,
++                    s_cc_tab[t].lr, s_cc_tab[t].a3, s_cc_tab[t].a4, (now - s_cc_tab[t].t0) / 1e9);
++        else
++            fprintf(stderr, "[curcall] tid %d in import %08X lr=0x%08X r3=0x%08X r4=0x%08X for %.1f s\n", t, k,
++                    s_cc_tab[t].lr, s_cc_tab[t].a3, s_cc_tab[t].a4, (now - s_cc_tab[t].t0) / 1e9);
++    }
++}
 +struct ppu_main_wait_scope {
-+    uint64_t t0 = 0; uint32_t key, lr;
++    uint64_t t0 = 0; uint32_t key, lr; int cc = -1;
 +    ppu_main_wait_scope(uint32_t k, const ppu_context* ctx) : key(k), lr(0) {
++        if (cc_on() && ctx && ctx->thread_id < 256 && t_cc_depth++ == 0) {
++            cc_slot& c = s_cc_tab[ctx->thread_id];
++            c.lr = (uint32_t)ctx->lr; c.a3 = (uint32_t)ctx->gpr[3]; c.a4 = (uint32_t)ctx->gpr[4];
++            c.t0 = mwp_now_ns(); c.key.store(k ? k : 0xFFFFFFFFu, std::memory_order_release);
++            cc = (int)ctx->thread_id;
++        }
 +        if (__builtin_expect(s_mwp < 0, 0)) { const char* e = getenv("PS3_MAIN_WAITPROF"); s_mwp = e ? (atoi(e) > 0 ? atoi(e) : 1) : 0; }
 +        if (!s_mwp || !ctx || ctx->thread_id != (uint64_t)s_mwp || t_mwp_depth++) return;
 +        lr = (uint32_t)ctx->lr; t0 = mwp_now_ns();
 +    }
 +    ~ppu_main_wait_scope() {
++        if (s_cc > 0 && t_cc_depth > 0 && --t_cc_depth == 0 && cc >= 0)
++            s_cc_tab[cc].key.store(0, std::memory_order_release);
 +        if (!s_mwp || !t_mwp_depth) return;
 +        if (--t_mwp_depth == 0 && t0) mwp_note(key, lr, mwp_now_ns() - t0);
 +    }
@@ -38323,7 +38386,7 @@ index 15d4ef60..0d98e1a3 100644
      if (const hle_fast_fn f = hle_fast(nid))
          if (f(ctx)) return;
  
-@@ -263,7 +372,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -263,7 +408,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
       * and "the title ran for a while and then quietly stopped advancing" is
       * exactly that shape. Every guest frame goes through HLE calls, so the last
       * dump in the log names the frame the loop was in when it stopped. */
@@ -38332,7 +38395,7 @@ index 15d4ef60..0d98e1a3 100644
        if (every < 0) { const char* e = getenv("HLE_BT_EVERY"); every = e ? atoi(e) : 0; }
        if (every > 0 && ctx) {
            static unsigned n[8] = {0};
-@@ -321,7 +430,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -321,7 +466,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
          return;
      }
      /* Guest-PC breadcrumb for the sampling profiler (see lv2_syscall). */
@@ -38341,7 +38404,7 @@ index 15d4ef60..0d98e1a3 100644
      g_last_hle_nid = nid;
      /* Stamp the NAME here too, not only where a handler is found below.
       *
-@@ -339,7 +448,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -339,7 +484,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
  
      /* Boot trace: log the first N HLE calls (PS3_HLE_TRACE=N). Invaluable for
       * new-SDK bring-up (e.g. PSL1GHT) where the failure is "nothing happens". */
@@ -38350,7 +38413,7 @@ index 15d4ef60..0d98e1a3 100644
      if (s_trace == -2) { const char* e = getenv("PS3_HLE_TRACE"); s_trace = e ? atoi(e) : 0; }
      if (s_trace > 0) {
          s_trace--;
-@@ -352,7 +461,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -352,7 +497,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
       * a MISDECLARED HLE prototype from a guest passing bad values -- the two look
       * identical from the callee side, and getting it wrong silently shifts every
       * argument after the mistake. */
@@ -38359,7 +38422,7 @@ index 15d4ef60..0d98e1a3 100644
        if (s_ha < 0) { const char* e = getenv("PS3_HLE_ARGS");
                        s_ha = e ? (long)strtoul(e, 0, 16) : 0; }
        if (s_ha && nid == (uint32_t)s_ha) {
-@@ -398,17 +507,13 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -398,17 +543,13 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
       * the caller no longer reads [r1+0x28] to restore r2, so this ABI TOC-spill is
       * unnecessary — and in the frameless-cascade it can clobber a caller frame slot
       * (e.g. the deserializer's this-pointer). Skip it to test that theory. */
@@ -38382,7 +38445,7 @@ index 15d4ef60..0d98e1a3 100644
      {
          uint32_t opd = prx_resolve_export(nid);
          if (opd) {
-@@ -722,7 +827,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -722,7 +863,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
              return;
          }
  
@@ -38391,7 +38454,7 @@ index 15d4ef60..0d98e1a3 100644
      if (!e || !e->handler) {
          /* Recorded before the diagnostic paths below, several of which return
           * early. An import moving between resolved and unresolved is exactly the
-@@ -740,7 +845,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -740,7 +881,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
                  fprintf(stderr, "[TUNERFIX] sysPrxForUser 0xE0998DBF -> 0x8001112E (profiler not loaded)\n");
              return;
          }
@@ -38400,7 +38463,7 @@ index 15d4ef60..0d98e1a3 100644
          if (logged < 40) { fprintf(stderr, "[hle] unresolved NID 0x%08X\n", nid); logged++; }
          /* cellSaveData call-shape capture: dump r3-r10 + resolve r7/r8 as OPD
           * callbacks (statCallback/fileCallback) to learn the cellSaveDataAutoLoad2
-@@ -781,7 +886,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -781,7 +922,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
           * and later virtual-calls it -> the 0xC708C708 null-vtable crash. Return a
           * negative error instead so the game's online-content check takes its
           * graceful OFFLINE-FAILURE path and proceeds with the local Persistent.zip. */
@@ -38409,7 +38472,7 @@ index 15d4ef60..0d98e1a3 100644
            if(_no){ switch(nid){
              case 0x139A9E9Bu: case 0x9FB6228Eu: case 0x05893E7Cu:
              case 0x52AAC4FAu: case 0x9638F766u: case 0x522180BCu:
-@@ -815,7 +920,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
+@@ -815,7 +956,7 @@ extern "C" void ps3_hle_call(uint32_t nid, ppu_context* ctx)
       * CELL_ERROR code (0x8001xxxx / 0x8002xxxx) is leaking a truncated HOST
       * pointer. It surfaces much later as an unresolved indirect call with no hint
       * of where it came from, which is why it is worth checking for directly. */
@@ -38418,7 +38481,7 @@ index 15d4ef60..0d98e1a3 100644
        if(_pl){ uint32_t rv=(uint32_t)r;
          if(rv>=0x10000000u && (rv & 0xFFFF0000u)!=0x80010000u && (rv & 0xFFFF0000u)!=0x80020000u){
            static int _n=0; if(PS3_LOG_FIRST(_n, 40)) fprintf(stderr,"[PTRLEAK] NID 0x%08X %s returned 0x%08X (out-of-guest-RAM host ptr?)\n",
-@@ -840,9 +945,18 @@ extern "C" void ppu_hle_register_all(void) __attribute__((weak));
+@@ -840,9 +981,18 @@ extern "C" void ppu_hle_register_all(void) __attribute__((weak));
  extern "C" void ppu_hle_register_all(void) {}
  #endif
  
@@ -41742,7 +41805,7 @@ index 4b7df8c5..88a5f49e 100644
          const char* e = getenv("PS3_VERBOSE");
          if (e) v = (e[0] && e[0] != '0') ? 1 : 0;
 diff --git a/runtime/spu/spu_channels.c b/runtime/spu/spu_channels.c
-index 5fc50208..cc36117f 100644
+index 5fc50208..4369ff5a 100644
 --- a/runtime/spu/spu_channels.c
 +++ b/runtime/spu/spu_channels.c
 @@ -12,34 +12,23 @@
@@ -43785,11 +43848,11 @@ index 5fc50208..cc36117f 100644
 +                return (spu_lifted_fn)spu_lookup(lsa, img);
          }
 -        return e->fn;
--    }
+     }
 -    if (mode == 2) {   /* shared counters only in shadow mode: they would bounce between SPU threads */
 -        __atomic_fetch_add(&s_dcache_misses, 1, __ATOMIC_RELAXED);
 -        spu_dcache_shadow_stats();
-     }
+-    }
 -    const spu_lifted_fn fn = spu_lifted_lookup_full(ctx, lsa);
 -    if (fn) {
 -        /* The resolver may have verified a pending slot; the entry records the
@@ -43827,7 +43890,7 @@ index 5fc50208..cc36117f 100644
 -typedef struct { uint32_t src_ea; int image_id; uint8_t sig[16]; int has_sig; uint32_t span;
 -                 uint32_t load_lsa; unsigned code_count; spu_overlay_code_segment* code; } spu_ovl_src;
 +typedef struct { uint32_t src_ea; int image_id; uint8_t sig[16]; int has_sig; uint32_t span; uint32_t lift_lsa;
-+                 const uint8_t* ref; } spu_ovl_src;
++                 const uint8_t* ref; int owner_img; } spu_ovl_src;
  /* 6 FMOD codec/DSP overlays + up to 89 WWS job-code modules (all stream into
   * the same job code buffer at LS 0x4000, dispatched by content signature). */
  #define SPU_OVL_SRC_MAX 128
@@ -43885,7 +43948,7 @@ index 5fc50208..cc36117f 100644
      }
  }
  
-@@ -1907,100 +2225,92 @@ void spu_overlay_register_region(uint32_t content_ea, uint32_t span, int image_i
+@@ -1907,100 +2225,104 @@ void spu_overlay_register_region(uint32_t content_ea, uint32_t span, int image_i
      s_ovl_src[s_ovl_src_count - 1].span = span;
  }
  
@@ -43959,6 +44022,18 @@ index 5fc50208..cc36117f 100644
 +    if (src_ea >= SPU_OVL_REF_EA && src_ea - SPU_OVL_REF_EA < SPU_OVL_SRC_MAX)
 +        return s_ovl_src[src_ea - SPU_OVL_REF_EA].ref;
 +    return vm_base + src_ea;
++}
++/* Only contexts running image `owner` can load the last registered fixed-
++ * address region: GETs by every other context skip its byte compare. The
++ * MultiStream core's code regions (flashMP3 at 0x1A900..0x2A810, the DSP
++ * plugins at 0x37000+) overlap where SPURS jobs put their data, and every such
++ * GET compared its bytes against the lift's. */
++void spu_overlay_owner_last(int owner)
++{
++    /* SPU_OVL_OWNER=1 (default off until validated) */
++    const char* e = getenv("SPU_OVL_OWNER");
++    if (!(e && e[0] == '1')) return;
++    if (s_ovl_src_count) s_ovl_src[s_ovl_src_count - 1].owner_img = owner;
 +}
 +void spu_overlay_register_bytes_at(const uint8_t* bytes, uint32_t lsa, uint32_t span, int image_id)
 +{
@@ -44049,7 +44124,7 @@ index 5fc50208..cc36117f 100644
          if (ctx->pc == s_stack_reset[i].entry &&
              fn == spu_lookup(ctx->pc, s_stack_reset[i].image_id)) {
              g_spu_trampoline_fn = 0;
-@@ -2018,7 +2328,7 @@ static void spu_check_stack_reset_scan(spu_context* ctx, void (*fn)(spu_context*
+@@ -2018,7 +2340,7 @@ static void spu_check_stack_reset_scan(spu_context* ctx, void (*fn)(spu_context*
   * dormant co-resident task can no longer shadow the one the policy launched. */
  #define SPU_TASK_ENTRY_MAX 16
  static struct { uint32_t entry; int image_id; } s_task_entry[SPU_TASK_ENTRY_MAX];
@@ -44058,7 +44133,7 @@ index 5fc50208..cc36117f 100644
  void spu_taskset_register_task_entry(uint32_t entry, int image_id)
  {
      if (s_task_entry_count < SPU_TASK_ENTRY_MAX) {
-@@ -2085,7 +2395,7 @@ void spu_overlay_register_sig(const uint8_t sig[16], int image_id)
+@@ -2085,7 +2407,7 @@ void spu_overlay_register_sig(const uint8_t sig[16], int image_id)
   * file. One file per source EA: ovl_<ea>.bin. */
  static void spu_ovl_dump(spu_context* ctx, uint32_t ea, uint32_t lsa, const uint8_t* ls, uint32_t size)
  {
@@ -44067,7 +44142,7 @@ index 5fc50208..cc36117f 100644
      if (s_on < 0) { const char* e = getenv("SPU_DUMP_OVL"); s_on = e && *e;
          if (s_on) { snprintf(s_dir, sizeof s_dir, "%s", e);
                      char* c = strchr(s_dir, ','); if (c) { *c = 0; s_lsa = (uint32_t)strtoul(c + 1, 0, 0); } } }
-@@ -2114,7 +2424,7 @@ static void spu_ovl_dump(spu_context* ctx, uint32_t ea, uint32_t lsa, const uint
+@@ -2114,7 +2436,7 @@ static void spu_ovl_dump(spu_context* ctx, uint32_t ea, uint32_t lsa, const uint
   * new bytes for [ea, ea+size). */
  void spu_lockguard_check(spu_context* ctx, uint32_t ea, const uint8_t* src, uint32_t size, const char* what)
  {
@@ -44076,7 +44151,7 @@ index 5fc50208..cc36117f 100644
      if (s_g == -2) { const char* e = getenv("SPU_LOCKGUARD"); s_g = e ? (int64_t)strtoul(e, 0, 16) : -1; }
      if (s_g < 0 || !vm_base) return;
      uint32_t g = (uint32_t)s_g;
-@@ -2123,7 +2433,7 @@ void spu_lockguard_check(spu_context* ctx, uint32_t ea, const uint8_t* src, uint
+@@ -2123,7 +2445,7 @@ void spu_lockguard_check(spu_context* ctx, uint32_t ea, const uint8_t* src, uint
      unsigned os = (o[0] << 8) | o[1], on = (o[2] << 8) | o[3];
      unsigned ns = (n[0] << 8) | n[1], nn = (n[2] << 8) | n[3];
      int bad = !(ns == os || ns == ((os + 1) & 0xFFFF)) || !(nn == on || nn == ((on + 1) & 0xFFFF));
@@ -44085,7 +44160,7 @@ index 5fc50208..cc36117f 100644
          fprintf(stderr, "[lockguard] %s img=%d pc=0x%05X ea=0x%08X size=%u: %04X/%04X -> %04X/%04X\n",
                  what, ctx ? ctx->image_id : -1, ctx ? (unsigned)(ctx->pc & SPU_LS_MASK) : 0u,
                  ea, size, os, on, ns, nn); }
-@@ -2132,32 +2442,151 @@ void spu_lockguard_check(spu_context* ctx, uint32_t ea, const uint8_t* src, uint
+@@ -2132,32 +2454,152 @@ void spu_lockguard_check(spu_context* ctx, uint32_t ea, const uint8_t* src, uint
  void spu_overlay_note_get(spu_context* ctx, uint32_t ea, const uint8_t* ls, uint32_t size)
  {
      uint32_t lsa = (uint32_t)(ls - ctx->ls);
@@ -44217,6 +44292,7 @@ index 5fc50208..cc36117f 100644
 +    for (uint64_t mk = cand[wd]; mk; mk &= mk - 1) {
 +        const int i = wd * 64 + __builtin_ctzll(mk);
          const spu_ovl_src* o = &s_ovl_src[i];
++        if (o->owner_img && o->owner_img != ctx->image_id) continue;
          int hit = o->has_sig ? (size >= 512 && memcmp(ls, o->sig, 16) == 0)
                               : (o->src_ea == ea);
 +        if (o->lift_lsa) {
@@ -44249,7 +44325,7 @@ index 5fc50208..cc36117f 100644
                  for (unsigned slot = 0; slot < 4; ++slot) {
                      if (ctx->resident_code[slot].image_id && ctx->resident_code[slot].lsa != lsa)
                          continue;
-@@ -2165,9 +2594,9 @@ void spu_overlay_note_get(spu_context* ctx, uint32_t ea, const uint8_t* ls, uint
+@@ -2165,9 +2607,9 @@ void spu_overlay_note_get(spu_context* ctx, uint32_t ea, const uint8_t* ls, uint
                      ctx->resident_code[slot].size = o->span;
                      ctx->resident_code[slot].source_ea = ea;
                      ctx->resident_code[slot].image_id = o->image_id;
@@ -44262,7 +44338,7 @@ index 5fc50208..cc36117f 100644
                      return;
                  }
                  fprintf(stderr, "[spu-ovl] no free resident code span for image %d\n", o->image_id);
-@@ -2175,7 +2604,7 @@ void spu_overlay_note_get(spu_context* ctx, uint32_t ea, const uint8_t* ls, uint
+@@ -2175,7 +2617,7 @@ void spu_overlay_note_get(spu_context* ctx, uint32_t ea, const uint8_t* ls, uint
              }
              if (ctx->resident_ovl != o->image_id) {
                  ctx->resident_ovl = o->image_id;
@@ -44271,7 +44347,7 @@ index 5fc50208..cc36117f 100644
                      fprintf(stderr, "[spu-ovl] img=%d streamed overlay src=0x%08X "
                              "-> LS 0x%05X size=%u -> resident ovl image %d%s\n",
                              ctx->image_id, ea, (uint32_t)(ls - ctx->ls), size,
-@@ -2186,11 +2615,102 @@ void spu_overlay_note_get(spu_context* ctx, uint32_t ea, const uint8_t* ls, uint
+@@ -2186,11 +2628,103 @@ void spu_overlay_note_get(spu_context* ctx, uint32_t ea, const uint8_t* ls, uint
      }
  }
  
@@ -44295,6 +44371,7 @@ index 5fc50208..cc36117f 100644
 +    for (int i = 0; i < n; i++) {
 +        const spu_ovl_src* o = &s_ovl_src[i];
 +        if (!o->lift_lsa || !o->span || pc - o->lift_lsa >= o->span) continue;
++        if (o->owner_img && o->owner_img != ctx->image_id) continue;
 +        if (!gm_equal(spu_ovl_bytes(o->src_ea), ctx->ls + o->lift_lsa, o->span)) continue;
 +        /* Its bytes fill the span, so nothing else resident there still is. */
 +        for (unsigned slot = 0; slot < 4; ++slot) {
@@ -44374,7 +44451,7 @@ index 5fc50208..cc36117f 100644
  int spu_overlay_match_sig(const uint8_t hdr[16])
  {
      for (int i = 0; i < s_ovl_src_count; i++) {
-@@ -2222,7 +2742,7 @@ int spu_overlay_match_sig(const uint8_t hdr[16])
+@@ -2222,7 +2756,7 @@ int spu_overlay_match_sig(const uint8_t hdr[16])
  static void spu_ef_deliver_owed(spu_context* ctx, uint32_t wobj)
  {
      (void)ctx;
@@ -44383,7 +44460,7 @@ index 5fc50208..cc36117f 100644
      if (s_od < 0) s_od = getenv("SPURS_EF_OBJ_DELIVER") ? 1 : 0;
      if (!s_od || !wobj || !vm_base) return;
      extern uint16_t spu_ef_bits_take(uint32_t);
-@@ -2234,7 +2754,7 @@ static void spu_ef_deliver_owed(spu_context* ctx, uint32_t wobj)
+@@ -2234,7 +2768,7 @@ static void spu_ef_deliver_owed(spu_context* ctx, uint32_t wobj)
          m[0x30 + 2*s]     = (uint8_t)(bits >> 8);
          m[0x30 + 2*s + 1] = (uint8_t)bits;
      }
@@ -44392,7 +44469,7 @@ index 5fc50208..cc36117f 100644
          fprintf(stderr, "[spu] delivered owed bits=0x%04X to object 0x%08X \n",
                  (unsigned)bits, wobj); }
  }
-@@ -2245,9 +2765,9 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
+@@ -2245,9 +2779,9 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
      uint32_t num = raw & 0x0F;
      /* SPU_SYSCALL_IMG=<n>: every syscall of image n, uncapped (the 24-line
       * budget is spent by FMOD's WAIT_SIGNAL loop long before a later task). */
@@ -44404,7 +44481,7 @@ index 5fc50208..cc36117f 100644
          fprintf(stderr, "[spu] SPURS taskset syscall num=%u (raw=0x%X args=0x%08X) image=%d link/r0=0x%05X wobj@2FDC=0x%02X%02X%02X%02X\n",
                  num, raw, ctx->gpr[4]._u32[0], ctx->image_id, ctx->gpr[0]._u32[0] & SPU_LS_MASK,
                  ctx->ls[0x2FDC], ctx->ls[0x2FDD], ctx->ls[0x2FDE], ctx->ls[0x2FDF]); }
-@@ -2255,8 +2775,8 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
+@@ -2255,8 +2789,8 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
       * caller does shufb(arg,...) -> stqd 0x2FD0 and only then sets r3 = number
       * (see func_00026DE0 / func_000272AC in image 22). Logging r4 shows caller
       * leftovers and hides what the task actually asked for. */
@@ -44415,7 +44492,7 @@ index 5fc50208..cc36117f 100644
          const uint8_t* a = &ctx->ls[0x2FD0];
          fprintf(stderr, "[spu] syscall num=%u LS[0x2FD0]=%02X%02X%02X%02X %02X%02X%02X%02X"
                          " %02X%02X%02X%02X %02X%02X%02X%02X img=%d\n",
-@@ -2276,11 +2796,11 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
+@@ -2276,11 +2810,11 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
       * that has since done work and calls EXIT again means it: returning there makes
       * it re-enter and spin (observed: 6x num=0 from link 0x26E18 once the task is
       * woken). Honour the first call, halt on the rest. Each task runs on its own
@@ -44430,7 +44507,7 @@ index 5fc50208..cc36117f 100644
              fprintf(stderr, "[spu] cri task EXIT #%d -- halting (was spinning)\n",
                      s_exit_seen); }
          ctx->status = SPU_STATUS_STOPPED_BY_STOP;
-@@ -2326,11 +2846,11 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
+@@ -2326,11 +2860,11 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
           * success is the most expensive kind of bug (see the unresolved-NID note
           * in ppu_hle.cpp), so it stays opt-in and must never become the default.
           * If the PPU advances, the answer is what the task must do to earn it. */
@@ -44444,7 +44521,7 @@ index 5fc50208..cc36117f 100644
                int again = 0;
                for (int i = 0; i < seen_n; i++) if (seen[i] == wobj) { again = 1; break; }
                if (s_rp >= 2) again = 1;   /* force: answer "would the PPU move at all?" */
-@@ -2339,7 +2859,7 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
+@@ -2339,7 +2873,7 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
                    extern void spurs_ef_set_from_spu(uint32_t, uint16_t);
                    spurs_ef_set_from_spu(wobj + 0x100u, 1);
                    static int _n = 0;
@@ -44453,7 +44530,7 @@ index 5fc50208..cc36117f 100644
                        fprintf(stderr, "[spu] SPU-REPLY: set flag 0x%08X for object "
                                        "0x%08X (cycle complete)\n", wobj + 0x100u, wobj);
                }
-@@ -2391,44 +2911,16 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
+@@ -2391,44 +2925,16 @@ void spu_spurs_taskset_syscall(spu_context* ctx)   /* non-static: also called by
  static int spu_smc_microstep(spu_context* ctx)
  {
      uint32_t pc = ctx->pc & SPU_LS_MASK & ~3u;
@@ -44507,7 +44584,7 @@ index 5fc50208..cc36117f 100644
          uint32_t w = ((uint32_t)ctx->ls[pc] << 24) | ((uint32_t)ctx->ls[pc+1] << 16) |
                       ((uint32_t)ctx->ls[pc+2] << 8) | ctx->ls[pc+3];
          uint32_t op11 = w >> 21, op9 = w >> 23, op8 = w >> 24, op7 = w >> 25;
-@@ -2440,7 +2932,7 @@ static int spu_smc_microstep(spu_context* ctx)
+@@ -2440,7 +2946,7 @@ static int spu_smc_microstep(spu_context* ctx)
          if (op11 == 0x1A8 || op11 == 0x1A9 || op11 == 0x1AA || op11 == 0x1AB) {
              /* bi / bisl / iret / bisled (+E/D interrupt bits) */
              if (op11 == 0x1AB &&                       /* bisled: only on event */
@@ -44516,7 +44593,7 @@ index 5fc50208..cc36117f 100644
              if (w & 0x40000) ctx->int_enable = 1;
              else if (w & 0x80000) ctx->int_enable = 0;
              uint32_t tgt = (op11 == 0x1AA) ? ctx->srr0
-@@ -2505,9 +2997,7 @@ static int spu_smc_microstep(spu_context* ctx)
+@@ -2505,9 +3011,7 @@ static int spu_smc_microstep(spu_context* ctx)
              pc += 4; continue;
          }
          if (op9 == 0x041 || op9 == 0x061) {                   /* stqa / lqa (abs) */
@@ -44527,7 +44604,7 @@ index 5fc50208..cc36117f 100644
              if (op9 == 0x041) spu_ls_write128(ctx, a, ctx->gpr[rt]);
              else              ctx->gpr[rt] = spu_ls_read128(ctx, a);
              pc += 4; continue;
-@@ -2571,7 +3061,7 @@ static int spu_smc_microstep(spu_context* ctx)
+@@ -2571,7 +3075,7 @@ static int spu_smc_microstep(spu_context* ctx)
           * ordinary instruction the interpreter handles -- and with it the
           * decompression job it was running never completes. */
          { static int _n = 0;
@@ -44536,7 +44613,7 @@ index 5fc50208..cc36117f 100644
                fprintf(stderr, "[spu-smc] microstep img=%d pc=0x%05X word 0x%08X not in the"
                        " microstep set -- handing to the interpreter (steps=%d)\n",
                        ctx->image_id, pc, w, steps); }
-@@ -2594,66 +3084,83 @@ static int spu_smc_microstep(spu_context* ctx)
+@@ -2594,66 +3098,83 @@ static int spu_smc_microstep(spu_context* ctx)
          }
          return result ? 1 : 0;
      }
@@ -44646,7 +44723,7 @@ index 5fc50208..cc36117f 100644
              ctx->pc = ctx->gpr[0]._u32[0] & SPU_LS_MASK;
              return;
          }
-@@ -2675,7 +3182,18 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2675,7 +3196,18 @@ void spu_indirect_branch(spu_context* ctx)
          int lifted = spu_lookup(SPURS_TASKSET_PM_SYSCALL_LS, ctx->image_id) ||
              (ctx->resident_task && spu_lookup(SPURS_TASKSET_PM_SYSCALL_LS, ctx->resident_task)) ||
              (ctx->resident_ovl  && spu_lookup(SPURS_TASKSET_PM_SYSCALL_LS, ctx->resident_ovl));
@@ -44666,7 +44743,7 @@ index 5fc50208..cc36117f 100644
          if (ctx->image_id == 22 || standalone ||
              (ctx->policy_mode && sc == SPURS_TASKSET_PM_SYSCALL_LS)) {
              spu_spurs_taskset_syscall(ctx);
-@@ -2690,7 +3208,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2690,7 +3222,7 @@ void spu_indirect_branch(spu_context* ctx)
       * Inject r4 = taskset EA (0x0F000000) at the policy entry dispatch (this is the
       * exact point before the entry reads r4, after the kernel's arg setup). */
      if (ctx->image_id == SPU_RESOLVER_ONLY_IMAGE_ID && !getenv("YDKJ_NO_CRI_R4")) {
@@ -44675,7 +44752,7 @@ index 5fc50208..cc36117f 100644
          if (s_r4) {
              /* Force ctxt->taskset @LS 0x27B8 = the REAL game taskset EA on every
               * image-23 branch, so the policy's atomic reads + context-EA computation
-@@ -2701,7 +3219,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2701,7 +3233,7 @@ void spu_indirect_branch(spu_context* ctx)
              uint32_t ts = g_ydkj_real_taskset_ea ? g_ydkj_real_taskset_ea : 0x0F000000u;
              ctx->ls[0x27B8]=0x00; ctx->ls[0x27B9]=0x00; ctx->ls[0x27BA]=0x00; ctx->ls[0x27BB]=0x00;
              ctx->ls[0x27BC]=(uint8_t)(ts>>24); ctx->ls[0x27BD]=(uint8_t)(ts>>16); ctx->ls[0x27BE]=(uint8_t)(ts>>8); ctx->ls[0x27BF]=(uint8_t)ts;
@@ -44684,7 +44761,7 @@ index 5fc50208..cc36117f 100644
                  fprintf(stderr, "[cri-r4] policy entry pc=0xA00: forced ctxt->taskset LS[0x27B8]=0x0F000000\n"); }
          }
      }
-@@ -2709,7 +3227,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2709,7 +3241,7 @@ void spu_indirect_branch(spu_context* ctx)
       * pages the task's indirect branches land in; dump the set periodically. If
       * coverage stays in the kernel/wait region (~0x13xxx) the decode routine never
       * runs; if it spans a wide high range, decode executes but doesn't output. */
@@ -44693,7 +44770,7 @@ index 5fc50208..cc36117f 100644
        if (s_cov && ctx->image_id == 3) {
          static uint8_t pages[64] = {0};   /* 64 pages * 0x1000 = 256KB LS */
          static uint64_t hits = 0;
-@@ -2722,7 +3240,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2722,7 +3254,7 @@ void spu_indirect_branch(spu_context* ctx)
              for (int i = 0; i < 64; i++) if (pages[i]) p += snprintf(line+p, sizeof(line)-p, " 0x%X", i<<12);
              fprintf(stderr, "%s\n", line); }
        } }
@@ -44702,7 +44779,7 @@ index 5fc50208..cc36117f 100644
        if (s_t) { static uint64_t s_n = 0; static uint32_t s_last = 0; static uint64_t s_run = 0;
          if (ctx->pc == s_last) s_run++; else { s_last = ctx->pc; s_run = 1; }
          if ((++s_n % 2000000) == 0)
-@@ -2733,8 +3251,8 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2733,8 +3265,8 @@ void spu_indirect_branch(spu_context* ctx)
       * LS[0x780]). Log r3..r6 + the word the kernel handed it, to see why the
       * wrong branch is taken. Env YDKJ_POLTRACE. */
      if (ctx->pc == 0xA00u) {
@@ -44713,7 +44790,7 @@ index 5fc50208..cc36117f 100644
              /* re-lifted policy entry uses r80 (kernel-set context base): r44=LS[r80+0xC0] */
              uint32_t r80=ctx->gpr[80]._u32[0] & SPU_LS_MASK;
              const uint8_t* q = ctx->ls + ((r80+0xC0)&SPU_LS_MASK);
-@@ -2766,8 +3284,40 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2766,8 +3298,40 @@ void spu_indirect_branch(spu_context* ctx)
          if (!ti && !ctx->resident_task) ti = spu_taskset_task_image(ctx->pc);
          if (ti) ctx->resident_task = ti;
      }
@@ -44756,7 +44833,7 @@ index 5fc50208..cc36117f 100644
      /* The job returned through the link register we planted: it is finished.
       * Its outermost frame ends in `bi $r0`, and r0 was 0 -- so without this the
       * return landed on LS 0, which is the job's OWN entry, and it ran a second
-@@ -2776,7 +3326,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2776,7 +3340,7 @@ void spu_indirect_branch(spu_context* ctx)
       * opcodes. The work is already done by the time it returns. */
      if (!ctx->policy_mode && ctx->pc == SPU_JOB_RETURN_LS) {
          static int _n = 0;
@@ -44765,7 +44842,7 @@ index 5fc50208..cc36117f 100644
              fprintf(stderr, "[spurs-job] img=%d returned to the job manager \n",
                      ctx->image_id);
          spu_halt(ctx);
-@@ -2815,7 +3365,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2815,7 +3379,7 @@ void spu_indirect_branch(spu_context* ctx)
              if ((w >> 21) == 0u) {                 /* stop / stopd */
                  ctx->stop_code = w & 0x3FFFu;
                  static int _n = 0;
@@ -44774,7 +44851,7 @@ index 5fc50208..cc36117f 100644
                      fprintf(stderr, "[spu] img=%d exit: synthesised stop 0x%04X at LS 0x%05X\n",
                              ctx->image_id, ctx->stop_code, p0);
                  spu_halt(ctx);
-@@ -2825,54 +3375,100 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2825,54 +3389,100 @@ void spu_indirect_branch(spu_context* ctx)
      }
  
      if (!fn && !ctx->policy_mode && ctx->pc >= SPU_JM2_KERNEL_BASE) {
@@ -44911,7 +44988,7 @@ index 5fc50208..cc36117f 100644
            } }
          spu_halt(ctx);
          return;
-@@ -2886,12 +3482,26 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2886,12 +3496,26 @@ void spu_indirect_branch(spu_context* ctx)
          uint32_t codeBase = ((uint32_t)ctx->ls[0x1320] << 24) | ((uint32_t)ctx->ls[0x1321] << 16) |
                              ((uint32_t)ctx->ls[0x1322] << 8) | ctx->ls[0x1323];
          if (codeBase + 16 <= SPU_LS_SIZE) {
@@ -44941,7 +45018,7 @@ index 5fc50208..cc36117f 100644
                          fprintf(stderr, "[spu-ovl] WWS job module resident: codeBase=0x%05X "
                                  "pc=0x%05X -> overlay image %d\n", codeBase, ctx->pc & SPU_LS_MASK, img);
                  }
-@@ -2928,7 +3538,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2928,7 +3552,7 @@ void spu_indirect_branch(spu_context* ctx)
          ((uint32_t)ctx->ls[ctx->pc] | ctx->ls[ctx->pc+1] |
           ctx->ls[ctx->pc+2] | ctx->ls[ctx->pc+3]) == 0) {
          static int _n = 0;
@@ -44950,7 +45027,7 @@ index 5fc50208..cc36117f 100644
              /* Ground-truth dump of the WWS code-buffer resolution at dispatch
               * (wwsjob-rosetta offsets). jobEntry = lsaJobCodeBuffer + [buf+0x10];
               * lsaJobCodeBuffer = Gbt_bufferPageNum<<10 from the RunJob command.
-@@ -2961,7 +3571,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2961,7 +3585,7 @@ void spu_indirect_branch(spu_context* ctx)
       * The pm-flow drain hook can't see a job that performs no channel ops
       * (LBP's frozen job runs as a complete no-op: entry, no DMAs, return);
       * this names its early-out path instead. */
@@ -44959,7 +45036,7 @@ index 5fc50208..cc36117f 100644
        if (s_jt < 0) { const char* e = getenv("SPU_JOBTRACE"); s_jt = e ? 1 : 0; }
        if (s_jt && ctx->resident_ovl >= 200) { static int _n = 0;
          uint32_t p = ctx->pc & SPU_LS_MASK;
-@@ -2970,7 +3580,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -2970,7 +3594,7 @@ void spu_indirect_branch(spu_context* ctx)
           * PM code the job calls back into -- and keep logging thereafter. */
          static int _armed = 0;
          if (p >= 0x4000) _armed = 1;
@@ -44968,7 +45045,7 @@ index 5fc50208..cc36117f 100644
              fprintf(stderr, "[jobtrace] pc=0x%05X lr=0x%05X%s",
                      p, ctx->gpr[0]._u32[0] & SPU_LS_MASK,
                      fn ? "" : " (no lift)");
-@@ -3010,7 +3620,7 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -3010,7 +3634,7 @@ void spu_indirect_branch(spu_context* ctx)
       * fakes ONLY the done-signal (not the job's data DMA), so it tests how far
       * the boot gets once loading stops deadlocking. */
      if (ctx->pc == 0x4A40 && ctx->resident_ovl >= 200) {
@@ -44977,7 +45054,7 @@ index 5fc50208..cc36117f 100644
          if (s_hd < 0) { const char* e = getenv("LBP_HLE_JOBDONE"); s_hd = e ? 1 : 0; }
          if (s_hd) {
              extern uint8_t* vm_base;
-@@ -3019,9 +3629,9 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -3019,9 +3643,9 @@ void spu_indirect_branch(spu_context* ctx)
                  uint32_t w = (ctx->ls[o]<<24)|(ctx->ls[o+1]<<16)|(ctx->ls[o+2]<<8)|ctx->ls[o+3];
                  if ((w & 0xFFFF0000u) == 0x470A0000u && vm_base) {
                      /* write nonzero to the completion word in main RAM (BE) */
@@ -44990,7 +45067,7 @@ index 5fc50208..cc36117f 100644
                              fprintf(stderr, "[hle-jobdone] wrote completion 0x%08X=1 (job overlay %d)\n",
                                      w, ctx->resident_ovl);
                          wrote++;
-@@ -3031,9 +3641,9 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -3031,9 +3655,9 @@ void spu_indirect_branch(spu_context* ctx)
          }
      }
      if (fn && ctx->pc >= 0x4000 && ctx->resident_ovl >= 200) {
@@ -45002,7 +45079,7 @@ index 5fc50208..cc36117f 100644
              fprintf(stderr, "[jobexec] DISPATCH job code pc=0x%05X overlay=%d "
                      "runJobNum=0x%02X%02X%02X%02X\n",
                      ctx->pc & SPU_LS_MASK, ctx->resident_ovl,
-@@ -3078,9 +3688,9 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -3078,9 +3702,9 @@ void spu_indirect_branch(spu_context* ctx)
       * kernel hand-back does on hardware. */
      if (ctx->image_id == 2 && ctx->policy_mode && ctx->pc == 0 &&
          (ctx->gpr[0]._u32[0] & SPU_LS_MASK) >= 0xA00 &&
@@ -45014,7 +45091,7 @@ index 5fc50208..cc36117f 100644
              fprintf(stderr, "[wws-jobret] staged job returned to kernel (LS 0); "
                      "resuming PM at link 0x%05X\n", ctx->gpr[0]._u32[0] & SPU_LS_MASK);
          ctx->pc = ctx->gpr[0]._u32[0] & SPU_LS_MASK;
-@@ -3104,17 +3714,36 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -3104,17 +3728,36 @@ void spu_indirect_branch(spu_context* ctx)
       * LS 0 in this path is a re-entry. Treat it as job end. */
      if (!ctx->policy_mode && ctx->pc == 0 && ctx->image_id > 0) {
          static int _n = 0;
@@ -45054,7 +45131,7 @@ index 5fc50208..cc36117f 100644
          if (_n < 12) {
              _n++;
              const uint8_t* p = ctx->ls + (ctx->pc & SPU_LS_MASK);
-@@ -3144,8 +3773,54 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -3144,8 +3787,54 @@ void spu_indirect_branch(spu_context* ctx)
       * WWS jobmanager writes a save/restore stub above its static
       * image and calls it). Interpret the live LS bytes; on success the next
       * branch re-enters lifted code via the trampoline. */
@@ -45110,7 +45187,7 @@ index 5fc50208..cc36117f 100644
      /* Cap the unresolved-branch log PER IMAGE: a global cap let one noisy
       * image (the FMOD mixer's overlay calls) exhaust it and silently hide
       * every other image's misses -- LBP's loading jobs skipped their command
-@@ -3154,13 +3829,14 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -3154,13 +3843,14 @@ void spu_indirect_branch(spu_context* ctx)
        static int _bt0[BT0_MAX_IMG];
        unsigned img = (ctx->image_id >= 0 && ctx->image_id < BT0_MAX_IMG)
                       ? (unsigned)ctx->image_id : 0;
@@ -45128,7 +45205,7 @@ index 5fc50208..cc36117f 100644
        if (_d < 0) { const char* e = getenv("SPU_DSPDESC");
          _ea = e ? (uint32_t)strtoul(e, 0, 16) : 0; _d = _ea ? 1 : 0; }
        if (_d == 1) { _d = 2;
-@@ -3173,12 +3849,12 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -3173,12 +3863,12 @@ void spu_indirect_branch(spu_context* ctx)
      /* SPU_MISS_DUMP_IMG=<n>: reserve the deep-dump budget for image n's misses
       * (the global 2-shot budget was always consumed by an earlier image's
       * misses, hiding the one under investigation). Unset = old behavior. */
@@ -45143,7 +45220,7 @@ index 5fc50208..cc36117f 100644
          fprintf(stderr, "[SPU] branch-to-0 lr=0x%05X r1=0x%05X\n",
                  ctx->gpr[0]._u32[0] & SPU_LS_MASK, ctx->gpr[1]._u32[0] & SPU_LS_MASK);
  #ifdef _WIN32
-@@ -3217,6 +3893,91 @@ void spu_indirect_branch(spu_context* ctx)
+@@ -3217,6 +3907,91 @@ void spu_indirect_branch(spu_context* ctx)
      ctx->status = SPU_STATUS_STOPPED_BY_HALT;
  }
  
@@ -45235,7 +45312,7 @@ index 5fc50208..cc36117f 100644
  /* ===========================================================================
   * Execution trace (for §3 validation: diff vs RPCS3 SPU interpreter)
   *
-@@ -3253,7 +4014,7 @@ void spu_trace_init(const char* path)
+@@ -3253,7 +4028,7 @@ void spu_trace_init(const char* path)
   * job kernel, kept from the WWS verification) would otherwise spew the
   * per-instruction log into every boot. Enable with SPU_TRACE=1 (stderr) or
   * SPU_TRACE_FILE=<path>. */
@@ -45244,7 +45321,7 @@ index 5fc50208..cc36117f 100644
  /* Set when spu_trace_pc suppressed its line (gates below): the paired
   * spu_trace_rt call for the same instruction must also stay silent. */
  static SPU_THREAD_LOCAL int s_trace_suppress;
-@@ -3264,20 +4025,20 @@ void spu_trace_pc(spu_context* ctx, uint32_t pc)
+@@ -3264,20 +4039,20 @@ void spu_trace_pc(spu_context* ctx, uint32_t pc)
      /* SPU_TRACE_AT_WALL=1: hold the trace until the PPU's job-barrier probe
       * arms g_barrier_sync_watch, so the budget covers the post-ticket claim/
       * stage pass instead of boot-time idle polling. */
@@ -45268,7 +45345,7 @@ index 5fc50208..cc36117f 100644
        if (s_ti == -2) { const char* e = getenv("SPU_TRACE_IMG");
                          s_ti = e ? atoll(e) : -1; }
        if (s_ti >= 0 && ctx->image_id != (int)s_ti) { s_trace_suppress = 1; return; } }
-@@ -3299,7 +4060,10 @@ void spu_trace_pc(spu_context* ctx, uint32_t pc)
+@@ -3299,7 +4074,10 @@ void spu_trace_pc(spu_context* ctx, uint32_t pc)
          fflush(s_trace_fp);
          return;
      }
@@ -45280,7 +45357,7 @@ index 5fc50208..cc36117f 100644
  }
  
  void spu_trace_rt(spu_context* ctx, uint32_t rt)
-@@ -3316,4 +4080,161 @@ void spu_trace_rt(spu_context* ctx, uint32_t rt)
+@@ -3316,4 +4094,161 @@ void spu_trace_rt(spu_context* ctx, uint32_t rt)
  
  #ifdef __cplusplus
  }
@@ -52436,7 +52513,7 @@ index be77bfdc..4254994b 100644
                n, (unsigned long long)ctx->gpr[4], (unsigned long long)ctx->gpr[5]); }
      return CELL_OK;
 diff --git a/runtime/spu/spu_workload.c b/runtime/spu/spu_workload.c
-index 3ce8d0d6..f4510095 100644
+index 3ce8d0d6..abcbf32c 100644
 --- a/runtime/spu/spu_workload.c
 +++ b/runtime/spu/spu_workload.c
 @@ -5,9 +5,11 @@
@@ -52581,7 +52658,7 @@ index 3ce8d0d6..f4510095 100644
  #ifdef _WIN32
  static SRWLOCK s_spu_serial = SRWLOCK_INIT;
  void spu_serial_acquire(void){ if (spu_serial_enabled()) AcquireSRWLockExclusive(&s_spu_serial); }
-@@ -509,139 +580,279 @@ static spu_ts_ls_slot* ts_ls_get(uint32_t taskset_ea, uint32_t taskid)
+@@ -509,139 +580,280 @@ static spu_ts_ls_slot* ts_ls_get(uint32_t taskset_ea, uint32_t taskid)
   * +0x30 enabled (task 0 = MSB of byte 0); task_info[t] at +0x80 + 0x30*t with
   * the ELF EA at +0x14 and the context save EA at +0x1C. */
  #define TS_TRACK 8
@@ -52819,6 +52896,7 @@ index 3ce8d0d6..f4510095 100644
 +            if (stuck) ts_dump_locked(s_ts_run[i].ea, s_ts_run[i].running);
 +        }
 +        ts_unlock();
++        { extern void ppu_curcall_dump(void); ppu_curcall_dump(); }
 +        fflush(stderr);
 +    }
 +    return NULL;
@@ -52944,7 +53022,7 @@ index 3ce8d0d6..f4510095 100644
      spu_taskset_mark(j->taskset_ea, j->taskid, 1);
      /* Persistent per-taskset LS: acquire (+serialize) the taskset's LS, or fall
       * back to a fresh per-dispatch LS when disabled / no taskset. */
-@@ -717,7 +928,7 @@ static void spu_async_run(spu_async_job* j)
+@@ -717,7 +929,7 @@ static void spu_async_run(spu_async_job* j)
                                                       j->args_ea, 23, 1, j->have_r3 ? j->r3 : 0, 0);
                  fprintf(stderr, "[cri] taskset policy RETURNED rc=%d\n", prc);
                  fflush(stderr);
@@ -52953,7 +53031,7 @@ index 3ce8d0d6..f4510095 100644
              }
              /* YDKJ HLE cri-task path (image 22, cri_mpvps3spurs.elf): the real
               * SPURS kernel/policy would build the task's SpursTasksetContext (LS
-@@ -838,7 +1049,7 @@ static void spu_async_run(spu_async_job* j)
+@@ -838,7 +1050,7 @@ static void spu_async_run(spu_async_job* j)
                   * globals, which the next CreateTask clobbers -- the race that made
                   * both audio tasks run task 1's descriptor). */
                  if (j->taskset_ea) {
@@ -52962,7 +53040,7 @@ index 3ce8d0d6..f4510095 100644
                      fprintf(stderr, "[taskset] built SpursTasksetContext image=%d "
                              "taskset=0x%08X task=%u\n", j->image_id,
                              j->taskset_ea, j->taskid); fflush(stderr);
-@@ -886,44 +1097,6 @@ static void spu_async_run(spu_async_job* j)
+@@ -886,44 +1098,6 @@ static void spu_async_run(spu_async_job* j)
                      }
                      fflush(stderr);
                  }
@@ -53007,7 +53085,7 @@ index 3ce8d0d6..f4510095 100644
                  #undef RDBE32
              }
              spu_serial_acquire();       /* one SPU task runs at a time (LBP_SPU_SERIAL) */
-@@ -979,8 +1152,13 @@ static void spu_async_run(spu_async_job* j)
+@@ -979,8 +1153,13 @@ static void spu_async_run(spu_async_job* j)
                    FILE* f = fopen(path, "wb");
                    if (f) { fwrite(ls, 1, SPU_LS_SIZE, f); fclose(f);
                        fprintf(stderr, "[spu_workload] wrote local store -> %s\n", path); } } }
@@ -53023,7 +53101,7 @@ index 3ce8d0d6..f4510095 100644
              spu_serial_release();
              if (j->taskset_ea) spu_taskset_task_exited(j->taskset_ea, j->taskid);
          }
-@@ -995,6 +1173,7 @@ static void spu_async_run(spu_async_job* j)
+@@ -995,6 +1174,7 @@ static void spu_async_run(spu_async_job* j)
          pthread_mutex_unlock(&ts_slot->lock);
  #endif
      }
@@ -53031,7 +53109,7 @@ index 3ce8d0d6..f4510095 100644
      free(j);
  }
  
-@@ -1015,18 +1194,177 @@ static DWORD WINAPI spu_async_thread(LPVOID p) {
+@@ -1015,18 +1195,177 @@ static DWORD WINAPI spu_async_thread(LPVOID p) {
  }
  #else
  static void* spu_async_thread(void* p) { spu_async_run((spu_async_job*)p); return NULL; }
@@ -53211,7 +53289,7 @@ index 3ce8d0d6..f4510095 100644
      if (!fn) {
          /* Capped: an unlifted job a title dispatches every frame (Tornado
           * Outbreak's Wwise audio jobs) wrote 2 GB of these in three minutes,
-@@ -1060,6 +1398,30 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
+@@ -1060,6 +1399,30 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
                    }
                }
            } }
@@ -53242,7 +53320,7 @@ index 3ce8d0d6..f4510095 100644
          return 0;
      }
      /* Two lines plus two explicit flushes PER JOB. A title running its audio
-@@ -1067,6 +1429,23 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
+@@ -1067,6 +1430,23 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
       * lock, and it starved the guest threads competing for that lock badly
       * enough to change what the title does (see ps3_log.h). Milestones stay;
       * the per-job pair is verbose-only. */
@@ -53266,7 +53344,7 @@ index 3ce8d0d6..f4510095 100644
      int verbose = ps3_log_verbose();
      if (verbose) {
          fprintf(stderr, "[spurs-job] dispatch HIT fp=0x%016llX image=%d job=0x%08X\n",
-@@ -1079,7 +1458,7 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
+@@ -1079,7 +1459,7 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
      if (s_prof < 0) { const char* e = getenv("SPU_JOBPROF"); s_prof = e ? atoi(e) : 0; }
      struct timespec t0, t1;
      if (s_prof) timespec_get(&t0, TIME_UTC);
@@ -53275,7 +53353,7 @@ index 3ce8d0d6..f4510095 100644
      if (s_prof) {
          static double acc[64], last; static unsigned cnt[64];
          timespec_get(&t1, TIME_UTC);
-@@ -1099,6 +1478,37 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
+@@ -1099,6 +1479,37 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
          fprintf(stderr, "[spurs-job] job 0x%08X RETURNED rc=%d\n", job_ea, rc);
          fflush(stderr);
      }
@@ -53313,7 +53391,7 @@ index 3ce8d0d6..f4510095 100644
      return 1;
  }
  
-@@ -1113,8 +1523,7 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
+@@ -1113,8 +1524,7 @@ int spu_workload_dispatch_job(const uint8_t* image, uint32_t image_size,
   *     the guest bit is set under the same lock the waiter checks it).
   * The bitset is guest state (SPU-visible); the host lock/condvar exist only
   * to block and wake the task's host thread. */
@@ -53323,7 +53401,7 @@ index 3ce8d0d6..f4510095 100644
  
  #ifdef _WIN32
  static SRWLOCK            s_sig_lock = SRWLOCK_INIT;
-@@ -1172,6 +1581,14 @@ void spu_taskset_parked_add(uint32_t taskset_ea, uint32_t taskId, uint32_t wait_
+@@ -1172,6 +1582,14 @@ void spu_taskset_parked_add(uint32_t taskset_ea, uint32_t taskId, uint32_t wait_
          }
  }
  
@@ -53338,7 +53416,7 @@ index 3ce8d0d6..f4510095 100644
  void spu_taskset_parked_del(uint32_t taskset_ea, uint32_t taskId)
  {
      uint64_t key = ((uint64_t)taskset_ea << 32) | (uint64_t)(taskId + 1);
-@@ -1183,6 +1600,64 @@ void spu_taskset_parked_del(uint32_t taskset_ea, uint32_t taskId)
+@@ -1183,6 +1601,64 @@ void spu_taskset_parked_del(uint32_t taskset_ea, uint32_t taskId)
          }
  }
  
@@ -53403,7 +53481,7 @@ index 3ce8d0d6..f4510095 100644
  /* Event bits owed to a task, keyed by the OBJECT it waits on (flag - 0x80).
   *
   * Writing the bits at Set time loses a race: the guest reads them from
-@@ -1275,21 +1750,11 @@ int spu_taskset_signal_parked_obj(uint32_t taskset_ea, uint32_t wait_obj)
+@@ -1275,21 +1751,11 @@ int spu_taskset_signal_parked_obj(uint32_t taskset_ea, uint32_t wait_obj)
   * and drop every reservation on the line. */
  static void spu_signalled_update(uint32_t taskset_ea, uint32_t taskId, int set)
  {
@@ -53430,7 +53508,7 @@ index 3ce8d0d6..f4510095 100644
  }
  
  /* Wake WAIT_SIGNAL sleepers when the signalled line is written, including by
-@@ -1309,6 +1774,72 @@ static void spu_taskset_wake_written(void* opaque)
+@@ -1309,6 +1775,72 @@ static void spu_taskset_wake_written(void* opaque)
  #endif
  }
  
@@ -53503,7 +53581,7 @@ index 3ce8d0d6..f4510095 100644
  /* Deliver a signal to a task (callable from any PPU/host thread). */
  void spu_taskset_signal_task(uint32_t taskset_ea, uint32_t taskId)
  {
-@@ -1321,7 +1852,7 @@ void spu_taskset_signal_task(uint32_t taskset_ea, uint32_t taskId)
+@@ -1321,7 +1853,7 @@ void spu_taskset_signal_task(uint32_t taskset_ea, uint32_t taskId)
          fprintf(stderr, "[spu_workload] signal task %u (taskset 0x%08X)\n",
                  taskId, taskset_ea); fflush(stderr); }
      /* SPU_SIG_STATS=1: signals per second per (taskset, task, caller). */
@@ -53512,7 +53590,7 @@ index 3ce8d0d6..f4510095 100644
        if (s_on) {
            static uint32_t ts[32], tk[32]; static uintptr_t ca[32]; static unsigned cnt[32];
            static unsigned long long t0;
-@@ -1344,41 +1875,6 @@ void spu_taskset_signal_task(uint32_t taskset_ea, uint32_t taskId)
+@@ -1344,41 +1876,6 @@ void spu_taskset_signal_task(uint32_t taskset_ea, uint32_t taskId)
        } }
  }
  
@@ -53554,7 +53632,7 @@ index 3ce8d0d6..f4510095 100644
  /* WAIT_SIGNAL from the task side (runs ON the task's host thread, called by
   * the 0xA70 taskset-syscall intercept). Consumes a pending signal or blocks
   * until one is delivered. Returns 0 (the syscall's success rc). */
-@@ -1410,13 +1906,12 @@ int spu_taskset_wait_signal(uint32_t taskset_ea, uint32_t taskId)
+@@ -1410,13 +1907,12 @@ int spu_taskset_wait_signal(uint32_t taskset_ea, uint32_t taskId)
              for (int row = 0; row < 4; row++) {
                  uint32_t p = b + 0x40 + 16u * (uint32_t)row;
                  extern uint8_t* vm_base;
@@ -53571,7 +53649,7 @@ index 3ce8d0d6..f4510095 100644
                      }
                  }
              }
-@@ -1439,30 +1934,53 @@ int spu_taskset_wait_signal(uint32_t taskset_ea, uint32_t taskId)
+@@ -1439,30 +1935,53 @@ int spu_taskset_wait_signal(uint32_t taskset_ea, uint32_t taskId)
       * run (and possibly signal us); re-acquired before returning to resume. */
      spu_serial_release();
      spu_coh_watch watch;
@@ -53628,7 +53706,7 @@ index 3ce8d0d6..f4510095 100644
              if (drain && secs >= drain) { drained = 1; break; }
          }
      }
-@@ -1470,28 +1988,52 @@ int spu_taskset_wait_signal(uint32_t taskset_ea, uint32_t taskId)
+@@ -1470,28 +1989,52 @@ int spu_taskset_wait_signal(uint32_t taskset_ea, uint32_t taskId)
  #endif
      spu_lockline_lock();
      spu_coh_watch_remove(&watch);
@@ -53686,7 +53764,7 @@ index 3ce8d0d6..f4510095 100644
      if (!fn) {
          /* SPU_DUMP_MISS also applies here. The sync path has written the
           * unrecognised image out for a while and the async path did not, so a
-@@ -1528,12 +2070,7 @@ int spu_workload_dispatch_async(const uint8_t* image, uint32_t image_size,
+@@ -1528,12 +2071,7 @@ int spu_workload_dispatch_async(const uint8_t* image, uint32_t image_size,
       * set the globals for THIS task). Reading them later in the async thread races
       * the next CreateTask overwriting the single-slot globals -- with two audio
       * tasks that made both run task 1's descriptor. */
@@ -53700,7 +53778,7 @@ index 3ce8d0d6..f4510095 100644
      /* Capture the SPURS task r3 NOW (PPU thread, synchronous) from the game's
       * descriptor at eaContext+0x10 = {0x40-marker handle, workload EAs}; the
       * async SPU thread reading it later would race the PPU stack. word1 is
-@@ -1591,20 +2128,178 @@ int spu_workload_dispatch_async(const uint8_t* image, uint32_t image_size,
+@@ -1591,20 +2129,178 @@ int spu_workload_dispatch_async(const uint8_t* image, uint32_t image_size,
       * mmap'd and committed on touch, so this reserves address space rather
       * than memory. The default is 512 KB on Darwin, half the 1 MB that blew
       * the guard page above. */
@@ -63082,7 +63160,7 @@ index a52e592a..7901e393 100644
  
  # ---------------------------------------------------------------------------
 diff --git a/tools/ppu_lifter.py b/tools/ppu_lifter.py
-index a657ba61..f2eaf4e2 100644
+index a657ba61..c1bde9c0 100644
 --- a/tools/ppu_lifter.py
 +++ b/tools/ppu_lifter.py
 @@ -12,6 +12,7 @@ Usage:
@@ -63362,7 +63440,7 @@ index a657ba61..f2eaf4e2 100644
  #endif
  
  /* Syscall handler */
-@@ -953,6 +1032,444 @@ def _fuse_cr(body_lines: list[str]) -> list[str]:
+@@ -953,6 +1032,514 @@ def _fuse_cr(body_lines: list[str]) -> list[str]:
      return out
  
  
@@ -63407,15 +63485,18 @@ index a657ba61..f2eaf4e2 100644
 +_LR_FPR0, _LR_VR0 = 36, 68
 +_LR_LOCAL_FPRS = False
 +_LR_LOCAL_VRS = False
++# --split-cr: CR as eight locals, _cr0.._cr7, each holding its field in place
++# (see _lr_split_cr).
++_LR_SPLIT_CR = False
 +
 +
-+def configure_local_regs(fprs: bool = False, vrs: bool = False) -> None:
++def configure_local_regs(fprs: bool = False, vrs: bool = False, split_cr: bool = False) -> None:
 +    """Choose which register files --local-regs keeps in locals: GPRs, CR,
 +    XER, LR and CTR always; FPRs and VRs on request. Off (the default) emits
 +    exactly what the pass always emitted."""
 +    global _LR_REG_RE, _LR_NAMES, _LR_CTX, _LR_TYPES, _LR_NREG, _LR_SAFE_CTX_RE
-+    global _LR_WRITE_RE, _LR_PLAIN_LHS_RE, _LR_MUSTDEF_RE, _LR_LOCAL_FPRS, _LR_LOCAL_VRS
-+    _LR_LOCAL_FPRS, _LR_LOCAL_VRS = fprs, vrs
++    global _LR_WRITE_RE, _LR_PLAIN_LHS_RE, _LR_MUSTDEF_RE, _LR_LOCAL_FPRS, _LR_LOCAL_VRS, _LR_SPLIT_CR
++    _LR_LOCAL_FPRS, _LR_LOCAL_VRS, _LR_SPLIT_CR = fprs, vrs, split_cr
 +    alts = [r"gpr\[(\d+)\]", r"(cr|xer|lr|ctr)\b"]
 +    names = [f"_r{n}" for n in range(32)] + ["_cr", "_xer", "_lr", "_ctr"]
 +    ctxs = [f"ctx->gpr[{n}]" for n in range(32)] + ["ctx->cr", "ctx->xer", "ctx->lr", "ctx->ctr"]
@@ -63641,6 +63722,67 @@ index a657ba61..f2eaf4e2 100644
 +    return " ".join(f"{_LR_NAMES[n]} = {_LR_CTX[n]};" for n in range(_LR_NREG) if mask >> n & 1)
 +
 +
++_CRF_MASKS = [0xF0000000 >> (4 * k) for k in range(8)]
++_CRV = "(" + " | ".join(f"_cr{k}" for k in range(8)) + ")"
++_CR_WRITE_RE = re.compile(r"(?<![\w.>])_cr = (?!=)")
++_CR_READ_RE = re.compile(r"(?<![\w.>])_cr\b")
++
++
++def _cr_fields(expr: str) -> str:
++    return " ".join(f"_cr{k} = _crt & 0x{m:08X}u;" for k, m in enumerate(_CRF_MASKS))
++
++
++def _lr_split_cr_line(line: str) -> str:
++    """One line of a localized body with `_cr` turned into the eight field
++    locals: each `_cr = E;` becomes `{ const uint32_t _crt = E; _cr0 = _crt &
++    0xF0000000u; ... }` and every other `_cr` the OR of the eight. All eight
++    are always written: a field the write leaves alone gets back its old value,
++    which the compiler sees through (the masks make the fields disjoint), so a
++    compare's update of one field no longer keeps the previous update of every
++    other field alive. Raises _LocalRegsUnsupported on a shape it does not
++    know."""
++    out, pos = [], 0
++    for m in _CR_WRITE_RE.finditer(line):
++        if m.start() < pos:
++            raise _LocalRegsUnsupported("split-cr: nested write")
++        before = line[:m.start()].rstrip()
++        if before and before[-1] not in "{;)":
++            raise _LocalRegsUnsupported("split-cr: write in an expression: " + line[:120])
++        i, depth = m.end(), 0
++        while i < len(line):
++            ch = line[i]
++            if ch in "([{":
++                depth += 1
++            elif ch in ")]}":
++                depth -= 1
++                if depth < 0:
++                    raise _LocalRegsUnsupported("split-cr: unterminated write")
++            elif ch == ";" and depth == 0:
++                break
++            i += 1
++        else:
++            raise _LocalRegsUnsupported("split-cr: unterminated write")
++        rhs = _CR_READ_RE.sub(_CRV, line[m.end():i])
++        out.append(_CR_READ_RE.sub(_CRV, line[pos:m.start()]))
++        out.append(f"{{ const uint32_t _crt = {rhs}; {_cr_fields(rhs)} }}")
++        pos = i + 1
++    out.append(_CR_READ_RE.sub(_CRV, line[pos:]))
++    return "".join(out)
++
++
++def _lr_split_cr(out_lines: list[str]) -> list[str]:
++    """--split-cr over a localized body whose first line declares the locals."""
++    decl = out_lines[0]
++    m = re.search(r"(?<![\w.>])_cr = ctx->cr(?=[,;])", decl)
++    if not m:
++        return out_lines
++    fields = ", ".join(f"_cr{k} = ctx->cr & 0x{mk:08X}u" for k, mk in enumerate(_CRF_MASKS))
++    res = [decl[:m.start()] + fields + decl[m.end():]]
++    for line in out_lines[1:]:
++        res.append(_lr_split_cr_line(line) if "_cr" in line else line)
++    return res
++
++
 +configure_local_regs()
 +
 +
@@ -63801,13 +63943,19 @@ index a657ba61..f2eaf4e2 100644
 +            out_lines.append(ind + new + comment)
 +    if seen[END] and wb[END]:
 +        out_lines.append("    " + _lr_wb(wb[END]))
++    if _LR_SPLIT_CR and allregs >> 32 & 1:
++        try:
++            out_lines = _lr_split_cr(out_lines)
++            LOCAL_REGS_STATS["split cr"] += 1
++        except _LocalRegsUnsupported as e:
++            LOCAL_REGS_STATS["split cr refused: " + str(e).split(":")[1].strip()] += 1
 +    return out_lines
 +
 +
  @dataclass
  class LiftedFunction:
      """A single lifted C function."""
-@@ -996,6 +1513,125 @@ def _last_line_is_terminator(body_lines: list[str]) -> bool:
+@@ -996,6 +1583,200 @@ def _last_line_is_terminator(body_lines: list[str]) -> bool:
      return False
  
  
@@ -63835,6 +63983,27 @@ index a657ba61..f2eaf4e2 100644
 + * SPU_ATOM_EA and PS3_NULL_SWEEP clear vm_inline_ok (span 0), so the inline
 + * store does not test for them. */
 +#define PPU_FAST_MM 1
++/* The out-of-line accesses, behind wrappers that keep every register the
++ * caller has live (clang's preserve_all): the inline paths only call them on
++ * their cold side, and an ordinary call there clobbers every SSE register and
++ * half the integer ones, so the lifted code kept its float and vector locals
++ * in stack slots and reloaded the memory-model copy after each access. The
++ * wrapper saves what the real call clobbers, on the cold path only. */
++#if defined(__clang__) && (defined(__x86_64__) || defined(__aarch64__))
++#define PPU_COLD static __attribute__((noinline, cold, preserve_all))
++#else
++#define PPU_COLD static __attribute__((noinline, cold))
++#endif
++PPU_COLD uint8_t  vm_read8_cold (uint64_t a) { return vm_read8(a); }
++PPU_COLD uint16_t vm_read16_cold(uint64_t a) { return vm_read16(a); }
++PPU_COLD uint32_t vm_read32_cold(uint64_t a) { return vm_read32(a); }
++PPU_COLD uint64_t vm_read64_cold(uint64_t a) { return vm_read64(a); }
++PPU_COLD void vm_write8_cold (uint64_t a, uint8_t  v) { vm_write8(a, v); }
++PPU_COLD void vm_write16_cold(uint64_t a, uint16_t v) { vm_write16(a, v); }
++PPU_COLD void vm_write32_cold(uint64_t a, uint32_t v) { vm_write32(a, v); }
++PPU_COLD void vm_write64_cold(uint64_t a, uint64_t v) { vm_write64(a, v); }
++PPU_COLD void vm_store_coh_notify_cold(uint32_t ea, uint32_t n) { vm_store_coh_notify(ea, n); }
++PPU_COLD void vm_store16_coh_cold(uint32_t ea, const void* src) { vm_store16_coh(ea, src); }
 +typedef struct ppu_mm { uint8_t* vb; int64_t span; uint32_t poll; const unsigned char* bits; } ppu_mm;
 +typedef struct ppu_mm_cache { uint8_t* vb; int64_t span; uint32_t poll; int ready; } ppu_mm_cache;
 +static ppu_mm_cache ppu_mmc;
@@ -63912,20 +64081,74 @@ index a657ba61..f2eaf4e2 100644
 +"""
 +
 +
++# --lean-fp: the same NaN results, one test on the common path. Every IEEE
++# operation with a NaN operand returns a NaN, so a result that is not a NaN
++# says no operand was one: the operand checks only need to run when the
++# result is a NaN (then in the same order as before).
++LEAN_FP_SUBS = [
++("""static inline double ppu_fp_bin(double a, double b, double r)
++{
++    if (a != a) return ppu_fp_quiet(a);
++    if (b != b) return ppu_fp_quiet(b);
++    if (r != r) return ppu_fp_default_qnan();
++    return r;
++}""", """static inline double ppu_fp_bin(double a, double b, double r)
++{
++    /* --lean-fp: r is a NaN whenever a or b is one */
++    if (__builtin_expect(r != r, 0)) {
++        if (a != a) return ppu_fp_quiet(a);
++        if (b != b) return ppu_fp_quiet(b);
++        return ppu_fp_default_qnan();
++    }
++    return r;
++}"""),
++("""    if (a != a) return ppu_fp_quiet(a);
++    if (b != b) return ppu_fp_quiet(b);
++    if (c != c) return ppu_fp_quiet(c);
++    double r = fma(a, c, neg_b ? -b : b);
++    if (r != r) return ppu_fp_default_qnan();
++#else""", """    /* --lean-fp: r is a NaN whenever a, b or c is one */
++    double r = fma(a, c, neg_b ? -b : b);
++    if (__builtin_expect(r != r, 0)) {
++        if (a != a) return ppu_fp_quiet(a);
++        if (b != b) return ppu_fp_quiet(b);
++        if (c != c) return ppu_fp_quiet(c);
++        return ppu_fp_default_qnan();
++    }
++#else"""),
++]
++
++
++def apply_lean_fp(preamble: str) -> str:
++    for old, new in LEAN_FP_SUBS:
++        assert preamble.count(old) == 1, old[:60]
++        preamble = preamble.replace(old, new)
++    return preamble
++
++
 +def apply_fast_mm(preamble: str) -> str:
 +    """The header preamble with FAST_MM_BLOCK in place of the default memory
 +    model copy and store checks (see FAST_MM_BLOCK)."""
 +    a = preamble.index("typedef struct ppu_mm {")
 +    b = preamble.index("PPU_INL uint8_t vm_read8_mm(")
 +    out = preamble[:a] + FAST_MM_BLOCK + preamble[b:]
-+    w0 = out.index("PPU_INL void vm_write8_mm(")
++    w0 = out.index("PPU_INL uint8_t vm_read8_mm(")
 +    w1 = out.index("/* Outside a lifted function: a fresh copy per access. */")
 +    body = out[w0:w1]
 +    assert body.count("vm_mm_st_done(ea, ") == 4
-+    out = out[:w0] + body.replace("vm_mm_st_done(ea, ", "vm_mm_st_done_m(m, ea, ") + out[w1:]
++    body = body.replace("vm_mm_st_done(ea, ", "vm_mm_st_done_m(m, ea, ")
++    for w in ("8", "16", "32", "64"):
++        assert body.count(f"return vm_read{w}(a);") == 1 and body.count(f"    vm_write{w}(a, v);") == 1
++        body = body.replace(f"return vm_read{w}(a);", f"return vm_read{w}_cold(a);")
++        body = body.replace(f"    vm_write{w}(a, v);", f"    vm_write{w}_cold(a, v);")
++    out = out[:w0] + body + out[w1:]
 +    old = "{ vm_store16_coh(ea, src); return; }"
 +    assert out.count(old) == 1
-+    out = out.replace(old, "{ ppu_vr _t; memcpy(&_t, src, 16); vm_store16_coh(ea, &_t); return; }")
++    out = out.replace(old, "{ ppu_vr _t; memcpy(&_t, src, 16); vm_store16_coh_cold(ea, &_t); return; }")
++    # the after-store checks' notify: cold, keeps the caller's registers
++    a2 = out.index("PPU_INL void vm_mm_st_done(uint32_t ea")
++    b2 = out.index("PPU_INL uint8_t vm_read8_mm(")
++    out = out[:a2] + out[a2:b2].replace("vm_store_coh_notify(ea, n);", "vm_store_coh_notify_cold(ea, n);") + out[b2:]
 +    return out
 +
 +
@@ -63933,7 +64156,7 @@ index a657ba61..f2eaf4e2 100644
  class PPULifter:
      """Translates PPU instructions into C source."""
  
-@@ -2721,7 +3357,8 @@ class PPULifter:
+@@ -2721,7 +3502,8 @@ class PPULifter:
              ea = f"ctx->gpr[{ra}] + ctx->gpr[{rb}]" if ra != "0" else f"ctx->gpr[{rb}]"
              return (f"{{ uint64_t ea = {ea}; "
                      f"ctx->gpr[{rd}] = vm_read32(ea); "
@@ -63943,7 +64166,7 @@ index a657ba61..f2eaf4e2 100644
  
          if mn == "stwcx" or mn == "stwcx.":
              rs, ra, rb = _reg_idx(ops[0]), _reg_idx(ops[1]), _reg_idx(ops[2])
-@@ -2731,26 +3368,27 @@ class PPULifter:
+@@ -2731,26 +3513,27 @@ class PPULifter:
              # the atomic CAS). A plain conditional write loses concurrent updates
              # (lock-free free-list/refcount corruption under real host threads).
              return (f"{{ uint64_t ea = {ea}; "
@@ -63976,7 +64199,7 @@ index a657ba61..f2eaf4e2 100644
  
          # ------- Data-stream hints: no architected effect -------
          if mn in ("dst", "dstst", "dss"):
-@@ -3002,15 +3640,15 @@ class PPULifter:
+@@ -3002,15 +3785,15 @@ class PPULifter:
              vd = int(ops[0][1:]) if ops[0].startswith("v") else _reg_idx(ops[0])
              ra = _reg_idx(ops[1])
              rb = _reg_idx(ops[2])
@@ -64001,7 +64224,7 @@ index a657ba61..f2eaf4e2 100644
  
          if mn == "stvebx" or mn == "stvehx" or mn == "stvewx":
              vs = int(ops[0][1:]) if ops[0].startswith("v") else _reg_idx(ops[0])
-@@ -3042,15 +3680,8 @@ class PPULifter:
+@@ -3042,15 +3825,8 @@ class PPULifter:
              va = int(ops[1][1:])
              vb = int(ops[2][1:])
              vc = int(ops[3][1:])
@@ -64019,7 +64242,7 @@ index a657ba61..f2eaf4e2 100644
  
          # VMX splat (vspltw, vsplth, vspltb) — duplicate one element across vector
          if mn == "vspltw":
-@@ -3191,9 +3822,8 @@ class PPULifter:
+@@ -3191,9 +3967,8 @@ class PPULifter:
              va = int(ops[1][1:])
              vb = int(ops[2][1:])
              sh = int(ops[3])  # numeric shift count (disasm emits plain number)
@@ -64031,7 +64254,7 @@ index a657ba61..f2eaf4e2 100644
  
          # VMX integer multiply-accumulate
          # ---- halfword/word ops with big-endian lane semantics ----
-@@ -3992,6 +4622,8 @@ class PPULifter:
+@@ -3992,6 +4767,8 @@ class PPULifter:
          preamble = (HEADER_PREAMBLE.replace("function_table",
                                              self.prefix + "function_table")
                      if self.prefix else HEADER_PREAMBLE)
@@ -64040,7 +64263,16 @@ index a657ba61..f2eaf4e2 100644
          lines = [preamble]
          # Forward declarations
          for func in self.functions:
-@@ -4176,8 +4808,13 @@ class PPULifter:
+@@ -4010,6 +4787,8 @@ class PPULifter:
+         self-contained)."""
+         lines = [SOURCE_PREAMBLE.replace('#include "ppu_recomp.h"',
+                  f'#include "{getattr(self, "header_name", "ppu_recomp.h")}"')]
++        if getattr(self, "lean_fp", False):
++            lines[0] = apply_lean_fp(lines[0])
+ 
+         # Emit helper macros
+         lines.append("/* Rotate helpers */")
+@@ -4176,8 +4955,13 @@ class PPULifter:
          for g in guards:
              lines += ["#ifdef __cplusplus", f'extern "C" int {g};', "#else",
                        f"extern int {g};", "#endif"]
@@ -64055,7 +64287,7 @@ index a657ba61..f2eaf4e2 100644
          for bline in _fuse_cr(func.body_lines):
              lines.append(f"    {bline}" if not bline.endswith(":") else bline)
  
-@@ -4213,6 +4850,8 @@ class PPULifter:
+@@ -4213,6 +4997,8 @@ class PPULifter:
                        f"0x{func.fallthrough_to:08X}; emitting halt", flush=True)
                  lines.append(f"        /* missing continuation 0x{func.fallthrough_to:08X}: halt */ return;")
  
@@ -64064,7 +64296,7 @@ index a657ba61..f2eaf4e2 100644
          lines.append("}")
          lines.append("")
          return lines
-@@ -4463,11 +5102,12 @@ def discover_jump_tables(all_insns, read_u32, toc, text_lo, text_hi, func_starts
+@@ -4463,11 +5249,12 @@ def discover_jump_tables(all_insns, read_u32, toc, text_lo, text_hi, func_starts
                  return _k + 1
          return 0
      def _live(lo, i):
@@ -64082,7 +64314,7 @@ index a657ba61..f2eaf4e2 100644
          seg = all_insns[lo:i]
          targets = set()
          for x in seg:
-@@ -4512,9 +5152,42 @@ def discover_jump_tables(all_insns, read_u32, toc, text_lo, text_hi, func_starts
+@@ -4512,9 +5299,42 @@ def discover_jump_tables(all_insns, read_u32, toc, text_lo, text_hi, func_starts
                  k2 = _bisect.bisect_left(func_starts, t)
                  return k2 < len(func_starts) and func_starts[k2] == t
              return False
@@ -64126,7 +64358,7 @@ index a657ba61..f2eaf4e2 100644
                  # back to the block's first insn: a branch target, or the insn
                  # right after another branch (fallthrough entry)
                  while k > 0 and seg[k].addr not in targets and not _ends_block(seg[k - 1]):
-@@ -5064,7 +5737,23 @@ def main() -> None:
+@@ -5064,7 +5884,28 @@ def main() -> None:
                               "is emitted as `if (guard) {new} else {orig}`, guard "
                               "being an int the port defines. The input must hold "
                               "`orig` at `addr` or the lift stops.")
@@ -64143,23 +64375,29 @@ index a657ba61..f2eaf4e2 100644
 +                             "memory-model copy a function takes at entry comes from a "
 +                             "per-unit cache, and a store tests the SPU reservation bitmap "
 +                             "through that copy (see PPU_FAST_MM in the header).")
++    parser.add_argument("--split-cr", action="store_true",
++                        help="With --local-regs: CR as eight field locals (see _lr_split_cr).")
++    parser.add_argument("--lean-fp", action="store_true",
++                        help="FP helpers that test a result for NaN once and look at "
++                             "the operands only when it is one (same results).")
      args = parser.parse_args()
-+    if (args.local_fprs or args.local_vrs) and not args.local_regs:
-+        parser.error("--local-fprs/--local-vrs need --local-regs")
-+    configure_local_regs(args.local_fprs, args.local_vrs)
++    if (args.local_fprs or args.local_vrs or args.split_cr) and not args.local_regs:
++        parser.error("--local-fprs/--local-vrs/--split-cr need --local-regs")
++    configure_local_regs(args.local_fprs, args.local_vrs, args.split_cr)
  
      # Load firmware-import stubs (addr -> NID) up front; applied to func_bounds
      # and the lifter below.
-@@ -5500,6 +6189,8 @@ def main() -> None:
+@@ -5500,6 +6341,9 @@ def main() -> None:
  
      lifter = PPULifter(prefix=args.symbol_prefix, weak_emit=args.weak)
      lifter.header_name = args.header_name
 +    lifter.local_regs = args.local_regs
 +    lifter.fast_mm = args.fast_mm
++    lifter.lean_fp = args.lean_fp
      # A single-module executable keeps r2 (TOC) constant, so an `ld r2, N(r1)` TOC
      # restore can be lowered to this literal instead of a stack read (the recomp has
      # no glink stub writing the save slot, so the stack read returns garbage -> r2
-@@ -5618,6 +6309,8 @@ def main() -> None:
+@@ -5618,6 +6462,8 @@ def main() -> None:
              print(f"  removed stale {os.path.basename(stale)}")
      print(f"  {len(lifter.functions)} functions lifted")
      print(f"  {len(lifter.call_targets)} unique call targets")
@@ -64726,6 +64964,19 @@ index 64ed2451..d2cb577d 100644
      test_base_before_fallthrough_split()
      test_const_base_no_table()
      test_const_base_needs_constant()
+diff --git a/tools/test_ppu_lift.py b/tools/test_ppu_lift.py
+index 4c6d3496..3e490aaa 100644
+--- a/tools/test_ppu_lift.py
++++ b/tools/test_ppu_lift.py
+@@ -804,6 +804,8 @@ def check_barrier_lowering():
+ 
+ def emit_c(path):
+     lifter = PPULifter()
++    # PPU_TEST_LEAN_FP=1: the --lean-fp FP helpers (the same results expected).
++    lifter.lean_fp = os.environ.get("PPU_TEST_LEAN_FP") == "1"
+     dummy = LiftedFunction(name="conf", start_addr=0, end_addr=0x10000)
+     pre = lifter._preamble_lines()
+     # Replace the generated-header include with the real (small) context
 diff --git a/tools/test_ppu_lifter_chunks.py b/tools/test_ppu_lifter_chunks.py
 index fbc5523f..5ed42613 100644
 --- a/tools/test_ppu_lifter_chunks.py
@@ -64742,10 +64993,10 @@ index fbc5523f..5ed42613 100644
  def main() -> int:
 diff --git a/tools/test_ppu_local_regs.py b/tools/test_ppu_local_regs.py
 new file mode 100755
-index 00000000..0e85d920
+index 00000000..61d5f00c
 --- /dev/null
 +++ b/tools/test_ppu_local_regs.py
-@@ -0,0 +1,235 @@
+@@ -0,0 +1,340 @@
 +#!/usr/bin/env python3
 +"""Checks for the PPU lifter's --local-regs pass (localize_ppu_registers).
 +
@@ -64769,7 +65020,7 @@ index 00000000..0e85d920
 +TOOLS = os.path.dirname(os.path.abspath(__file__))
 +sys.path.insert(0, TOOLS)
 +
-+from ppu_lifter import LOCAL_REGS_STATS, localize_ppu_registers
++from ppu_lifter import LOCAL_REGS_STATS, configure_local_regs, localize_ppu_registers
 +
 +FAILS = []
 +
@@ -64966,6 +65217,110 @@ index 00000000..0e85d920
 +              r.stdout + r.stderr)
 +
 +
++# --- --local-fprs --local-vrs --split-cr: build and run both ways ----------
++PRELUDE2 = r"""
++#include <stdint.h>
++#include <string.h>
++#include <stdio.h>
++typedef union { uint8_t b[16]; uint32_t w[4]; uint64_t d[2]; float f[4]; } ppu_vr;
++typedef struct { uint64_t gpr[32]; double fpr[32]; ppu_vr vr[32]; uint32_t cr; uint64_t lr, ctr; uint32_t xer; uint32_t vscr; } ppu_context;
++static uint8_t mem[4096];
++static uint32_t vm_read32(uint64_t a) { uint32_t v; memcpy(&v, &mem[a & 4092], 4); return v; }
++static void vm_write32(uint64_t a, uint32_t v) { memcpy(&mem[a & 4092], &v, 4); }
++static void vadd(void* d, const void* a, const void* b) { ppu_vr r; const ppu_vr* x = (const ppu_vr*)a; const ppu_vr* y = (const ppu_vr*)b;
++    for (int i = 0; i < 4; i++) r.w[i] = x->w[i] + y->w[i]; memcpy(d, &r, 16); }
++static void (*g_trampoline_fn)(void*);
++static uint64_t seen;
++#define DRAIN_TRAMPOLINE(ctx) do { while (g_trampoline_fn) { void(*f)(void*) = g_trampoline_fn; g_trampoline_fn = 0; f(ctx); } } while (0)
++static void func_00020000(ppu_context* c) {
++    for (int i = 0; i < 32; i++) { uint64_t u; memcpy(&u, &c->fpr[i], 8); seen = seen * 31 + c->gpr[i] + u + c->vr[i].d[0] * 7 + c->vr[i].d[1]; }
++    seen = seen * 31 + c->cr + c->xer + c->lr + c->ctr;
++    c->gpr[3] = c->gpr[3] * 3 + 1; c->fpr[1] = c->fpr[1] * 0.5 + 1.0; c->vr[2].w[1] ^= 0x1234u;
++    c->cr ^= 0x10200000u;
++}
++static void func_00030000(ppu_context* c) { (void)c; }
++"""
++
++BODY2 = body(
++    "ctx->fpr[2] = ctx->fpr[1] + (double)(int32_t)ctx->gpr[3];",
++    "ctx->ctr = (int64_t)(int32_t)(3);",
++    "loc_00010000:",
++    "ctx->gpr[4] = vm_read32(ctx->gpr[3] + 0x10);",
++    "{ double a = ctx->fpr[2]; double b = ctx->fpr[1]; uint32_t cr_val = (a != a || b != b) ? 1 : (a < b) ? 8 : (a > b) ? 4 : 2; ctx->cr = (ctx->cr & ~(0xFu << 24)) | (cr_val << 24); }",
++    "{ int64_t a = (int32_t)ctx->gpr[4]; int64_t b = (int64_t)0; uint32_t cr_val = "
++    "((a < b) ? 8 : (a > b) ? 4 : 2) | ((ctx->xer >> 31) & 1u); ctx->cr = (ctx->cr & ~(0xFu << 28)) | (cr_val << 28); }",
++    "{ uint32_t a = (ctx->cr >> (31 - 0)) & 1; uint32_t b = (ctx->cr >> (31 - 6)) & 1; ctx->cr = (ctx->cr & ~(1u << (31 - 25))) | ((a | b) << (31 - 25)); }",
++    "vadd(&ctx->vr[3], &ctx->vr[2], &ctx->vr[4]);",
++    "{ uint32_t* d = (uint32_t*)&ctx->vr[5]; uint32_t val = ((uint32_t*)&ctx->vr[3])[1]; d[0] = d[1] = d[2] = d[3] = val; }",
++    "ctx->fpr[1] = ctx->fpr[1] * ctx->fpr[2] - 1.0;",
++    "if (((ctx->cr >> 29) & 1)) goto loc_00010040;",
++    "vm_write32(ctx->gpr[3] + 0x20, (uint32_t)ctx->vr[5].w[2]);",
++    "ctx->gpr[3] = ctx->gpr[4] + (ctx->cr & 0x0F0000FFu);",
++    "loc_00010040:",
++    CALL,
++    "ctx->gpr[5] = ctx->cr;",
++    "{ uint64_t tmp; memcpy(&tmp, &ctx->fpr[1], 8); vm_write32(ctx->gpr[5] + 8, (uint32_t)tmp); }",
++    "if ((--ctx->ctr != 0)) goto loc_00010000;",
++    "if (((ctx->cr >> 6) & 1)) { g_trampoline_fn = (void(*)(void*))func_00030000; return; }",
++    "ctx->cr = (ctx->cr & ~0xF0u) | ((uint32_t)(ctx->gpr[5] & 0xF) << 4);",
++    "ctx->fpr[3] = -ctx->fpr[2];")
++
++MAIN2 = r"""
++int main(void) {
++    unsigned long long s = 88172645463325252ull;
++    for (int t = 0; t < 3000; t++) {
++        ppu_context c0; memset(&c0, 0, sizeof c0);
++        for (int i = 0; i < 32; i++) { s ^= s << 13; s ^= s >> 7; s ^= s << 17; c0.gpr[i] = s & 4095;
++            c0.fpr[i] = (double)(int64_t)(s % 2001) / 7.0 - 100.0; c0.vr[i].d[0] = s; c0.vr[i].d[1] = s * 3; }
++        if (t % 5 == 0) { uint64_t q = 0x7FF8000000000001ull; memcpy(&c0.fpr[1], &q, 8); }
++        c0.cr = (uint32_t)s; c0.xer = (uint32_t)(s >> 32) & 0xE0000000u; c0.lr = s >> 3; c0.ctr = s & 7;
++        for (int i = 0; i < 4096; i++) { s ^= s << 13; s ^= s >> 7; s ^= s << 17; mem[i] = (uint8_t)s; }
++        uint8_t m0[4096]; memcpy(m0, mem, 4096);
++        ppu_context a = c0, b = c0;
++        seen = 0; f_base(&a); uint64_t sa = seen; uint8_t ma[4096]; memcpy(ma, mem, 4096); void* ta = (void*)g_trampoline_fn;
++        memcpy(mem, m0, 4096); g_trampoline_fn = 0;
++        seen = 0; f_loc(&b); void* tb = (void*)g_trampoline_fn; g_trampoline_fn = 0;
++        if (memcmp(&a, &b, sizeof a) || sa != seen || memcmp(ma, mem, 4096) || ta != tb) { printf("diff at %d\n", t); return 1; }
++    }
++    printf("same\n");
++    return 0;
++}
++"""
++
++
++def test_v2_build_and_run():
++    cc = shutil.which("clang") or shutil.which("cc") or shutil.which("gcc")
++    if not cc:
++        print("skip v2 build-and-run: no C compiler")
++        return
++    configure_local_regs(True, True, True)
++    try:
++        before = LOCAL_REGS_STATS["split cr"]
++        loc = localize_ppu_registers(BODY2)
++        text = "\n".join(loc)
++        check("v2: fprs, vrs and cr fields in locals",
++              "ctx->fpr[2] +" not in text and "_f2" in text and "&_v3" in text and "_cr6 =" in text, text)
++        check("v2: split-cr counted", LOCAL_REGS_STATS["split cr"] == before + 1)
++    finally:
++        configure_local_regs()
++    src = (PRELUDE2
++           + "static void f_base(ppu_context* __restrict ctx) {\n" + "\n".join(BODY2) + "\n}\n"
++           + "static void f_loc(ppu_context* __restrict ctx) {\n" + "\n".join(loc) + "\n}\n" + MAIN2)
++    with tempfile.TemporaryDirectory() as d:
++        c, exe = os.path.join(d, "t.c"), os.path.join(d, "t")
++        with open(c, "w") as f:
++            f.write(src)
++        for opt in ("-O0", "-O2"):
++            r = subprocess.run(check=False, args=[cc, opt, "-fwrapv", "-fno-strict-aliasing", "-w", "-o", exe, c],
++                               capture_output=True, text=True)
++            check(f"v2 build-and-run {opt}: compiles", r.returncode == 0, r.stderr[-2000:])
++            if r.returncode:
++                return
++            r = subprocess.run(check=False, args=[exe], capture_output=True, text=True, timeout=60)
++            check(f"v2 build-and-run {opt}: same ctx, memory, callee view and hand-off",
++                  r.stdout.strip() == "same", r.stdout + r.stderr)
++
++
 +def main() -> int:
 +    test_call_sync()
 +    test_loop_and_cond_exit()
@@ -64975,6 +65330,7 @@ index 00000000..0e85d920
 +    test_unsupported_left_alone()
 +    test_no_registers()
 +    test_build_and_run()
++    test_v2_build_and_run()
 +    print(f"\n{'FAILED: ' + ', '.join(FAILS) if FAILS else 'all passed'}")
 +    return 1 if FAILS else 0
 +
