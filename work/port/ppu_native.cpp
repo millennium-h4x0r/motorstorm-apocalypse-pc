@@ -227,7 +227,13 @@ static void lk_stats_note(const ppu_context* c, uint32_t ea, uint64_t ns)
     enum { N = 32 };
     static std::atomic<uint64_t> key[N], cnt[N], tot[N];
     static std::atomic<uint32_t> lockea[N];
-    const uint64_t k = ((uint64_t)(uint32_t)c->thread_id << 32) | (uint32_t)c->lr;
+    /* The event Wait (0xFF5AD8) is one site for every job batch: name its
+     * caller instead (Wait saved its lr at r1 + 0x90). */
+    uint32_t site = (uint32_t)c->lr;
+    if (site == 0x00FF5AFCu && range_ok(c->gpr[1] + 0x90, 8)) site = (uint32_t)vm_read64(c->gpr[1] + 0x90);
+    /* ... and through the batch's Wait (0x673AB8, frame 0x70 above Wait's 0x80) */
+    if (site == 0x00673AE4u && range_ok(c->gpr[1] + 0x80 + 0x80, 8)) site = (uint32_t)vm_read64(c->gpr[1] + 0x80 + 0x80);
+    const uint64_t k = ((uint64_t)(uint32_t)c->thread_id << 32) | site;
     for (unsigned i = (unsigned)(k * 0x9E3779B97F4A7C15ull >> 59), n = 0; n < N; n++, i = (i + 1) % N) {
         uint64_t cur = key[i].load(std::memory_order_relaxed);
         if (cur == 0 && key[i].compare_exchange_strong(cur, k)) cur = k;

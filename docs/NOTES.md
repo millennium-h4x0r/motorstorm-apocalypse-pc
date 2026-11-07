@@ -1286,40 +1286,104 @@ settings (`PS3RECOMP_BE_THREAD=1` etc.); vk-stats 200-340 submit-and-waits
 a second before, ~13 after (the frame dump's present only). The dynamic
 resolution goes to its top (1240x1020 source) once the RSX keeps up.
 
-Left: the big black shapes under the cars and on the road near the camera.
-They are in the composite 0x01010000 before any draw of it in the frame
-(`PS3RECOMP_ENG_DRAWTRACE=<f>,<dir>,2330,2420` dumps; both MRT halves, the
-composite and 0x01560000, have them), shaped like extruded shadows: the arch
-on the left of the Prologue's canal casts one too, but the cars' reach the
-camera, and shadowed ground is pure black, no ambient. Still to find: the
-lighting/shadow pass that writes them (the sun's cascades live in the
-1024x3072 target 0x0C250000; both a colour target and a zeta sit there).
+The big black shapes under the cars and on the road near the camera are
+fixed: see "Round 2" below (an AO-volume pass read its own target through
+guest memory).
 
 ### Upstream v0.18 engine features, ported (2026-11-06)
 
-- **Scissored clears** (upstream #560): a CLEAR_SURFACE under a scissor
-  narrower than the surface clip clears only that rectangle
-  (`eng_clear_rect`; new optional backend hooks `clear_color_rect` /
-  `clear_depth_stencil_rect`, Vulkan: a fill copied from the staging ring;
-  `PS3RECOMP_ENG_RECT_CLEAR=0` clears whole as before). MotorStorm uses it in
-  its particle passes (620x510 of the 640x540 target). A partial depth clear
-  keeps the zeta's earlier contents readable.
-- **User clip planes** (upstream #537): SET_USER_CLIP_PLANE_CONTROL (0x1478)
-  feeds `rsx_vp_apply_user_clip` (SV_ClipDistance from o5/o6.yzw), part of
-  the pipeline key; Vulkan enables shaderClipDistance.
-  `PS3RECOMP_ENG_USER_CLIP=0` ignores the register.
+- **Scissored clears** and **user clip planes**: see "Round 2" below.
 - Already here before: polygon offset (#562), WPOS in the window convention
   (#589, ours in fp_alpha), depth read as a texture converted on the GPU
   (#499), a depth snapshot of the region the texture names (#507, now for
   colour-format reads too).
-- **3D textures: not yet.** The race binds them (a one-time log names each:
-  32x32x16 A8R8G8B8 at local 0x002E6900, 16x16x16 B8 volumes at 0x04367A00,
-  0x04896A00, 0x0425EB00, a 512x64x4 DXT5 at 0x0D3ECE00); they are sampled
-  as their first slice. Upstream's Vulkan backend has no 3D path either (only
-  the engine's slice upload and the decompiler's Texture3D declarations).
+- **3D textures**: see "Round 2" below.
 - `[vk-stats]` also reports from the present (and presents/s): it used to
   print only from a flush, and with frames in flight and no flushes the
   player's configuration logged nothing.
+
+### Round 2: 3D textures, own-target snapshots, rect clears, user clip (2026-11-07)
+
+All four are on by default (main.cpp); each `=0` turns it off.
+
+- **Own-target snapshots** (`PS3RECOMP_ENG_OWN_RECT`, rsx_draw_engine.c
+  `sink_bind_textures`): the fix for the black "extruded shadows". The
+  composite is `albedo * (L * (c3 - c2 * (1 - a)) + a * ambientCube(n) * k)`
+  with `a` the alpha of the G-buffer 0x01AB0000. After lighting, the
+  AO-volume pass (boxes around the cars: 48 vertices, depth GREATER,
+  front-face cull, alpha-only write) samples that same G-buffer as a
+  1240x1020 texture (the dynamic resolution) while drawing into the
+  1280x1080 target. The read-modify-write snapshot only matched an own
+  target of exactly the texture's size, so the unit fell through to guest
+  memory (stale bytes), `a` became 0, and wherever the sun was shadowed the
+  pixel went pure black. Such a unit now binds `color_snapshot_rect` of its
+  own target, taken just before the draw. Found with
+  `PS3RECOMP_ENG_DRAWTRACE_PX` on a black pixel (G-buffer fine, sun fine,
+  then the AO pass set alpha 255 -> 0) and confirmed with
+  `PS3RECOMP_ENG_SKIP_VOL=1` (drops every draw that samples a 3D texture).
+- **3D textures** (`PS3RECOMP_ENG_TEX3D`): engine `eng_texture_upload`
+  walks a volume level by level and slice by slice (swizzled: one 3D Morton
+  block per level, `rsx_swizzle_offset_3d`; linear and DXT: consecutive
+  slices), with its own cache key and span. Backend hooks
+  `texture_create_3d` / `texture_upload_3d`. Vulkan: a VK_IMAGE_TYPE_3D
+  image and a 3D view (the unit's crossbar in it), a third descriptor bank
+  `rsx_tex3[16]` at t64 (binding 80) and a 1x1x1 dummy. Decompiler:
+  `rsx_fp_decompile_buffered_ex3` with `tex_vol_mask`, so those units are
+  Texture3D sampled with xyz. The race binds five (32x32x16 A8R8G8B8 at local
+  0x002E6900, 16x16x16 B8 AO volumes at 0x04367A00 / 0x04896A00 /
+  0x0425EB00, a 512x64x4 DXT5); `PS3RECOMP_ENG_TEX3D_LOG=1` prints each
+  slice's byte range (the AO volumes: 254 at the faces, ~9 in the middle).
+  As 2D first slices they left a green patch behind the car and no AO.
+- **Scissored clears** (`PS3RECOMP_ENG_RECT_CLEAR`, upstream #560; `2`
+  colour only, `3` depth/stencil only): a CLEAR_SURFACE under a scissor
+  narrower than the surface clip clears only that rectangle
+  (`eng_clear_rect`, backend `clear_color_rect` /
+  `clear_depth_stencil_rect`). MotorStorm clears at the dynamic resolution
+  (1240x1020 of 1280x1080, 620x510 of 640x540, ...). A partial depth clear
+  keeps the zeta readable. Vulkan does the fill on the GPU: one row by
+  vkCmdUpdateBuffer into the device scratch buffer, doubled by buffer copies,
+  copied into the image. The first version filled from the staging ring
+  (~6 MB a frame for 1240x1020 depth + stencil), and its flushes slowed the
+  second boot's splash past main_menu.sh's 180 s.
+  `PS3RECOMP_ENG_CLEARLOG=1` logs every clear's rectangle.
+- **User clip planes** (`PS3RECOMP_ENG_USER_CLIP`, upstream #537):
+  SET_USER_CLIP_PLANE_CONTROL (0x1478) feeds `rsx_vp_apply_user_clip`
+  (SV_ClipDistance from o5/o6.yzw) and the pipeline key; Vulkan enables
+  shaderClipDistance only with it.
+- **Antialiased surfaces**: the game never sets one (the one-time log
+  `[rsx engine] antialiased surface` stays silent through the intro and the
+  race start), so there is nothing to do.
+- Tools: DRAWTRACE also logs depth bounds, depth range, the whole stencil
+  state and every fp constant. DUMP_SURFACES writes `<name>_a.pgm` with each
+  target's alpha. `PS3RECOMP_FP_PERSP=0` ignores the fp
+  perspective-correction flag (diagnostic). work/runs/rsx2/drive.py drives a
+  boot to world frame N and can trigger a DRAWTRACE there.
+- Validated with everything on: main_menu 2/2, race_intro, and the race
+  start (work/runs/race_shadow_fix/fin_last.png).
+
+### Split-screen (2026-11-07)
+
+Wreckreation > Quick Race is the offline split-screen mode (up to 4 players).
+Player n joins with START on port n-1. Each join calls
+**cellUserInfoSelectUser_ListType** (the profile picker). That call was
+unresolved, its callback never came, and the menu sat on "Waiting". It now
+completes with the one user (libs/system/cellUserInfo.c; also
+`_SetList`), and player 2 shows as "(1)". Start Race, then CROSS at the
+fly-by.
+
+How the RSX draws it (a vp DRAWTRACE of a 4-player race): each view is a
+whole pass of its own, in turn. Shadow map 1024x3072 (two cascades), depth,
+G-buffer, lighting, composite, post, all in the top-left 620x508 of the
+1280x1080 targets. Then one draw puts the view at its place in the shared
+frame (viewport translate 330,284 / 950,284 / ..., scissor at 20,30 and
+640,30 ...). 2 players: top/bottom, 868x340 each, pillarboxed. 4 players:
+quadrants, 620x340. Nothing here needs new code: per-view dynamic resolution
+goes through the own-target snapshots and rect clears above. Pictures:
+work/runs/splitscreen/2p.png, 4p.png.
+
+Driver: work/runs/rsx2/mp/ -- launch.py (PADS=n virtual file pads,
+optional seeded save), nav.py (second boot -> Quick Race), tap.py (presses
+and a snapshot of the last frame).
 
 ### Tools
 
@@ -1346,6 +1410,67 @@ save and for 60 s more, then waits for 200 world frames
 one has a central-60% luma mean in [12, 235] with a standard deviation of at
 least 12 (the black screen and the white one both fail). Saves
 `work/runs/race_intro.png`. 3-15 minutes, mostly the race load.
+
+## Every track (all_tracks.sh)
+
+### Booting straight into a race
+
+The game mounts patch archives over ms3.psarc: it looks for
+`ms3patchv0102.psarc` and `ms3patchv0101.psarc` in
+`/dev_hdd0/game/BCES00484/USRDIR/` (then on the disc). Their files replace
+the base archive's by path (PSARC v1.4, zlib, 64 KB blocks, flags 3 =
+ignore case: the TOC key is the MD5 of the upper-cased path). The game flow
+lives in `/data/gamestate/gamestates.xml`: states (boot, mainmenu,
+QuickRacing, festivalracing...), the transitions between them, and the
+GameConfigs they read. `work/tests/all_tracks.sh` patches two things in it:
+- `boot -> booted` goes to `QuickRacing`, not `mainmenu`;
+- the `quickrace` GameConfig gets `ticket="Track NN"`, `World`,
+  `Environment` (`sky_<track>`), `Gags` (`track_NN`), `GameMode race.mode`,
+  `GUIResource Art/UI_Art_BE.rpk`, `IsRaceConfig`, three AI players and one
+  local human, and 1 lap. The ticket alone does not set the world
+  (`worlds/.rpk` is opened and the loader dies in its error path,
+  func_00573F8C), so World and Environment are given explicitly.
+
+The game then boots into the pre-race flyover (START RACE: CROSS) with no
+movies, no menus, and no save needed, in 20-55 s. Each track gets its own
+PS3_HDD0_ROOT holding only that archive. The gamestates.xml it patches is
+read from the disc's ms3.psarc at run time, so no game data is kept in the
+repo.
+
+Dead ends: an argv `.cfg` (`PS3_ARGV=<name>.cfg`) replaces
+`Configs/ms3_config.cfg` (func_002CD150 looks it up on hdd0, the disc, then
+`configs/` in the psarc). The disc's own race configs (autotest_*,
+*_4player, benchmark_*) are stale: they name skies that no longer exist
+(sky_downtown_midday) and `.gui` files. An untyped config goes to the
+`gostorm` state and runs out of a GUI object pool (pointer pool at
+[0x144F118] read past its end, ctor on 0xA via func_006CF6C8). A
+`COMMANDLINE_RACE` config goes to the main-menu flow and never leaves the
+loading screen.
+
+The tracks are the game's 39 `Track NN` tickets (alltickets.zip in
+ms3.psarc): dogpatch v1-4 (Docklands), pier v1-3 (Boardwalk), haight v1-4
+(Upper Bohemia), yerbabuena v1-4 (Good Herb), interstate v1-4, union v1-4
+(Downtown), market v1-3 (Market Garden), mainline v1-3, transbay v1-4
+(Terminus), vertigo v1-3 (Skyline), alcatraz v1-3. The alcatraz worlds on the
+disc are 2-16 MB greybox placeholders (the real ones are the ALCATRAZ.edat
+DLC the game probes for), so they render as grey geometry: expected. The
+prologue tracks are not in the list (first_race.sh covers the Prologue).
+
+### all_tracks.sh
+
+`work/tests/all_tracks.sh [track ...]` (PAR=<n> games at once, LIMIT_S per
+track, default 600) taps CROSS every 3 s until the race HUD shows. A track
+passes when:
+- the yellow POS shows at the bottom left;
+- the race clock box (top right) changes over 3 dump pairs (it starts at GO);
+- Havok tasks are still returning;
+- the log has no null call, unresolved call or NID.
+It keeps `<track>.png` and `summary.txt` under `$RUNS/all_tracks/`.
+
+Measured (fix1 copy, PAR=2, load ~40): 39 of 39 reach GO, the clock running
+21-56 s after start. About 25 min for the whole list. The pictures still
+show the known black shadow shapes and, on dogpatch_v1 and pier_v2, an
+overexposed sky band.
 
 ## Simulation pacing
 

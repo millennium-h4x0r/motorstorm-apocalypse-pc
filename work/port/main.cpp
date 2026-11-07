@@ -707,6 +707,20 @@ int main(int argc, char** argv)
      * second vblank. The vblank handler counts vblanks to decide its flips,
      * so it gets every one (GCM_VBLANK_EACH, libs/video/cellGcmSys.c). */
     env_default("PS3_SIM_60", "1");
+    /* MultiStream's MP3 decoder is the firmware's flashMP3.pic, loaded into
+     * the task's LS at run time: lifted from the user's dev_flash, it ends
+     * the livelock that killed race audio (docs/NOTES.md "Race"). */
+    env_default("SPU_FW_LIFT", "1");
+    /* notify_spus skips the coherence-watch walk for unwatched lines. */
+    env_default("SPU_COH_WFILT", "1");
+    /* Draw engine (docs/NOTES.md "Race rendering"): a pass sampling a sub-rect
+     * of its own target reads a snapshot of it (the car AO boxes: without it,
+     * black shadows), real 3D textures (the AO volumes), scissored clears,
+     * user clip planes. Each =0 restores the old path. */
+    env_default("PS3RECOMP_ENG_OWN_RECT", "1");
+    env_default("PS3RECOMP_ENG_TEX3D", "1");
+    env_default("PS3RECOMP_ENG_RECT_CLEAR", "1");
+    env_default("PS3RECOMP_ENG_USER_CLIP", "1");
     if (atoi(getenv("PS3_SIM_60")) != 0) env_default("GCM_VBLANK_EACH", "1");
     /* inFAMOUS 2 built its frames on the SPU: the FIFO parked at the end of
      * what was ready and the title patched the park with the rest. Wait at a
