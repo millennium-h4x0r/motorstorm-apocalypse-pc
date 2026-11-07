@@ -210,7 +210,7 @@ class Run:
         self.pads = [self.pad] + [d / f"pad{i}" for i in range(1, PLAYERS)]
         self.set("")
         env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy", SDL_VIDEODRIVER="dummy",
-                   PS3_SAVEDATA_ROOT=str(d / "save"), PS3_HDD1_ROOT=str(d / "hdd1"),
+                   PS3_SAVEDATA_ROOT=str(d / "save"), PS3_GAMEDATA_ROOT=str(d / "gamedata"), PS3_HDD1_ROOT=str(d / "hdd1"),
                    PS3_HDD0_ROOT=str(d / "hdd0"), PS3_PAD_FILE=str(self.pad),
                    **{f"PS3_PAD_FILE_{i}": str(p) for i, p in enumerate(self.pads) if i},
                    LD_FRAME_DUMP=str(d / "d"), LD_FRAME_DUMP_EVERY="30")

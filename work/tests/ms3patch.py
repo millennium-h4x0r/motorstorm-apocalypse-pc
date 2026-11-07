@@ -141,3 +141,28 @@ def write_png(p, w, h, px):
         return struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b))
     Path(p).write_bytes(b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
                         + ch(b"IDAT", zlib.compress(rows, 6)) + ch(b"IEND", b""))
+
+
+def psarc_ranges(path, prefix=""):
+    """[(start, end, name)] byte ranges of the archive's files (compressed,
+    as stored), for the names starting with prefix: maps a read offset in
+    ms3.psarc (cellFsLseek, logged with FS_CALLER=1) back to the file."""
+    f = open(path, "rb")
+    _, _, _, tocsz, entsz, nent, blksz, _ = struct.unpack(">4sI4sIIIII", f.read(32))
+    toc = f.read(tocsz - 32)
+    ents = [(struct.unpack(">I", toc[i*entsz+16:i*entsz+20])[0],
+             int.from_bytes(toc[i*entsz+20:i*entsz+25], "big"),
+             int.from_bytes(toc[i*entsz+25:i*entsz+30], "big")) for i in range(nent)]
+    rest = toc[nent * entsz:]
+    bsz = [int.from_bytes(rest[i:i+2], "big") or blksz for i in range(0, len(rest) - 1, 2)]
+    idx0, usz0, off0 = ents[0]
+    nblk = lambda usz: max(1, (usz + blksz - 1) // blksz)
+    f.seek(off0)
+    man = b"".join(zlib.decompress(c) if c[:1] == b"\x78" else c
+                   for c in (f.read(bsz[i]) for i in range(idx0, idx0 + nblk(usz0))))[:usz0]
+    names = man.decode("latin1").split("\n")
+    out = []
+    for name, (idx, usz, off) in zip(names, ents[1:]):
+        if name.startswith(prefix):
+            out.append((off, off + sum(bsz[idx:idx + nblk(usz)]), name))
+    return sorted(out)

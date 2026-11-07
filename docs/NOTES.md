@@ -1509,6 +1509,87 @@ Measured (fix1 copy, PAR=2, load ~40): 39 of 39 reach GO in two full runs, the c
 show the known black shadow shapes and, on dogpatch_v1 and pier_v2, an
 overexposed sky band.
 
+### Game modes (MODE=)
+
+The Quick Race menu (ui/fe/offlinewreckreation.xml, QuickRaceSetMode)
+offers FESTIVAL, RACE, ELIMINATOR and CHASE. FESTIVAL there is a race with
+the track's incidents (Gags), which is what MODE=race already loads.
+`MODE=race|eliminator|chase` puts `data/gamemodes/<MODE>.mode` in the
+patched quickrace config. Checked on union_v1, mainline_v1 and dogpatch_v2:
+eliminator and chase both reach their running state (the eliminator's
+"ELIMINATIONS BEGIN IN" countdown, chase's rounds and score), and the clock
+box sees their timers run. Time attack is not reachable this way. Booting
+into `timeattackracing` (noperkrace config, ticket "Time Attack Infinite -
+Track NN"), or QuickRacing with timeattack.mode, dereferences NULL in the
+first frame (func_002A79D4, func_00ABCBDC). That controller wants state the
+challenge lobby sets up.
+
+Booting through the patch route skips the menus, and with them
+`FE/EndRaceScreen`: the frontend sets it when a race is started
+(Wreckreation_Race_Complete, Festival_Race_Complete...,
+ui/fe/carrier_menus.xml). Without it the HUD stays on YOU FINISHED forever
+after the finish, because the HUD's end-of-race Flow has no target. This is
+not an emulator bug. Tests that need the end of a race set it, or go through
+the menus.
+
+### save_options.sh
+
+`work/tests/save_options.sh` makes two boots on one fresh save root, each
+patched to boot straight into OPTIONS (`boot -> booted` goes to the
+`options` state).
+- Boot 1: DISPLAY, then SUBTITLES. Picture A is the value. RIGHT flips it
+  (picture B). Backing out saves the profile (`SAVE complete`).
+- Boot 2: the save loads (`new=0`) and the same path gives picture C. It must
+  match B and not A.
+Every step is checked on the frame dumps (the yellow OPTIONS title, the
+DISPLAY SETTINGS subtitle, the yellow `< >` around the focused row): a press
+made while a screen slides in is lost. It also fails on any `sceNpTrophy`
+error. 2 of 2 PASS (|A-B| 13-14, |C-B| 2, |C-A| 13).
+`work/tests/ms3patch.py` has the shared helpers: read/write PSARC, the stock
+gamestates.xml, the AutoPilot HUD, and frame boxes.
+
+### festival.sh (Festival mode)
+
+`work/tests/festival.sh` (SLOW) plays the first Festival event after the
+Prologue to its end and checks the progress survives a reboot. It needs a
+post-Prologue save: `SAVE_FROM=<root holding BCES00484/>`, otherwise it runs
+first_race.sh first.
+
+The game drives the car itself. The only patch (ms3patchv0101.psarc in the
+run's PS3_HDD0_ROOT) is the race HUD: GameHUD sets
+`CompetitorManager/Competitors[i]/AutoPilot` true for every competitor whose
+`Finished` is false (ms3patch.autopilot_hud). AutoPilot is the flag the game
+puts on a car after it finishes, and the AI drives it. The boot, the menus
+and the Festival flow are untouched: movies, title, MAIN MENU > FESTIVAL >
+FestivalPopup "Continue" (which also sets FE/EndRaceScreen to
+Festival_Race_Complete), the chapter's motion comic and intro card, the
+race, and the results.
+
+The pad policy (from the frame dumps):
+- While the race HUD (yellow POS) shows, nothing is pressed.
+- Otherwise it taps CROSS, CROSS, SQUARE. A car that finishes outside the top
+  5 gets QUIT (CIRCLE) / RETRY RACE (SQUARE) instead of CONTINUE.
+
+Boot 1 ends at the first `SAVE complete` after a race HUD. Boot 2 reboots on
+that save and goes the same way to the next race HUD. The event is the track
+world read last before the HUD, worked out from the ms3.psarc read offsets
+(FS_CALLER=1 logs every cellFsLseek; ms3patch.psarc_ranges maps an offset to
+its file). The boot also reads a header of the DLC worlds (alcatraz, market,
+two prologues). Boot 2 must continue on a different world than boot 1's
+event.
+
+The first event after the Prologue is Upper Bohemia (track_haight_v1), "Day
+One - Morning", a buggy in a field of 16, 3 laps. The next is Good Herb
+(track_yerbabuena_v1). Measured: race HUD 150 s after boot, event finished
+and saved at 458 s, and boot 2 continued on track_yerbabuena_v1 (PASS). Under AutoPilot the car
+has finished from 1st to below 5th.
+
+One hang so far, in an earlier hand run (work/runs/festival/fe1, reported to
+ppu2): at 1:05 into that race, one SPU task of taskset 0x1483F880 (image 36)
+spun forever on a "task0" host thread and Havok stopped. Seven dispatches of
+that image against six returns: task 0 was started again while its first
+instance still ran. The rerun did not hang.
+
 ## Simulation pacing
 
 As shipped, the game steps its simulation a fixed 1/30 s every frame and

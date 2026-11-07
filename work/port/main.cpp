@@ -734,6 +734,22 @@ int main(int argc, char** argv)
     env_default("PS3RECOMP_ENG_MLAA_VIEWS", "1");
     env_default("PS3RECOMP_VK_MEMPOOL", "1");
     env_default("PS3RECOMP_VK_SNAPCACHE", "1");
+    /* Per draw (docs/NOTES.md "Split-screen" / per-draw): a GPU copy target may
+     * alias a target at another pitch it only overlaps (no whole-frame
+     * read-back of the composite), only changed vertex-constant rows cross to
+     * the recording thread, and resident geometry falls back to system memory
+     * when the VRAM arena cannot be allocated. */
+    env_default("PS3RECOMP_ENG_BLIT_ALIAS", "1");
+    env_default("PS3RECOMP_BQ_VSC_DELTA", "1");
+    env_default("PS3RECOMP_VK_GEO_SYSMEM", "1");
+    /* Repeated own-target sub-rect snapshots are queued, not a synchronous
+     * round trip to the recording thread each (~300 per 4P frame). */
+    env_default("PS3RECOMP_BQ_SNAP_RECT", "1");
+    /* Vulkan recording on its own thread: what settings.ini's record_thread
+     * gives a player by default. A windowed run has already exported the
+     * player's choice above; this makes headless runs (tests, benchmarks)
+     * measure the same configuration. */
+    env_default("PS3RECOMP_BE_THREAD", "1");
     if (atoi(getenv("PS3_SIM_60")) != 0) env_default("GCM_VBLANK_EACH", "1");
     /* inFAMOUS 2 built its frames on the SPU: the FIFO parked at the end of
      * what was ready and the title patched the park with the rest. Wait at a

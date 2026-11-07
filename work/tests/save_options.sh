@@ -53,7 +53,7 @@ class Game:
         shutil.copytree(ROOT / "hdd1", self.dir / "hdd1")
         self.log, self.pad = self.dir / "log", self.dir / "pad"; self.set("")
         env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy", SDL_VIDEODRIVER="dummy",
-                   PS3_SAVEDATA_ROOT=str(save), PS3_HDD1_ROOT=str(self.dir / "hdd1"),
+                   PS3_SAVEDATA_ROOT=str(save), PS3_GAMEDATA_ROOT=str(OUT / "gamedata"), PS3_HDD1_ROOT=str(self.dir / "hdd1"),
                    PS3_HDD0_ROOT=str(hdd0), PS3_PAD_FILE=str(self.pad),
                    LD_FRAME_DUMP=str(self.dir / "d"), LD_FRAME_DUMP_EVERY="10")
         self.f = open(self.log, "wb")

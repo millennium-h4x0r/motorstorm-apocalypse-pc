@@ -48,7 +48,7 @@ def boot(i):
         tmp = pad.with_suffix(".tmp"); tmp.write_text(s + "\n"); os.replace(tmp, pad)
     held("")
     env = dict(os.environ, SDL_NO_SIGNAL_HANDLERS="1", SDL_AUDIODRIVER="dummy",
-               SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save),
+               SDL_VIDEODRIVER="dummy", PS3_SAVEDATA_ROOT=str(save), PS3_GAMEDATA_ROOT=str(d / "gamedata"),
                PS3_HDD1_ROOT=str(hdd1), PS3_PAD_FILE=str(pad))
     f = open(log, "wb")
     p = subprocess.Popen([BIN, ELF], cwd=ROOT, env=env, stdout=f,
