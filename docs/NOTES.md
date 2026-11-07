@@ -1541,9 +1541,17 @@ patched to boot straight into OPTIONS (`boot -> booted` goes to the
   (picture B). Backing out saves the profile (`SAVE complete`).
 - Boot 2: the save loads (`new=0`) and the same path gives picture C. It must
   match B and not A.
-Every step is checked on the frame dumps (the yellow OPTIONS title, the
-DISPLAY SETTINGS subtitle, the yellow `< >` around the focused row): a press
-made while a screen slides in is lost. It also fails on any `sceNpTrophy`
+Navigation is a loop that reads a frame dumped after the previous press and
+acts on the screen it shows:
+- DISPLAY SETTINGS (a value box on its 4th row, and a short subtitle):
+  DOWN until the yellow `< >` sits on SUBTITLES.
+- The OPTIONS list (the yellow icon panel on the right): UP x5, DOWN, CROSS.
+- Another OPTIONS sub-screen: CIRCLE.
+- No OPTIONS title for 4 s (SET SCREEN SIZE): CIRCLE.
+A press made while a screen slides in is lost under load. A fixed sequence
+once ended in OVERLAY TRANSPARENCY (integ7 SLOW) and once in WIRELESS
+CONTROLLER SETTINGS, whose list also has value boxes, hence the subtitle
+check. It also fails on any `sceNpTrophy`
 error. 2 of 2 PASS (|A-B| 13-14, |C-B| 2, |C-A| 13).
 Trophies are kept in `$PS3_GAMEDATA_ROOT/trophies` (sceNpTrophy.c), and by
 default that is the player's `gamedata/trophies`. The tests set

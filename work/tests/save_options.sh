@@ -99,9 +99,22 @@ def value(fr):
     w, h, px = mp.read_ppm(fr); return mp.crop(px, w, h, VALUE)
 
 YEL = lambda r, g, b: r > 200 and g > 150 and b < 90
-def display(fr):
-    """The DISPLAY SETTINGS subtitle under OPTIONS."""
-    w, h, px = mp.read_ppm(fr); return mp.count(px, w, h, (80, 260, 82, 108), YEL, 1) > 600
+WHITE = lambda r, g, b: r > 180 and g > 180 and b > 180
+def screen(fr):
+    """'display' (the DISPLAY SETTINGS list: its PLAY IN 3D value box shows),
+    'root' (the OPTIONS list: the yellow icon panel on the right), 'other'
+    (another OPTIONS sub-screen, e.g. OVERLAY TRANSPARENCY) or 'none' (no
+    OPTIONS title: loading, sliding in, or SET SCREEN SIZE)."""
+    w, h, px = mp.read_ppm(fr)
+    if mp.count(px, w, h, (100, 380, 40, 120), YEL) <= 150: return "none"
+    # The DISPLAY SETTINGS list: a value box on its 4th row, and the subtitle
+    # under OPTIONS short ("DISPLAY SETTINGS" ends before x 360; "WIRELESS
+    # CONTROLLER SETTINGS", whose list has value boxes too, runs past it).
+    if (mp.count(px, w, h, (930, 1040, 412, 440), WHITE, 1) > 50 and
+            mp.count(px, w, h, (360, 470, 128, 158), YEL, 1) < 50):
+        return "display"
+    if mp.count(px, w, h, (780, 1100, 250, 450), YEL) > 400: return "root"
+    return "other"
 def on_subtitles(fr):
     """The yellow < > of the focused row, on the SUBTITLES row."""
     w, h, px = mp.read_ppm(fr)
@@ -109,22 +122,33 @@ def on_subtitles(fr):
             mp.count(px, w, h, (1132, 1162, 372, 398), YEL, 1) > 100)
 
 def to_subtitles(g):
-    """OPTIONS -> DISPLAY -> SUBTITLES, checking each step on the frames
-    (a press while a screen slides in is lost)."""
-    g.until(lambda: header(g.frame()), 240, "OPTIONS screen")
+    """OPTIONS -> DISPLAY -> SUBTITLES. Every step looks at a frame dumped
+    after the previous press and acts on the screen it shows: a press made
+    while a screen slides in is lost, so a fixed sequence can end up
+    anywhere (once in OVERLAY TRANSPARENCY, under load)."""
+    g.until(lambda: screen(g.frame()) != "none", 240, "OPTIONS screen")
     time.sleep(3)
-    for _ in range(4):
-        g.tap("DOWN"); g.tap("CROSS", 3)
-        if display(g.frame(0.5)): break
-        g.tap("CIRCLE", 3)                    # wrong screen: back to the OPTIONS list, top item
-        g.tap("UP"); g.tap("UP"); g.tap("UP"); g.tap("UP")
-    else:
-        g.stop(); fail(f"could not open DISPLAY settings ({g.log})")
-    for _ in range(6):
-        fr = g.frame(0.5)
-        if on_subtitles(fr): return fr
-        g.tap("DOWN", 2)
-    g.stop(); fail(f"could not focus SUBTITLES ({g.log})")
+    none_since = None
+    for _ in range(60):
+        fr = g.frame(0.5); s = screen(fr)
+        if s == "display":
+            if on_subtitles(fr): return fr
+            g.tap("DOWN", 2)
+        elif s == "root":
+            for _ in range(5): g.tap("UP", 0.8)   # to the top: CONTROLLER
+            g.tap("DOWN", 1.2); g.tap("CROSS", 3) # DISPLAY
+        elif s == "other":
+            g.tap("CIRCLE", 3)
+        if s == "none":
+            # A sub-screen without the OPTIONS title (SET SCREEN SIZE) or a
+            # transition: give it 4 s, then back out of it.
+            none_since = none_since or time.time()
+            if time.time() - none_since > 90: g.stop(); fail(f"left the OPTIONS screens ({g.log})")
+            if time.time() - none_since > 4: g.tap("CIRCLE", 3)
+            else: time.sleep(1)
+        else:
+            none_since = None
+    g.stop(); fail(f"could not get to DISPLAY > SUBTITLES ({g.log})")
 
 # -- boot 1: change it ----------------------------------------------------------
 g = Game("boot1")

@@ -745,6 +745,12 @@ int main(int argc, char** argv)
     /* Repeated own-target sub-rect snapshots are queued, not a synchronous
      * round trip to the recording thread each (~300 per 4P frame). */
     env_default("PS3RECOMP_BQ_SNAP_RECT", "1");
+    /* Higher resolutions: depth targets are sampled in place (a depth-aspect
+     * view, coordinates scaled to a dynamic-res corner) instead of copied, and
+     * scissored clears are render-pass clears instead of buffer fills. At 4K
+     * these were 42 of 55 ms of GPU time a frame. */
+    env_default("PS3RECOMP_ENG_ZVIEW", "1");
+    env_default("PS3RECOMP_VK_CLEAR_RP", "1");
     /* Vulkan recording on its own thread: what settings.ini's record_thread
      * gives a player by default. A windowed run has already exported the
      * player's choice above; this makes headless runs (tests, benchmarks)

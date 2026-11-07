@@ -448,7 +448,7 @@ void draw_menu()
                              ImGuiCond_Always);
     ImGui::Begin("MotorStorm Apocalypse  ·  Options", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                 ImGuiWindowFlags_NoSavedSettings);
+                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
     if (ImGui::BeginTabBar("pages")) {
         option_tabs(s);
         ImGui::EndTabBar();
@@ -462,7 +462,11 @@ void draw_menu()
         ImGui::PopStyleColor();
         ImGui::SameLine();
     }
-    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - fs * 7.5f);
+    /* Right-aligned by its own width: a fixed 7.5 em left the button half
+     * outside the window at 720p. */
+    { const ImGuiStyle& st = ImGui::GetStyle();
+      ImGui::SetCursorPosX(ImGui::GetWindowWidth() - ImGui::CalcTextSize("Close  (F1)").x -
+                           st.FramePadding.x * 2.0f - st.WindowPadding.x); }
     if (ImGui::Button("Close  (F1)")) rsx_ui_set_menu_open(0);
     ImGui::End();
 }
@@ -617,7 +621,9 @@ void draw_start()
             ImGui::EndTabBar();
         }
         const std::string note = restart_note(s);
-        ImGui::SetCursorPosY(height - fs * 3.0f);
+        /* Room for the hint beside BACK to wrap onto a second line: at 3 em
+         * from the bottom its second line was cut off. */
+        ImGui::SetCursorPosY(height - fs * 3.9f);
         ImGui::Separator();
         if (g_page_focus) { ImGui::SetKeyboardFocusHere(); g_page_focus = false; }
         if (ImGui::Button("BACK", ImVec2(fs * 8.0f, fs * 1.8f))) go_page(MENU_MAIN);

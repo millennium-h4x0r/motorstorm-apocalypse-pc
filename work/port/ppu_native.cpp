@@ -222,6 +222,16 @@ static int lk_stats_on(void)
     if (v < 0) v = getenv("PS3_LOCK_STATS") ? 1 : 0;
     return v;
 }
+extern "C" void ps3_tl(const char* tag, uint32_t a, uint32_t b);
+extern "C" int g_ps3_tl;
+/* The caller a contended acquire is named by (see lk_stats_note). */
+static uint32_t lk_site(const ppu_context* c)
+{
+    uint32_t site = (uint32_t)c->lr;
+    if (site == 0x00FF5AFCu && range_ok(c->gpr[1] + 0x90, 8)) site = (uint32_t)vm_read64(c->gpr[1] + 0x90);
+    if (site == 0x00673AE4u && range_ok(c->gpr[1] + 0x80 + 0x80, 8)) site = (uint32_t)vm_read64(c->gpr[1] + 0x80 + 0x80);
+    return site;
+}
 static void lk_stats_note(const ppu_context* c, uint32_t ea, uint64_t ns)
 {
     enum { N = 32 };
@@ -269,7 +279,11 @@ static int nat_lock(ppu_context* c)
     if (ea < 0x10000u || (ea & 3u)) return 0;
     if (nat_trylock(c, ea)) { c->gpr[3] = 0; return 1; }
     const uint64_t t0 = lk_stats_on() ? lk_now_ns() : 0;
+    /* PS3_TIMELINE: a contended acquire's start and end ("lkw0"/"lkw1": thread, caller lr). */
+    const int tl = g_ps3_tl;
+    if (tl) ps3_tl("lkw0", (uint32_t)c->thread_id, lk_site(c));
     do lk_wait(ea); while (!nat_trylock(c, ea));
+    if (tl) ps3_tl("lkw1", (uint32_t)c->thread_id, lk_site(c));
     if (t0) lk_stats_note(c, ea, lk_now_ns() - t0);
     c->gpr[3] = 0;
     return 1;
@@ -445,6 +459,71 @@ static int nat_dt_clamp_note(ppu_context* c)
     if (dt > (double)clamp)
         __atomic_fetch_add(&g_sim_clamped_us, (uint64_t)((dt - (double)clamp) * 1e6), __ATOMIC_RELAXED);
     return 0;
+}
+
+/* func_00911128's packet lists (tools/ppu_native_entries.py NATIVE_BLOCKS,
+ * the block at loc_00911378, the top of its per-packet loop).
+ *
+ * The function walks lists of packets: r19 is the cursor (first at list+16),
+ * the list ends at [r1+0xEB8] (list + size word + 16) and each packet's byte
+ * at +3 is its size in bytes, a multiple of 16; the copy loops at 0x9113F8
+ * and 0x911480 move (byte >> 4) quadwords two at a time and stop only for a
+ * count of 1..15. A header whose count is 0 makes that copy run forever, 32
+ * bytes a pass, up through the flat guest window until the first page that
+ * is not writable -- the guard under the first guest thread stack, which is
+ * why every such crash stored to exactly 0xD0000000 (and why everything from
+ * the list's target up to there, VRAM included, was trashed first). On a PS3
+ * that header would be just as fatal: the list was read before whoever
+ * writes it had finished (or after a lost update).
+ *
+ * So: a cursor at a packet with a count of 0, or past the end, ends the list
+ * there (the block sets r19 to the end and takes the function's own
+ * end-of-list path). Logged with the list, the bytes and the guest call
+ * chain, once per distinct (cursor, end) for the first 16; then counted.
+ * PS3_PKT_GUARD=0 turns it off (the crash comes back); PS3_PKT_GUARD=2 also
+ * calls spu_coh_dump() on the first one (SPU_LINE_WATCH ring and every SPU
+ * context's reservation state). */
+extern "C" void spu_coh_dump(void);
+extern "C" int ppu_pkt_guard(uint32_t p, uint32_t end, uint32_t r1)
+{
+    static int s_mode = -1;
+    if (s_mode < 0) { const char* e = getenv("PS3_PKT_GUARD"); s_mode = e ? atoi(e) : 1; }
+    if (!s_mode) return 0;
+    if (p < end && p >= 0x10000u && (uint64_t)p + 4 <= 0x100000000ull &&
+        (vm_read8(p + 3) >> 4) != 0)
+        return 0;                                   /* the normal case */
+    static std::atomic<uint32_t> s_hits{0};
+    static uint32_t s_seen[16][2];
+    const uint32_t n = s_hits.fetch_add(1) + 1;
+    int fresh = 1;
+    for (int i = 0; i < 16 && i < (int)n - 1; i++)
+        if (s_seen[i][0] == p && s_seen[i][1] == end) fresh = 0;
+    if (fresh && n <= 16) {
+        s_seen[n - 1][0] = p; s_seen[n - 1][1] = end;
+        fprintf(stderr, "[pkt-guard] func_00911128: %s at 0x%08X (list end 0x%08X): list cut there "
+                "(hit %u)\n", p >= end ? "cursor past the end" : "packet with a quadword count of 0",
+                p, end, n);
+        if (p >= 0x10000u && p < 0xFFFFFFC0u) {
+            fprintf(stderr, "[pkt-guard]   bytes at 0x%08X:", p & ~0xFu);
+            for (uint32_t i = 0; i < 64; i++)
+                fprintf(stderr, "%s%02X", (i % 16) ? " " : "\n[pkt-guard]     ", vm_read8((p & ~0xFu) + i));
+            fprintf(stderr, "\n");
+        }
+        /* the guest call chain: back chain at 0(r1), saved LR at +16 */
+        fprintf(stderr, "[pkt-guard]   called from:");
+        uint32_t sp = r1;
+        for (int i = 0; i < 12 && sp >= 0x10000u && sp < 0xFFFFFF00u; i++) {
+            const uint32_t next = (uint32_t)vm_read64(sp);
+            if (next <= sp) break;
+            fprintf(stderr, " 0x%08X", (uint32_t)vm_read64(next + 16));
+            sp = next;
+        }
+        fprintf(stderr, "\n");
+        if (s_mode >= 2 && n == 1) spu_coh_dump();
+    } else if ((n & (n - 1)) == 0) {
+        fprintf(stderr, "[pkt-guard] func_00911128: %u lists cut so far\n", n);
+    }
+    return 1;
 }
 
 static const ppu_native_desc s_funcs[] = {

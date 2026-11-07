@@ -88,6 +88,26 @@ PROBES = [
 # (inFAMOUS 2 had one: a memchr over a byte array in its solve loop.)
 # Add MotorStorm blocks here.
 NATIVE_BLOCKS = [
+    # func_00911128's per-packet loop top: a packet whose header (byte +3)
+    # has a quadword count of 0, or a cursor past the list end, ends the list
+    # there instead of starting a copy that never stops (the 0xD0000000
+    # crashes). port/ppu_native.cpp ppu_pkt_guard; PS3_PKT_GUARD=0 turns it off.
+    {"func": 0x00911128,
+     "label": "loc_00911378",
+     "code": [
+         "        { const uint32_t _pend = vm_read32(_r1 + 0xEB8);",
+         "          if (((uint32_t)_r19 >= _pend || (vm_read8(_r19 + 3) >> 4) == 0) &&",
+         "              ppu_pkt_guard((uint32_t)_r19, _pend, (uint32_t)_r1)) { _r19 = _pend; goto loc_00912348; } }",
+     ],
+     "before": [
+         "        vm_write64(_r1 + 0xE60, _r18);",
+         "        vm_write8(_r1 + 0xE80, _r18);",
+         "        vm_write64(_r1 + 0xEA8, _r20);",
+     ],
+     "expect": [
+         "        { uint64_t _a = _r1; uint64_t _r = _a + (uint64_t)(int64_t)(0x9F0); _r3 = _r; _xer = (_xer & ~(1u << 29)) | ((_r < _a) ? (1u << 29) : 0u); }",
+         "        _r7 = vm_read64(_r1 + 0xE88);",
+     ]},
 ]
 
 MARK = "/* ppu-native: tools/ppu_native_entries.py */"
@@ -101,6 +121,7 @@ PREAMBLE_HOOK = [
 # one the inline accessors would take access by access (ppu_recomp.h vm_inl_ok).
 PREAMBLE_BLOCK = [
     'extern "C" int g_ppu_native_blocks;',
+    'extern "C" int ppu_pkt_guard(uint32_t p, uint32_t end, uint32_t r1);   /* port/ppu_native.cpp */',
     "static inline int ppu_nat_range_ok(uint32_t ea, uint64_t n)",
     "{",
     "    const uint64_t ctl = ppu_hle_inject_base + 0x2008u;",

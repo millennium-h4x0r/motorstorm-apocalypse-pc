@@ -833,12 +833,15 @@ extern void spu_overlay_register_region_at(uint32_t content_ea, uint32_t lsa, ui
 extern void spu_overlay_register_bytes_at(const uint8_t* bytes, uint32_t lsa, uint32_t span, int image_id);
 extern void spu_overlay_owner_last(int owner);   /* only that task image loads it */
 extern char* getenv(const char*);
-/* SPU_FW_LIFT=1: the firmware code lifts below become resident when their
- * bytes are loaded at their address (default off until validated). */
-static int fw_lift_on(void) {{ const char* e = getenv("SPU_FW_LIFT"); return e && e[0] == '1'; }}
+/* SPU_FW_LIFT (default on, =0 off): the firmware code lifts below become
+ * resident when their bytes are loaded at their address. Read in a static
+ * constructor, before main() -- so main.cpp's env_default cannot set it: the
+ * default lives here. */
+static int fw_lift_on(void) {{ const char* e = getenv("SPU_FW_LIFT"); return !e || e[0] != '0'; }}
 extern void spu_overlay_register_sig_at(const uint8_t sig[16], uint32_t base, uint32_t span, int image_id);
-/* SPU_WWS_ALT_BASE=1: the job-module lifts at their extra code buffers. */
-static int alt_base_on(void) {{ const char* e = getenv("SPU_WWS_ALT_BASE"); return e && e[0] == '1'; }}
+/* SPU_WWS_ALT_BASE (default on, =0 off): the job-module lifts at their extra
+ * code buffers. Also read before main(), as above. */
+static int alt_base_on(void) {{ const char* e = getenv("SPU_WWS_ALT_BASE"); return !e || e[0] != '0'; }}
 extern void wws_pm_spu_recomp_register(void);
 extern void wws_pm_spu_func_{PM_LSA:08X}(spu_context*);
 {dsp_decl}{fw_decl}{alt_decl}
