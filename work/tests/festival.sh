@@ -50,6 +50,7 @@ fi
 
 python3 -I - "$BIN" "$ELF" "$OUT" "$HERE" "$SAVE_FROM" "${LIMIT_S:-3600}" <<'EOF'
 import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp; _mp.hard_limit(2 * int(_o.environ.get("LIMIT_S", 3600)) + 900, "festival")
+_o.environ.setdefault("SPU_TS_WATCHDOG", "20")   # a Havok/taskset hang leaves a [ts-watchdog] dump (cheap otherwise; SPU_TS_WATCHDOG=0 off)
 import bisect, os, re, shutil, signal, subprocess, sys, time
 from pathlib import Path
 BIN, ELF, OUT, HERE = os.path.abspath(sys.argv[1]), sys.argv[2], Path(sys.argv[3]).resolve(), Path(sys.argv[4])
@@ -108,10 +109,14 @@ class Game:
         f = self.latest()
         if f is None: self.tap("CROSS"); return False
         w, h, px = f
-        if mp.count(px, w, h, (40, 220, 560, 640), lambda r, g, b: r > 200 and g > 150 and b < 90) > 25:
-            return True
+        # The not-qualified results first: their yellow "Cards Found" sits in
+        # the race HUD's POS box, and taking that screen for the race left it
+        # alone forever (two runs stuck an hour on QUIT / RETRY RACE).
         failed = mp.count(px, w, h, (930, 962, 640, 668),
                           lambda r, g, b: r > 190 and 70 < g < 160 and b > 100 and r - g > 60, 1) > 15
+        if not failed and mp.count(px, w, h, (40, 220, 560, 640),
+                                   lambda r, g, b: r > 200 and g > 150 and b < 90) > 25:
+            return True
         if failed:                            # RETRY RACE, then CROSS on its "are you sure"
             self.tap("SQUARE"); time.sleep(1.5); self.tap("CROSS")
         else:

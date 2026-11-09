@@ -132,6 +132,9 @@ def dev_flash_dir():
 # just loaded from a constant dispatched directly (--const-bi), as in the
 # inFAMOUS 2 port.
 LIFT_ARGS = ["--local-regs", "--merge-chunks", "--const-bi"] + os.environ.get("SPU_LIFT_EXTRA", "").split()
+# SPU_LIFT_NO_MERGE=1 (experiments): smaller C functions, one per chunk.
+if os.environ.get("SPU_LIFT_NO_MERGE") == "1":
+    LIFT_ARGS = [a for a in LIFT_ARGS if a != "--merge-chunks"]
 
 # Extra function entries for taskset tasks, found at run time (SPU_MISS_LOG=1
 # and the "[spu] img=N branched into unlifted LS ..." lines): the targets of

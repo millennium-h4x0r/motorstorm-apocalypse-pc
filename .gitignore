@@ -35,6 +35,7 @@
 !/work/port/job207_native.c
 !/work/port/job220_native.c
 !/work/port/windows/
+!/work/port/spu-native/
 !/work/port/config.toml
 !/work/port/settings.cpp
 !/work/port/settings.h

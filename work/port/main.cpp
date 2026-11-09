@@ -727,6 +727,12 @@ int main(int argc, char** argv)
     env_default("SPU_FP_MXCSR", "1");
     /* The same for taskset task threads (MultiStream's float DSP: audio). */
     env_default("SPU_FP_MXCSR_TASKS", "1");
+    /* An SPU task that exits before its creator commits its record keeps
+     * its id until the commit (a Havok worker no longer dies mid-create). */
+    env_default("SPU_TS2_DEFER_EXIT", "1");
+    /* Native AVX2 kernels for hot SPU job leaves (bit-exact, checked by
+     * SPU_NATIVE_CHECK=1): dxtblendjob colour-index search. */
+    env_default("SPU_NATIVE", "1");
     /* Draw engine (docs/NOTES.md "Race rendering"): a pass sampling a sub-rect
      * of its own target reads a snapshot of it (the car AO boxes: without it,
      * black shadows), real 3D textures (the AO volumes), scissored clears,

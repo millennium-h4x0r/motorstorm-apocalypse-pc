@@ -60,6 +60,11 @@ NATIVE_ENTRIES = [
     0x001DA398,     # the race's dt clamp: counts frame time and the clamped part (sim_speed.sh); declines
     0x00675D3C,     # the game's spinlock acquire: futex wait instead of 250 us sleeps
     0x00675E00,     # its release: wakes the futex waiters
+    0x008BDB08,     # Havok job queue addJob (PS3_HAVOK_TRACE observer; declines)
+    0x008C20D8,     # Havok PPU semaphore acquire (PS3_HAVOK_TRACE; declines)
+    0x008C219C,     # Havok PPU semaphore, sibling (PS3_HAVOK_TRACE; declines)
+    0x007820C0,     # raycast batch wait (PS3_HAVOK_TRACE; declines)
+    0x007828D0,     # raycast batch build (PS3_HAVOK_TRACE; declines)
 ]
 
 # Hooks for port/ppu_native.cpp's call-count probes (PS3RECOMP_PPU_PROBE=1):
@@ -143,6 +148,20 @@ def strip(lines):
     return [l for l in lines if not HOOK.match(l) and not l.endswith(BLOCK_TAG) and not RESUME.match(l)]
 
 
+def _norm(line):
+    """A lifted line as the default lift spells it, for matching a block's
+    before/expect lines against a lift made with the codegen options
+    (ppu_lifter.py --stack-fast names r1-relative accesses vm_*_stk;
+    --split-xer spells an XER update as a block over _xca/_xrest): the
+    accessor names folded back, and a line cut at its XER update."""
+    line = re.sub(r"\bvm_(read|write)(8|16|32|64)_stk\(", r"vm_\1\2(", line)
+    for cut in ("_xer = ", "{ const uint32_t _xert = "):
+        k = line.find(cut)
+        if k >= 0:
+            line = line[:k]
+    return line.rstrip()
+
+
 def apply_blocks(lines, i, blocks):
     """Patch the function whose header is lines[i]; returns the end index."""
     j = i + 1
@@ -154,7 +173,8 @@ def apply_blocks(lines, i, blocks):
         except ValueError:
             sys.exit(f"func_{b['func']:08X}: no {b['label']} for its native block")
         n, m = len(b["expect"]), len(b["before"])
-        if lines[at + 1:at + 1 + n] != b["expect"] or lines[at - m:at] != b["before"]:
+        if ([_norm(l) for l in lines[at + 1:at + 1 + n]] != [_norm(l) for l in b["expect"]] or
+                [_norm(l) for l in lines[at - m:at]] != [_norm(l) for l in b["before"]]):
             sys.exit(f"func_{b['func']:08X} {b['label']}: the lifted loop is not the one its native block was "
                      "written for (tools/ppu_native_entries.py NATIVE_BLOCKS)")
         lines[at + 1 + n:at + 1 + n] = [f"ppu_nat_resume_{b['label'][4:]}:"]

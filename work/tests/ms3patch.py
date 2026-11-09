@@ -179,10 +179,49 @@ def allow_ptrace():
 def host_backtrace(pid, out):
     """Every host thread's stack (lifted guest functions show as func_<addr>,
     so this is the guest call chain too) into the file out."""
-    import subprocess
+    import subprocess, re
     with open(out, "w") as f:
         subprocess.run(["gdb", "-p", str(pid), "-batch", "-ex", "set pagination off",
+                        "-ex", "p/x (unsigned long)vm_base",
                         "-ex", "thread apply all bt 40"], stdout=f, stderr=subprocess.STDOUT, timeout=300)
+    try:
+        with open(out) as f:
+            mb = re.search(r"^\$1 = (0x[0-9a-f]+)", f.read(), re.M)
+        if mb:
+            with open(str(out) + ".jobqueue", "w") as f:
+                f.write(havok_queue_dump(pid, int(mb.group(1), 16)))
+    except Exception as e:  # diagnostics only
+        with open(str(out) + ".jobqueue", "w") as f:
+            f.write(f"no dump: {e}\n")
+
+
+def havok_queue_dump(pid, vm_base, Q=0x14700F90):
+    """The Havok hkJobQueue at Q and its dynamic data D=[Q+0x30] (592 bytes,
+    what the SPU tasks GET under the CellSyncMutex at Q), read from a live
+    game: D+2t active jobs of type t (halfwords), D+0x18 mask, D+0x1C wait
+    flag, D+0x22+2q tasks waiting on queue q's semaphore [Q+0x90+4q], queue q
+    at D+0x40+20q = {elements, capacity, head, tail, count}. Text."""
+    import struct
+    with open(f"/proc/{pid}/mem", "rb") as m:
+        def rd(ea, n):
+            m.seek(vm_base + ea); return m.read(n)
+        q = rd(Q, 0x100)
+        D = struct.unpack(">I", q[0x30:0x34])[0]
+        d = rd(D, 0x250)
+        sems = rd(0x146F7800, 0x200)   # the Havok semaphores (queue ones, and main's batch one at 0x146F7840)
+    W = lambda b, o: struct.unpack(">I", b[o:o + 4])[0]
+    H = lambda o: struct.unpack(">H", d[o:o + 2])[0]
+    s = [f"vm_base {vm_base:#x} queue {Q:08X} mutex {W(q, 0):08X} rec {W(q, 4)} owner {W(q, 8):08X}{W(q, 12):08X} D {D:08X}"]
+    s.append(f"active[t] {[H(2 * t) for t in range(10)]}  mask {W(d, 0x18):X}  waitflag {W(d, 0x1C)}")
+    s.append(f"waiting[q] {[H(0x22 + 2 * k) for k in range(12)]}")
+    for k in range(22):
+        o = 0x40 + 20 * k
+        s.append(f"queue {k:2d} sem {W(q, 0x90 + 4 * k) if k < 12 else 0:08X} elems {W(d, o):08X} cap {W(d, o + 4)} "
+                 f"head {W(d, o + 8)} tail {W(d, o + 12)} count {W(d, o + 16)}")
+    s += [f"Q+{o:03X}: " + " ".join(f"{W(q, o + i):08X}" for i in range(0, 16, 4)) for o in range(0, 0x100, 0x10)]
+    s += [f"D+{o:03X}: " + " ".join(f"{W(d, o + i):08X}" for i in range(0, 16, 4)) for o in range(0, 0x250, 0x10)]
+    s += [f"S {0x146F7800 + o:08X}: " + " ".join(f"{W(sems, o + i):08X}" for i in range(0, 16, 4)) for o in range(0, 0x200, 0x10)]
+    return "\n".join(s) + "\n"
 
 
 # -- a hard time limit for a whole test ---------------------------------------

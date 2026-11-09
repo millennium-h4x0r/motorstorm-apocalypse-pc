@@ -38,6 +38,7 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 
 python3 -I - "$BIN" "$ELF" "$OUT" "$RUNS" "${LIMIT_S:-3600}" "${SKIP_S:-60}" <<'EOF'
 import os as _o, sys as _s; _s.path.insert(0, _o.environ["TESTS_DIR"]); import ms3patch as _mp; _mp.hard_limit(int(_o.environ.get("LIMIT_S", 3600)) + 1500, "first_race")
+_o.environ.setdefault("SPU_TS_WATCHDOG", "20")   # a Havok/taskset hang leaves a [ts-watchdog] dump (cheap otherwise; SPU_TS_WATCHDOG=0 off)
 import os, re, signal, subprocess, sys, time, zlib, struct
 from pathlib import Path
 

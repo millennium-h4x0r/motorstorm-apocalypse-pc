@@ -526,7 +526,96 @@ extern "C" int ppu_pkt_guard(uint32_t p, uint32_t end, uint32_t r1)
     return 1;
 }
 
+/* PS3_HAVOK_TRACE=1: a ring of the Havok job-queue traffic -- PPU addJob
+ * (0x8BDB08), the PPU semaphore acquire (0x8C20D8) and its sibling 0x8C219C,
+ * the raycast batch wait (0x7820C0) and build (0x7828D0), plus SPU task
+ * creates and returns (havok_trace_note from libspurs / spu_workload) --
+ * dumped by the taskset watchdog (SPU_TS_WATCHDOG) at a stall. All hooks
+ * decline. Diagnostic. */
+struct hv_ev { uint64_t t; uint32_t tid, kind, a, b, c, d, e, f, q[4]; };
+/* The job queue header's words +0x14 +0x18 +0x20 +0x2C (line 0x14700F80), at each event. */
+static inline void hv_q(hv_ev& e) { static const uint32_t o[4] = { 0x14, 0x18, 0x20, 0x2C };
+    for (int i = 0; i < 4; i++) e.q[i] = vm_read32(0x14700F80u + o[i]); }
+static hv_ev s_hv[8192]; static std::atomic<uint32_t> s_hv_pos;
+static int hv_on(void) { static int v = -1; if (v < 0) { const char* e = getenv("PS3_HAVOK_TRACE"); v = e && e[0] == '1'; } return v; }
+extern "C" void havok_trace_note(uint32_t kind, uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+{
+    if (!hv_on()) return;
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    hv_ev& e = s_hv[s_hv_pos.fetch_add(1, std::memory_order_relaxed) & 8191u];
+    e.t = (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000u;
+    e.tid = (uint32_t)syscall(SYS_gettid); e.kind = kind; e.a = a; e.b = b; e.c = c; e.d = d; e.e = 0; e.f = 0; hv_q(e);
+}
+static void hv_ppu(ppu_context* c, uint32_t kind, uint32_t a, uint32_t b, uint32_t cc, uint32_t d, uint32_t ee = 0, uint32_t f = 0)
+{
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    hv_ev& e = s_hv[s_hv_pos.fetch_add(1, std::memory_order_relaxed) & 8191u];
+    e.t = (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000u;
+    e.tid = (uint32_t)c->thread_id | 0x80000000u; e.kind = kind; e.a = a; e.b = b; e.c = cc; e.d = d; e.e = ee; e.f = f; hv_q(e);
+    (void)c;
+}
+static int nat_hv_addjob(ppu_context* c)      /* 0x8BDB08(queue r3, job r4, r5) */
+{
+    if (!hv_on()) return 0;
+    const uint32_t j = (uint32_t)c->gpr[4];
+    hv_ppu(c, 1, (uint32_t)c->gpr[3], j, (uint32_t)c->gpr[5], vm_read32(j), vm_read32(j + 4), (uint32_t)c->lr);
+    /* the raycast (type 3) job's whole 120 bytes, the first 64 times */
+    if ((vm_read32(j) >> 16) == 3u) { static std::atomic<int> n;
+        if (n.fetch_add(1) < 64) { fprintf(stderr, "[hv-job]");
+            for (uint32_t o = 0; o < 120; o += 4) fprintf(stderr, " %08X", vm_read32(j + o));
+            fprintf(stderr, "\n"); } }
+    return 0;
+}
+static int nat_hv_semacq(ppu_context* c)      /* 0x8C20D8(sem r3): word at [r3+4] */
+{
+    if (!hv_on()) return 0;
+    const uint32_t s = (uint32_t)c->gpr[3], w = vm_read32(s + 4);
+    hv_ppu(c, 2, s, w, vm_read32(w), vm_read32(s + 0xC), (uint32_t)c->lr);
+    return 0;
+}
+static int nat_hv_sem2(ppu_context* c)        /* 0x8C219C(sem r3) */
+{
+    if (!hv_on()) return 0;
+    const uint32_t s = (uint32_t)c->gpr[3], w = vm_read32(s + 4);
+    hv_ppu(c, 3, s, w, vm_read32(w), (uint32_t)c->gpr[4], (uint32_t)c->lr);
+    return 0;
+}
+static int nat_hv_wait(ppu_context* c)        /* 0x7820C0(batch r3): waits on [[r3+0x10]] if [r3+0xC] */
+{
+    if (!hv_on()) return 0;
+    const uint32_t o = (uint32_t)c->gpr[3], sp = vm_read32(o + 0x10);
+    hv_ppu(c, 4, o, vm_read32(o + 0xC), sp, sp ? vm_read32(vm_read32(sp + 4)) : 0, vm_read32(o + 4), (uint32_t)c->lr);
+    return 0;
+}
+static int nat_hv_build(ppu_context* c)       /* 0x7828D0(r3, r4, r5) */
+{
+    if (!hv_on()) return 0;
+    hv_ppu(c, 5, (uint32_t)c->gpr[3], (uint32_t)c->gpr[4], (uint32_t)c->gpr[5], (uint32_t)c->gpr[6], (uint32_t)c->lr);
+    return 0;
+}
+extern "C" void havok_trace_dump(void)
+{
+    if (!hv_on()) return;
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    const uint64_t now = (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000u;
+    static const char* nm[] = { "?", "addJob", "semAcq", "sem2", "batchWait", "batchBuild", "?", "?", "?", "?",
+                                "spuRet", "create", "spuStart", "?" };
+    const uint32_t end = s_hv_pos.load(), k0 = end > 8192 ? end - 8192 : 0;
+    for (uint32_t k = k0; k < end; k++) {
+        const hv_ev& e = s_hv[k & 8191u];
+        fprintf(stderr, "[havok-trace] -%.4f %s %s%u a=%08X b=%08X c=%08X d=%08X e=%08X f=%08X q=%X/%X/%X/%X\n", (now - e.t) / 1e6,
+                nm[e.kind < 14 ? e.kind : 13], e.tid & 0x80000000u ? "ppu" : "host", e.tid & 0x7FFFFFFFu,
+                e.a, e.b, e.c, e.d, e.e, e.f, e.q[0], e.q[1], e.q[2], e.q[3]);
+    }
+}
+
 static const ppu_native_desc s_funcs[] = {
+    /* PS3_HAVOK_TRACE: job-queue traffic observers; all decline */
+    { 0x008BDB08u, "hv_addjob", nat_hv_addjob, nullptr, nullptr, 0u },
+    { 0x008C20D8u, "hv_semacq", nat_hv_semacq, nullptr, nullptr, 0u },
+    { 0x008C219Cu, "hv_sem2", nat_hv_sem2, nullptr, nullptr, 0u },
+    { 0x007820C0u, "hv_wait", nat_hv_wait, nullptr, nullptr, 0u },
+    { 0x007828D0u, "hv_build", nat_hv_build, nullptr, nullptr, 0u },
     /* no compare (lifted = null): the lifted reset is the deadlock */
     { 0x00FF5B40u, "event_set", nat_event_set, nullptr, nullptr, 0u },
     /* the game's spinlock: futex waits instead of 250 us sleeps */

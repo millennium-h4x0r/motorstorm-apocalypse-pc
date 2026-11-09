@@ -859,7 +859,18 @@ persisted. Every boot rebuilt the whole cache (minutes of I/O beside the
 menus) and rewrote "chimp" in place in whatever hdd1 the run had. ppu_fs now
 implements cellFsRename with the cellFsOpen mapping (`[fs] rename ...
 failed` on an error). A first boot now leaves the 1558 files, and later boots
-read them. cellFsUnlink and cellFsRmdir are still CELL_OK stubs.
+read them. cellFsUnlink and cellFsRmdir, CELL_OK stubs until then, now
+delete through the same mapping (a title that deletes a stale entry must
+not read it back). Their errors map from errno: ENOENT, EISDIR (unlink of a
+directory), ENOTEMPTY, ENOTDIR, EACCES, else EIO. Failures are logged as
+`[fs] unlink|rmdir ... failed`, and successes too with FS_CALLER=1.
+
+Measured on a first boot with an empty hdd1 (the seed boot, build-vk 11:4x,
+CPUs 0-7,16-23): the 1558 cache files, 1.2 GB, are written over 81 s while
+the title and menus run. A boot on a filled hdd1 writes none: 0 "chimp"
+opens in main_menu, save_options and first_race on the seed. Before the
+rename fix every boot paid those 81 s or more of background I/O. A long
+save_options boot once spent its whole 50 minutes rebuilding.
 
 Tests take /dev_hdd1 from a seed, work/runs/hdd1_seed (ms3patch.hdd1_seed,
 seed_hdd1):
@@ -2114,6 +2125,51 @@ batches the main thread waits for.
   00:24 tree; the 00:43 tree boots clean. With the hdd1 pre-filled (the four
   fonts, empty cache/BCES00484439898/) it never happened.
 
+### The Havok "physics stopped" hang (open, 2026-11-08)
+
+first_race.sh's "no Havok task for 120 s". About 1 race in 7 on a quiet host.
+Under host load (40-130), or with the game pinned to 4 cores (`taskset -c
+0-3`), it becomes most races, often at the same point (~245-280 s after the
+first save). Three shapes at the stall (SPU_TS_WATCHDOG=20 dump):
+
+- A: hkp_integrate (img 35) hits `stop 0x3FFF` at LS 0x19454 (Havok's
+  HK_BREAKPOINT, the default of a switch on a schema type byte). Its solver
+  buffer is laid out [accumulators | elements | schemas] from the task
+  descriptor. The job's writes run past the end of a region into the schemas
+  in its own LS, while memory still holds the right schemas. So the solve
+  works on more items than the layout made room for.
+- B: an integrate task in an endless loop (LS 0x13098/0x13204), or no task
+  running at all. The other Havok tasks wait on semaphores in line 0x146F7880.
+- C (most common): main waits in syscall 130 on queue 16 (lr 0x7820EC, the
+  raycast batch semaphore 0x20 at 0x146F7840) and every Havok task is idle.
+
+Related: a host SIGSEGV reading guest 0xD0000000 in Havok PPU code
+(func_00910478, func_00911128). Havok data is inconsistent on both the PPU
+and the SPU side.
+
+Ruled out:
+- The SPU lifts. SPU_DIFF lifted == interpreter on img 33/35/36, 600/600, with
+  a control that interprets the live run too.
+- A PUTLLC lost update. SPU_PUTLLC_CAS commits per doubleword and logs any
+  store landing after the compare: zero in a hung run.
+- SPU_COH_UNMARK=0, SPU_FP_MXCSR=0, PS3_SIM_60=0: all hang.
+- Fence lifting: sync/lwsync/eieio/isync become atomic_thread_fence.
+- Task-slot reuse: PS3_HAVOK_TRACE shows none.
+
+Not a predictor (counted in 73 hunt logs): libspurs' create heqi at
+integrate LS 0x126D8 (in most passes too), and raycast DMA to EA 0xFFFFFFFF.
+
+Tools, all default off:
+- `SPU_ASSERT_DIAG=1`: on a stop 0x3FFF, dumps registers, the last 64
+  transfers, and the small descriptors as LS copy vs memory.
+- `PS3_HAVOK_TRACE=1` (port/ppu_native.cpp): a ring of addJob, the Havok
+  semaphores, the raycast build/wait, task creates and returns.
+- `SPU_LINE_WATCH` (4 lines).
+- `SPU_DIFF` + `SPU_DIFF_CONTROL`.
+- `SPU_PUTLLC_CAS`.
+- work/runs/ppu2/perfwatch.sh (perf of the live game at a stall) and
+  hunt.sh.
+
 ## SPU job speed (rsx2, 2026-11-07)
 
 Side-by-side 1P races (work/runs/rsx2/spu: `ab.sh` two races at once,
@@ -2295,23 +2351,79 @@ keep RAX too (callers keep values in it across a void preserve_all call).
 `tools/test_ppu_fast_mm.py` checks both against a callee that clobbers every
 caller-saved register.
 
+### More options (code size, behind `--fast-mm`)
+
+- `--coh-bytemap`: a store tests `g_spu_coh_lines` (runtime/spu/spu_coherency.c:
+  one byte per 128-byte line, 32 MiB of bss) instead of extracting a bit:
+  one `cmpb` before and one after. The runtime keeps the bytes equal to the
+  bitmap: each of the three bitmap writes (coh_mark_line's fetch_or,
+  coh_line_dead's fetch_and and its put-back) is followed at once by the same
+  byte store, before the process-wide barrier, and coh_mark_line's fast path
+  also requires the byte. Always maintained; test_spu_coherency 204/0.
+- `--stack-fast`: loads and stores at r1 + displacement (52% of stores, 27%
+  of loads) skip the span test and both reservation tests. Checked before:
+  over a boot, the menus and a race, no line of a PPU stack (0xD0000000+,
+  the main stack 0x0FE..0x0FF) was ever in the reservation bitmap (sampled
+  4x a second from inside the process by an LD_PRELOAD thread; ptrace is
+  blocked on this host). The accesses stay relaxed atomics: the first
+  version used plain memcpy loads and the boot hung before evologo (a
+  guest loop polling a stack object had its load hoisted).
+
 ### Results
 
-Full lift `--local-regs --local-fprs --local-vrs --fast-mm --lean-fp
---split-xer --chunks 140` (work/codegen/src/recomp_v3, build work/port/build-v3)
-against the same runtime with the default chunks, side by side, twice:
+Same runtime objects, lifted chunks swapped (hyb.py), union_v1 race,
+CPUs 0-7,16-23, one game at a time, per frame of the main thread:
 
-| per frame, main thread | default | v3 |
+| lift | main CPU ms/frame | lifted cycles | lifted insns |
+|---|---|---|---|
+| default | 23.9 / 20.8 | 69.2M / 59.2M | 69.8M / 61.1M |
+| v3 (`--local-fprs --local-vrs --fast-mm --lean-fp --split-xer`) | 17.7 / 17.8 | 51.4M / 50.9M | 54.8M |
+| v3 + PGO | 15.7 / 16.5 | 44.6M / 46.6M | 53.6M |
+
+(load ~20.) A second series on the byte-map runtime, load 25-40:
+default 17.8 / 15.1 ms, 68M / 60M lifted insns; v3 15.3 / 12.9 ms, 55M /
+53M; v3 + byte map on the 20 hot chunks 11.7 / 13.5 ms, 43M; v5 (v3 +
+`--coh-bytemap --stack-fast`, full) 12.4 / 15.5 ms (the second during a load
+spike), 39.5M / 38.0M. Lifted instructions -42%, lifted cycles ~-25% for v5.
+Binary 656 MB (default) -> 553 MB (v3) -> 463 MB (v5).
+
+PGO: an instrumented build of the lifted chunks only (`-fprofile-generate`
+through work/codegen/ppu_cxx_pgo.sh; libclang_rt.profile from
+libclang-rt-18-dev, which the host lacks, linked last), three races
+(union_v1, mainline_v1, dogpatch_v1) with work/codegen/pgo_dump.cpp
+writing the counters every 20 s (the game is killed, and g++ linking means
+no `-u__llvm_profile_runtime`, so the file name is set by hand), llvm-profdata
+merge, then `-fprofile-use -fsplit-machine-functions`. About -10% lifted
+cycles on top of v3. The profile belongs to one lift: any lifter or header
+change needs a new instrumented build and training run (~2.5 h on this host).
+
+Final series (2026-11-08/09), same runtime objects (build-v5), union_v1:
+
+| | main CPU ms/frame | lifted cycles/frame |
 |---|---|---|
-| lifted cycles | 74.4M / 74.5M | 61.4M / 60.7M (-18%) |
-| lifted instructions | 69.6M / 69.3M | 56.0M / 55.6M (-20%) |
-| main-thread CPU | 36.8 / 35.7 ms | 32.3 / 32.4 ms (-11%) |
+| default, load ~10, x3 | 14.7 / 13.3 / 14.6 | 45.8M / 44.3M / 46.6M |
+| v5, load ~10, x3 | 10.3 / 11.4 / 11.0 (-24%) | 29.3M / 31.3M / 31.7M (-32%) |
+| default, load ~40, 4 pairs side by side | 29.8 / 33.3 / 29.0 / 30.3 | |
+| v5, same pairs | 23.0 / 22.8 / 22.3 / 21.8 (-26%) | |
+| v5, load ~45, 3 pairs side by side | 26.7 / 28.7 / 24.9 | 53.3M / 53.0M / 47.8M |
+| v5 + PGO (trained on mainline_v1, dogpatch_v1), same pairs | 23.8 / 23.4 / 23.0 (-12%) | 48.1M / 46.5M / 44.8M (-10%) |
 
-(load ~90, so the absolute ms are high.) Binary 656 MB -> 553 MB. Compile
-time about the same. Validation on that binary: test_ppu_lift 1533/0,
-test_ppu_local_regs and test_ppu_fast_mm pass; ALL_TRACKS 39/39 reach GO;
-run_all.sh 7/8 (main_menu, save_options, first_boot_fresh ... pass; festival
-failed inside its own first_race.sh run, see below).
+Validation: test_ppu_lift 1533/0, test_ppu_local_regs, test_ppu_fast_mm
+pass, test_spu_coherency 204/0. v3: ALL_TRACKS 39/39, SLOW first_race PASS,
+run_all 7/8 (festival's own embedded first_race failed once; first_race
+alone passed). v5: ALL_TRACKS 39/39 (twice), SLOW first_race PASS,
+race_intro PASS, main_menu x2 PASS (after the stack fix), reach_entry,
+boot_past_fios, first_draw, first_frame, save_options, first_boot_fresh
+PASS. In one series at load 45-65, 2 of 3 v5 runs and 1 of 2 v5+PGO runs
+stopped presenting after the HUD (one with the SPU 0 ch-wait / NULL reads
+0x0,0x10,0x13 signature that default code also shows, 2 of ~12 default
+runs earlier); the next 8 side-by-side runs at load ~40 (4 default, 4 v5)
+all ran.
+
+work/tools/ppu_native_entries.py matches a native block's before/expect
+lines after folding `vm_*_stk` back and cutting at an XER update, so its
+func_00911128 block applies to a lift with these options too (the default
+lift: unchanged, `--check` reports 0 chunks).
 
 ### Tried, measured, dropped
 
@@ -2319,3 +2431,4 @@ failed inside its own first_race.sh run, see below).
   `perf2bolt -nl`; ext-tsp, hfsort+, split-functions): iTLB misses -73%, but
   lifted code 22% slower (96M vs 78M cycles a frame, twice).
 - `preserve_all` wrappers written in C (the clang bug above).
+- `--split-cr`: bigger code.
