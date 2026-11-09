@@ -21,13 +21,22 @@ if [ "$got" != "$EXPECT" ]; then
 fi
 
 name=$(basename "$ELF"); name="${name%.*}"
+# The PPU codegen (docs/NOTES.md, "PPU codegen performance"): FPRs/VRs in
+# locals, the lean memory paths (needs runtime/spu/spu_coherency.c's byte map),
+# r1-relative fast path, XER split, single-NaN-test FP, byte-keyed chunks.
+# PPU_LIFT_LEGACY=1 lifts as before (GPR locals only, line-keyed chunks).
+if [ -n "${PPU_LIFT_LEGACY:-}" ]; then
+    PPU_FLAGS="--local-regs"
+else
+    PPU_FLAGS="--local-regs --local-fprs --local-vrs --fast-mm --coh-bytemap --stack-fast --lean-fp --split-xer --chunks 140"
+fi
 rm -rf "$ROOT/work/src/recomp"
 mkdir -p "$ROOT/work/out" "$ROOT/work/src"
 "$PY" "$DIR/tools/ppu_loader.py" "$ELF" -o "$ROOT/work/out"
 "$PY" "$DIR/tools/ppu_lifter.py" "$ELF" \
     --functions "$ROOT/work/out/$name.functions.json" \
     --hle-stubs "$ROOT/work/out/$name.imports.json" \
-    --code-end 0x13d0468 --local-regs --output "$ROOT/work/src/recomp"
+    --code-end 0x13d0468 $PPU_FLAGS --output "$ROOT/work/src/recomp"
 # Native stand-ins for some lifted functions and loops (work/port/ppu_native.cpp).
 "$PY" "$ROOT/work/tools/ppu_native_entries.py" --recomp "$ROOT/work/src/recomp"
 "$PY" "$ROOT/work/tools/lift_spu.py" --toolkit "$DIR" --eboot "$ELF" --spu-dir "$ROOT/work/port/spu"

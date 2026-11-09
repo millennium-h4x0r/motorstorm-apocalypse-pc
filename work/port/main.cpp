@@ -733,6 +733,10 @@ int main(int argc, char** argv)
     /* Native AVX2 kernels for hot SPU job leaves (bit-exact, checked by
      * SPU_NATIVE_CHECK=1): dxtblendjob colour-index search. */
     env_default("SPU_NATIVE", "1");
+    /* Cheaper overlay checks on SPU GETs: sample before the full compare,
+     * and only GETs covering a fixed-address lift's first byte count. */
+    env_default("SPU_OVL_SAMPLE", "1");
+    env_default("SPU_OVL_STARTONLY", "1");
     /* Draw engine (docs/NOTES.md "Race rendering"): a pass sampling a sub-rect
      * of its own target reads a snapshot of it (the car AO boxes: without it,
      * black shadows), real 3D textures (the AO volumes), scissored clears,

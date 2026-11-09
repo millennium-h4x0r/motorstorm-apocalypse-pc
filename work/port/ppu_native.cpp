@@ -559,6 +559,9 @@ static int nat_hv_addjob(ppu_context* c)      /* 0x8BDB08(queue r3, job r4, r5) 
     if (!hv_on()) return 0;
     const uint32_t j = (uint32_t)c->gpr[4];
     hv_ppu(c, 1, (uint32_t)c->gpr[3], j, (uint32_t)c->gpr[5], vm_read32(j), vm_read32(j + 4), (uint32_t)c->lr);
+    /* the job's shared completion header [job+0xC] (word 0 = sub-jobs left) */
+    if ((vm_read32(j) >> 16) == 3u) { const uint32_t h = vm_read32(j + 0xC);
+        if (h) havok_trace_note(14, h, vm_read32(h), vm_read32(j + 8), (uint32_t)c->thread_id); }
     /* the raycast (type 3) job's whole 120 bytes, the first 64 times */
     if ((vm_read32(j) >> 16) == 3u) { static std::atomic<int> n;
         if (n.fetch_add(1) < 64) { fprintf(stderr, "[hv-job]");
@@ -599,12 +602,12 @@ extern "C" void havok_trace_dump(void)
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
     const uint64_t now = (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000u;
     static const char* nm[] = { "?", "addJob", "semAcq", "sem2", "batchWait", "batchBuild", "?", "?", "?", "?",
-                                "spuRet", "create", "spuStart", "?" };
+                                "spuRet", "create", "spuStart", "spuPut4", "hdrAtAdd", "?" };
     const uint32_t end = s_hv_pos.load(), k0 = end > 8192 ? end - 8192 : 0;
     for (uint32_t k = k0; k < end; k++) {
         const hv_ev& e = s_hv[k & 8191u];
         fprintf(stderr, "[havok-trace] -%.4f %s %s%u a=%08X b=%08X c=%08X d=%08X e=%08X f=%08X q=%X/%X/%X/%X\n", (now - e.t) / 1e6,
-                nm[e.kind < 14 ? e.kind : 13], e.tid & 0x80000000u ? "ppu" : "host", e.tid & 0x7FFFFFFFu,
+                nm[e.kind < 16 ? e.kind : 15], e.tid & 0x80000000u ? "ppu" : "host", e.tid & 0x7FFFFFFFu,
                 e.a, e.b, e.c, e.d, e.e, e.f, e.q[0], e.q[1], e.q[2], e.q[3]);
     }
 }

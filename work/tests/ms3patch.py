@@ -209,6 +209,18 @@ def havok_queue_dump(pid, vm_base, Q=0x14700F90):
         D = struct.unpack(">I", q[0x30:0x34])[0]
         d = rd(D, 0x250)
         sems = rd(0x146F7800, 0x200)   # the Havok semaphores (queue ones, and main's batch one at 0x146F7840)
+        # The last raycast (queue 3) job and its batch header: the 128-byte
+        # slot [D+0x7C] + 128*((tail-1) mod cap); its +8 is the semaphore it
+        # posts, +0xC the header whose word 0 counts the open sub-jobs (the
+        # finisher that takes it to 0 posts), +0x10 a done counter.
+        g = lambda o: struct.unpack(">I", d[o:o + 4])[0]
+        cap3 = g(0x80) or 1
+        job3 = (g(0x7C) + 128 * ((g(0x88) - 1) % cap3)) & 0xFFFFFFFF
+        j3 = rd(job3, 128)
+        hdr3 = struct.unpack(">I", j3[0xC:0x10])[0]
+        h3 = rd(hdr3, 16) if 0x10000 <= hdr3 < 0xC0000000 else b""
+        cnt3 = struct.unpack(">I", j3[0x10:0x14])[0]
+        c3 = rd(cnt3, 4) if 0x10000 <= cnt3 < 0xC0000000 else b""
     W = lambda b, o: struct.unpack(">I", b[o:o + 4])[0]
     H = lambda o: struct.unpack(">H", d[o:o + 2])[0]
     s = [f"vm_base {vm_base:#x} queue {Q:08X} mutex {W(q, 0):08X} rec {W(q, 4)} owner {W(q, 8):08X}{W(q, 12):08X} D {D:08X}"]
@@ -220,6 +232,10 @@ def havok_queue_dump(pid, vm_base, Q=0x14700F90):
                  f"head {W(d, o + 8)} tail {W(d, o + 12)} count {W(d, o + 16)}")
     s += [f"Q+{o:03X}: " + " ".join(f"{W(q, o + i):08X}" for i in range(0, 16, 4)) for o in range(0, 0x100, 0x10)]
     s += [f"D+{o:03X}: " + " ".join(f"{W(d, o + i):08X}" for i in range(0, 16, 4)) for o in range(0, 0x250, 0x10)]
+    s.append(f"last queue-3 job {job3:08X}: sem {W(j3, 8):08X} header {hdr3:08X} = "
+             + (" ".join(f"{W(h3, i):08X}" for i in range(0, 16, 4)) if h3 else "?")
+             + f"  done-counter {cnt3:08X} = " + (f"{W(c3, 0):08X}" if c3 else "?"))
+    s += [f"J {job3 + o:08X}: " + " ".join(f"{W(j3, o + i):08X}" for i in range(0, 16, 4)) for o in range(0, 128, 16)]
     s += [f"S {0x146F7800 + o:08X}: " + " ".join(f"{W(sems, o + i):08X}" for i in range(0, 16, 4)) for o in range(0, 0x200, 0x10)]
     return "\n".join(s) + "\n"
 

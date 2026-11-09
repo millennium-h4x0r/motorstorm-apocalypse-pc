@@ -17,7 +17,8 @@
 # title, MAIN MENU > FESTIVAL > Continue, the event's intro, and its results.
 # While the race HUD (yellow POS, bottom left) is up nothing is pressed. If
 # the car did not qualify the results offer only QUIT and RETRY RACE (SQUARE):
-# seen by QUIT's pink circle in the prompt, it presses SQUARE and CROSS (the
+# seen by QUIT's pink circle and RETRY's square without CONTINUE's blue cross
+# (qualified results show all three), it presses SQUARE and CROSS (the
 # retry asks to confirm); else CROSS. Done at the first
 # "[cellSaveData] SAVE complete" after a race HUD was seen: the event's
 # progress.
@@ -102,25 +103,35 @@ class Game:
         return mp.read_ppm(fr[-2]) if len(fr) > 1 else None
     def drive(self):
         """One step of the pad policy: hands off while the race HUD (yellow
-        POS) shows; SQUARE (RETRY RACE) on the not-qualified results, whose
-        prompt starts with QUIT's pink circle where CONTINUE's cross would
-        be; CROSS on anything else. A blind SQUARE also retried races that
-        had been won."""
+        POS) shows. The results screen (prompts QUIT's pink circle and RETRY
+        RACE's square, bottom right) gets CROSS (CONTINUE) when CONTINUE's
+        blue cross is there too -- qualified -- and SQUARE (RETRY RACE) only
+        when it is not. QUIT is on both, so its circle alone does not mean
+        "not qualified": that retried a race won in 1st place. CROSS on
+        anything else."""
         f = self.latest()
         if f is None: self.tap("CROSS"); return False
         w, h, px = f
-        # The not-qualified results first: their yellow "Cards Found" sits in
-        # the race HUD's POS box, and taking that screen for the race left it
+        # The results screens first: their yellow "Cards Found" sits in the
+        # race HUD's POS box, and taking that screen for the race left it
         # alone forever (two runs stuck an hour on QUIT / RETRY RACE).
-        failed = mp.count(px, w, h, (930, 962, 640, 668),
-                          lambda r, g, b: r > 190 and 70 < g < 160 and b > 100 and r - g > 60, 1) > 15
-        if not failed and mp.count(px, w, h, (40, 220, 560, 640),
-                                   lambda r, g, b: r > 200 and g > 150 and b < 90) > 25:
+        results = (mp.count(px, w, h, (930, 962, 640, 668),
+                            lambda r, g, b: r > 190 and 70 < g < 160 and b > 100 and r - g > 60, 1) > 15 and
+                   mp.count(px, w, h, (1028, 1052, 643, 662),
+                            lambda r, g, b: r > 150 and g > 110 and b > 120 and 15 < r - g < 70, 1) > 6 and
+                   mp.count(px, w, h, (1060, 1170, 643, 664),           # the white "RETRY RACE"
+                            lambda r, g, b: r > 215 and g > 215 and b > 215, 1) > 400)
+        if results:
+            qualified = mp.count(px, w, h, (790, 820, 640, 668),
+                                 lambda r, g, b: b > 150 and b - r > 40, 1) > 8
+            if qualified:
+                self.tap("CROSS")                 # CONTINUE
+            else:                                 # RETRY RACE, then CROSS on its "are you sure"
+                self.tap("SQUARE"); time.sleep(1.5); self.tap("CROSS")
+            return False
+        if mp.count(px, w, h, (40, 220, 560, 640), lambda r, g, b: r > 200 and g > 150 and b < 90) > 25:
             return True
-        if failed:                            # RETRY RACE, then CROSS on its "are you sure"
-            self.tap("SQUARE"); time.sleep(1.5); self.tap("CROSS")
-        else:
-            self.tap("CROSS")
+        self.tap("CROSS")
         return False
     def new_worlds(self, t):
         """Track worlds the game reads, in order. The boot reads a header of
