@@ -22,7 +22,8 @@ typedef struct port_settings {
     char text[24];      /* the text language (PS3_TEXT_LANG, and PS3_SYS_LANG from it) */
     /* [performance] */
     int fps_limit;      /* 0 none, else frames a second */
-    int fps_counter;    /* the counter drawn by the UI */
+    int fps_counter;    /* the performance HUD: 0 off, 1 detailed, 2 compact (F10) */
+    int frame_rate;     /* PS3_SIM_FPS: 60, or 30 (every second vblank, as the PS3) */
     int record_thread;  /* PS3RECOMP_BE_THREAD */
     /* [launcher] */
     int skip_launcher;  /* open the game without the start screen */
@@ -50,7 +51,7 @@ enum {
     PORT_PIN_SCALE = 1 << 0, PORT_PIN_FULLSCREEN = 1 << 1, PORT_PIN_VSYNC = 1 << 2,
     PORT_PIN_STRETCH = 1 << 3, PORT_PIN_DISPLAY = 1 << 4, PORT_PIN_VOICE = 1 << 5,
     PORT_PIN_TEXT = 1 << 6, PORT_PIN_FPS_LIMIT = 1 << 7, PORT_PIN_RECORD_THREAD = 1 << 8,
-    PORT_PIN_PARTICLES = 1 << 9, PORT_PIN_ANISO = 1 << 10,
+    PORT_PIN_PARTICLES = 1 << 9, PORT_PIN_ANISO = 1 << 10, PORT_PIN_FRAME_RATE = 1 << 11,
 };
 
 /* Before port_settings_export: each field whose variable is set takes the

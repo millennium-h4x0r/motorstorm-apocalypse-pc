@@ -414,6 +414,31 @@ static void sim_patch_consts(void)
     }
 }
 static std::atomic<uint32_t> s_sim_clock;
+/* The frame rate the player picked (PS3_SIM_FPS, settings frame_rate, the
+ * menu's Frame rate): 60 is vsync interval 1, 30 is the game's interval 2
+ * (every second vblank, an even 30 for a host that cannot hold 60). The
+ * clock stays real-time either way. port_sim_set_fps changes it live: the
+ * present reads the interval from the clock source every frame. */
+static std::atomic<uint32_t> s_sim_iv{0};
+static uint32_t sim_interval(void)
+{
+    uint32_t v = s_sim_iv.load(std::memory_order_relaxed);
+    if (!v) {
+        const char* e = getenv("PS3_SIM_FPS");
+        v = (e && atoi(e) == 30) ? 2u : 1u;
+        s_sim_iv.store(v, std::memory_order_relaxed);
+    }
+    return v;
+}
+extern "C" void port_sim_set_fps(int fps)
+{
+    const uint32_t iv = fps == 30 ? 2u : 1u;
+    s_sim_iv.store(iv, std::memory_order_relaxed);
+    const uint32_t src = s_sim_clock.load(std::memory_order_relaxed);
+    if (src && sim60_on()) vm_write32(src + 0x18, iv);
+    fprintf(stderr, "[sim60] frame rate %d (vsync interval %u)\n", iv == 2 ? 30 : 60, iv);
+}
+extern "C" int port_sim_fps(void) { return sim60_on() ? (sim_interval() == 2 ? 30 : 60) : 30; }
 static int nat_clock_ctor(ppu_context* c)      /* 0x5EE2A4(this r3) */
 {
     if (sim60_on()) {
@@ -421,7 +446,7 @@ static int nat_clock_ctor(ppu_context* c)      /* 0x5EE2A4(this r3) */
         if (!once.exchange(1)) sim_patch_consts();
         const uint32_t src = (uint32_t)c->gpr[3];
         if (s_sim_clock.exchange(src) != src)
-            fprintf(stderr, "[sim60] game clock source at 0x%08X: real-time, vsync interval 1\n", src);
+            fprintf(stderr, "[sim60] game clock source at 0x%08X: real-time, vsync interval %u\n", src, sim_interval());
     }
     return 0;
 }
@@ -429,15 +454,15 @@ static int nat_clock_recompute(ppu_context* c) /* 0x5EE178(this r3) */
 {
     const uint32_t src = (uint32_t)c->gpr[3];
     if (!src || src != s_sim_clock.load(std::memory_order_relaxed)) return 0;
-    const uint32_t iv = vm_read32(src + 0x18), rt = vm_read32(src + 0x1C);
-    if (rt == 1 && iv <= 1) return 0;
+    const uint32_t iv = vm_read32(src + 0x18), rt = vm_read32(src + 0x1C), want = sim_interval();
+    if (rt == 1 && iv == want) return 0;
     vm_write32(src + 0x1C, 1u);
-    if (iv > 1) vm_write32(src + 0x18, 1u);
+    if (iv != want) vm_write32(src + 0x18, want);
     static std::atomic<int> told;
     if (told.fetch_add(1, std::memory_order_relaxed) < 16)
         fprintf(stderr, "[sim60] clock 0x%08X set to %u Hz, interval %u, %s (caller 0x%08X): "
-                "made real-time, interval 1\n", src, vm_read32(src + 0x10), iv, rt ? "real-time" : "fixed step",
-                (uint32_t)c->lr);
+                "made real-time, interval %u\n", src, vm_read32(src + 0x10), iv, rt ? "real-time" : "fixed step",
+                (uint32_t)c->lr, want);
     return 0;
 }
 

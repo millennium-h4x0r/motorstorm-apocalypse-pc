@@ -31,7 +31,7 @@ Vulkan. The runtime started as a copy of the
 | Races, all single-player modes | 🔧 The Prologue race runs start to finish with correct lighting, shadows and anti-aliasing; every track is being checked (~20–30 fps today) |
 | Split-screen (2–4 players) | 🔧 2- and 4-player races start and render correctly; performance not tuned yet |
 | Audio, saves, controllers | 🔧 Saves and virtual pads work; race audio plays (firmware MP3 decoder lifted from your dev_flash) |
-| Port menu, options (F1), up to 4K, unlocked 60+ fps simulation | 🔧 Real-time simulation without the 30 fps cap (`PS3_SIM_60`, on); frame rate is the current focus |
+| Port menu, options (F1), up to 4K, unlocked 60+ fps simulation | 🔧 Real-time simulation without the 30 fps cap (`PS3_SIM_60`, on); Frame rate 60 or 30 (F1 > Performance); performance HUD (F10); a steady 60 is the current focus |
 | Online play | ❌ Not planned (the servers are gone) |
 | Windows | ❌ Not yet: the Vulkan backend is Linux-only |
 

@@ -1773,6 +1773,21 @@ work.
   them off with the other natives). Log: `[sim60] game clock source at ...`
   once, `[sim60] clock ... made real-time` for the first 16 fixes (two at
   boot: the setup's flag and interval).
+- Frame rate: `PS3_SIM_FPS=60` (default) or `30` (settings.ini
+  `[performance] frame_rate`, the F1 menu's Frame rate, live via
+  `port_sim_set_fps`). 30 keeps the game's interval 2 (a flip every second
+  vblank) with the real-time clock. Measured windowed, 1x, menu (2026-11-09):
+  60 gives 45-49 presents/s, which on a 60 Hz screen alternates 1 and 2
+  refreshes a frame (the judder players see); 30 gives 30.0 presents/s.
+  Until the host holds 60, 30 is the smooth choice. Mailbox is missing on
+  COSMIC's Wayland surface (modes: fifo, immediate, fifo-latest-ready), so
+  `vsync = 0` falls back to immediate.
+- Performance HUD (ui.cpp, after the Pacific Rift port's): F10 cycles
+  detailed (fps against the target, avg/worst ms, 1% low, the share of
+  frame-to-frame swings over 4 ms, a frame-time graph, render size, draws,
+  process CPU), compact (fps only) and off; `fps_counter` 0/1/2. F2-F10 and
+  F12 reach the port through `rsx_ui_set_hotkey` (libs/video/rsx_ui.cpp);
+  PS3RECOMP_UI_KEYS takes F10.
 - `GCM_VBLANK_EACH=1` (set by main.cpp with PS3_SIM_60): the runtime calls the
   vblank handler once per vblank. The RSX thread ticks the 60 Hz vblanks it
   owes in a burst after each drain, and the pump folded them into one pending

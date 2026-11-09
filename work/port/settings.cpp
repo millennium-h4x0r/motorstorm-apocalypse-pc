@@ -52,6 +52,7 @@ void port_settings_defaults(port_settings* s)
     snprintf(s->text, sizeof s->text, "english");
     s->fps_limit = 0;
     s->fps_counter = 0;
+    s->frame_rate = 60;
     s->record_thread = 1;
     s->skip_launcher = 0;
     s->fullres_particles = 1;
@@ -110,7 +111,8 @@ int port_settings_load(port_settings* s, const char* path)
             else if (k == "text" && lang_known(v.c_str())) snprintf(s->text, sizeof s->text, "%s", v.c_str());
         } else if (section == "performance") {
             if (k == "fps_limit") set_int(&s->fps_limit, v, 0, 1000);
-            else if (k == "fps_counter") set_int(&s->fps_counter, v, 0, 1);
+            else if (k == "fps_counter") set_int(&s->fps_counter, v, 0, 2);
+            else if (k == "frame_rate") { int n = 60; set_int(&n, v, 30, 60); s->frame_rate = n == 30 ? 30 : 60; }
             else if (k == "record_thread") set_int(&s->record_thread, v, 0, 1);
         } else if (section == "launcher") {
             if (k == "skip") set_int(&s->skip_launcher, v, 0, 1);
@@ -140,6 +142,7 @@ int port_settings_save(const port_settings* in, const char* path)
     if (s_pinned & PORT_PIN_RECORD_THREAD) out.record_thread = s_file.record_thread;
     if (s_pinned & PORT_PIN_PARTICLES)     out.fullres_particles = s_file.fullres_particles;
     if (s_pinned & PORT_PIN_ANISO)         out.aniso = s_file.aniso;
+    if (s_pinned & PORT_PIN_FRAME_RATE)    out.frame_rate = s_file.frame_rate;
     std::string dir = path;
     const size_t slash = dir.find_last_of("/\\");
     if (slash != std::string::npos) {
@@ -169,7 +172,8 @@ int port_settings_save(const port_settings* in, const char* path)
             "text = %s\n"
             "\n[performance]\n"
             "fps_limit = %d      ; 0 = none\n"
-            "fps_counter = %d\n"
+            "fps_counter = %d    ; performance HUD: 0 off, 1 detailed, 2 compact (F10)\n"
+            "frame_rate = %d     ; 60, or 30 (every second refresh, as on the PS3)\n"
             "record_thread = %d\n"
             "\n[launcher]\n"
             "skip = %d\n"
@@ -178,7 +182,7 @@ int port_settings_save(const port_settings* in, const char* path)
             "aniso = %d             ; 0 = the game's own, 2..16\n"
             "enabled = %s ; mod folders under mods/, in load order (later wins)\n",
             s->scale, s->fullscreen, s->vsync, s->stretch, s->display,
-            s->voice, s->text, s->fps_limit, s->fps_counter, s->record_thread,
+            s->voice, s->text, s->fps_limit, s->fps_counter, s->frame_rate, s->record_thread,
             s->skip_launcher, s->fullres_particles, s->aniso, s->mods_on);
     const int ok = fclose(f) == 0;
 #ifdef _WIN32
@@ -227,6 +231,7 @@ unsigned port_settings_from_env(port_settings* s)
         snprintf(s->text, sizeof s->text, "%s", v); pin |= PORT_PIN_TEXT;
     }
     if ((v = getenv("PS3RECOMP_FPS_LIMIT")))     { s->fps_limit = atoi(v) < 0 ? 0 : atoi(v); pin |= PORT_PIN_FPS_LIMIT; }
+    if ((v = getenv("PS3_SIM_FPS")))             { s->frame_rate = atoi(v) == 30 ? 30 : 60; pin |= PORT_PIN_FRAME_RATE; }
     if ((v = getenv("PS3RECOMP_BE_THREAD")))     { s->record_thread = env_on(v); pin |= PORT_PIN_RECORD_THREAD; }
     if ((v = getenv("PS3RECOMP_FULLRES_PARTICLES"))) { s->fullres_particles = env_on(v); pin |= PORT_PIN_PARTICLES; }
     if ((v = getenv("PS3RECOMP_ANISO")))         { s->aniso = atoi(v) < 0 ? 0 : atoi(v) > 16 ? 16 : atoi(v); pin |= PORT_PIN_ANISO; }
@@ -287,6 +292,7 @@ void port_settings_export(const port_settings* s)
     put("PS3_SYS_LANG", sys);
     snprintf(b, sizeof b, "%d", s->fps_limit);     put("PS3RECOMP_FPS_LIMIT", b);
     put("PS3RECOMP_BE_THREAD", s->record_thread ? "1" : "0");
+    put("PS3_SIM_FPS", s->frame_rate == 30 ? "30" : "60");
     /* The GPU reads the guest's vertex bytes itself: in inFAMOUS 2 the CPU
      * fetch it replaces made turning the camera drop to ~40 fps in the city,
      * where most geometry was rebuilt by the SPUs every frame. */
