@@ -733,6 +733,11 @@ int main(int argc, char** argv)
     /* Native AVX2 kernels for hot SPU job leaves (bit-exact, checked by
      * SPU_NATIVE_CHECK=1): dxtblendjob colour-index search. */
     env_default("SPU_NATIVE", "1");
+    /* Six SPURS SPUs where the game asks for five (the PS3 gave a title six;
+     * 7 and 8 hang at boot). The main thread waits on SPU job batches for
+     * ~4 ms a frame with the SPUs ~90% busy: 54.3 -> 56.4 fps (1P race,
+     * whole machine, 2026-11-10). */
+    env_default("SPURS_NSPUS_MIN", "6");
     /* Cheaper overlay checks on SPU GETs: sample before the full compare,
      * and only GETs covering a fixed-address lift's first byte count. */
     env_default("SPU_OVL_SAMPLE", "1");

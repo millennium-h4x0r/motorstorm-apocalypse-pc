@@ -33,6 +33,12 @@ if [ -z "${PORT_SPU_MARCH:-}" ]; then
     fi
 fi
 MARCH="$PORT_SPU_MARCH"
+# The lifted PPU code's PGO profile (CMakeLists.txt PORT_PPU_PROFILE): used
+# when work/pgo/ppu.profdata exists (it is not in git: an instrumented build
+# and a training run make it, docs/NOTES.md "PGO"); PORT_PPU_PROFILE=<file>
+# picks another, PORT_PPU_PROFILE= none. clang only.
+PROFILE="${PORT_PPU_PROFILE-$ROOT/work/pgo/ppu.profdata}"
+if [ -n "${PORT_PPU_GCC:-}" ] || [ ! -f "$PROFILE" ]; then PROFILE=""; fi
 
 [ -f "$ROOT/work/src/recomp/ppu_recomp.h" ] || { echo "nothing lifted yet -- run scripts/lift.sh" >&2; exit 1; }
 
@@ -41,7 +47,8 @@ configure() {   # <build dir> <vulkan ON|OFF>
         -DPS3RECOMP_DIR="$DIR" -DRECOMP_DIR="$ROOT/work/src/recomp" -DSPU_DIR="$PORT/spu" \
         -DPS3RECOMP_RSX_VULKAN="$2" -DPython3_EXECUTABLE="${PYTHON:-$ROOT/.venv/bin/python}" -DPORT_SPU_MARCH="$MARCH" \
         -DCMAKE_C_COMPILER_LAUNCHER="$PORT/tools/spu_cc.sh" \
-        -DCMAKE_CXX_COMPILER_LAUNCHER="$PORT/tools/ppu_cxx.sh"
+        -DCMAKE_CXX_COMPILER_LAUNCHER="$PORT/tools/ppu_cxx.sh" \
+        -DPORT_PPU_PROFILE="$PROFILE"
 }
 build() {
     if command -v systemd-run >/dev/null && systemd-run --user --scope -q true 2>/dev/null; then

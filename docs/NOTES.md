@@ -2447,3 +2447,63 @@ lift: unchanged, `--check` reports 0 chunks).
   lifted code 22% slower (96M vs 78M cycles a frame, twice).
 - `preserve_all` wrappers written in C (the clang bug above).
 - `--split-cr`: bigger code.
+
+## Toward 60 fps: the critical path (2026-11-10)
+
+1P race (work/codegen/bench.py, union_v1, 30 s windows), the whole 5950X
+(two 8-core CCDs, 16 cores / 32 threads) unpinned, as players run it. Runs of
+one binary differ by about +-2 fps, so changes are read over pairs.
+
+### What the frame waits on
+
+- Causal test (`PS3_CAUSAL_MAIN_US` / `PS3_CAUSAL_RSX_US`, cellGcmSys.c:
+  spin N us once a frame on that thread): +3 ms on the main PPU thread took
+  56.5 -> 49.6 fps (+2.4 ms a frame, ~80% on the critical path); +3 ms on
+  the RSX thread changed nothing. The frame is the main thread: ~8.5 ms of
+  its own CPU plus its waits.
+- Its waits a frame (`PS3_MAIN_WAITPROF`, `PS3_LOCK_STATS`): ~3.8 ms at
+  0x45ADA8 (the per-frame driver func_0045AC74 waiting on an event that the
+  "JobBatchHandler" PPU thread, tid 3, sets when an SPU job batch is done:
+  `PS3_LOCK_WATCH_SITE=45ADA8` puts the waited word under SPU_LINE_WATCH and
+  showed thread 3 releasing it), ~1.9 ms in three event-queue receives,
+  0.35 ms on the lock at 0x5D3100, 0.2 ms polling a frame counter
+  (0x6BC824: `while ([o+0x2700] != [o+0x5C0]) usleep(100)`).
+- During the 0x45ADA8 wait the SPUs are 5.4 of 6 busy, mostly pvsjob, then
+  screenrushjob and renderablejob (`PS3_TIMELINE` window, kspu samples).
+  dxtblendjob, the biggest job by SPU time, runs outside those waits.
+- Present intervals are not quantized to the vblank: 14-20 ms, mean 17.1 ms
+  (`PS3RECOMP_VK_HITCH=0`).
+
+### Changes
+
+- Direct SPU tail calls (spu_drain.c): `spu_direct_init` turned them off
+  ("no musttail in this compiler") because the runtime is built by GCC,
+  while the lifted SPU code that reads the flag is built by clang and has
+  musttail. Every chunk-to-chunk hop went through the trampoline loop
+  (~750 M fallbacks per 10 s; `SPU_DIRECT_STATS=1` counts them by reason).
+  On: ~0.1 M, and 54.6 -> 56.4 fps at 6 SPUs.
+- Six SPURS SPUs (`SPURS_NSPUS_MIN=6`, main.cpp default): 54.3 -> 56.4 fps.
+  7 and 8 hang at boot.
+- PGO for the lifted PPU code (`work/pgo/ppu.profdata`, not in git; CMake
+  PORT_PPU_PROFILE, scripts/build.sh): main thread 8.9-9.1 -> 8.3-8.5 ms a
+  frame, 56-57 -> 58-59 fps.
+- dxtblendjob natives for the DXT1 block decode (0x4358) and the min/max
+  (0x4030), beside the colour-index search (0x4250): the same SPU helpers on
+  the same values, so exact (SPU_NATIVE_CHECK: 0 mismatches in 47 k / 95 k
+  checked calls). Less SPU time, no fps change (off the critical path).
+- Diagnostics: `PS3_LOCK_STATS` also prints `[lock-hold]` (holders per
+  thread, site and lock, and event Set callers with the site's top bit set).
+
+### Tried, no gain
+
+- `PS3_HOT_PIN=1` (a core each for main, rsx, rsx-record, SPUs 0-4 on
+  CPUs 0-7): 54.6 / 55.1 vs 58.2 unpinned.
+- `PS3_USLEEP_YIELD=1`: 56.3 / 56.3 vs 57.2 / 58.6.
+- `SPURS_IDLE_SPIN_US=2000` (default 200): no change.
+
+### Where it stands
+
+58-59 fps average (1P race, whole machine). What is left on the path: the
+main thread's own CPU (runtime overhead ~18% of it: notify_spus, ppu_lookup,
+ll_take, reservation helpers) and pvsjob's batch (about half of pvsjob's SPU
+time is DMA handling: gm_copy_from, spu_overlay_note_get, MFC).

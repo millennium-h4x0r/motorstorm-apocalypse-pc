@@ -66,6 +66,14 @@ endif()
 list(LENGTH RECOMP_SOURCES RECOMP_SOURCE_COUNT)
 message(STATUS "Lifted sources:  ${RECOMP_SOURCE_COUNT} file(s)")
 
+# Profile-guided optimisation of the lifted PPU code: PORT_PPU_PROFILE is an
+# llvm .profdata from an instrumented build of the same lift (scripts/build.sh
+# passes work/pgo/ppu.profdata when it exists; docs/NOTES.md "PGO"). About
+# -7% main-thread CPU per frame, which is the frame's critical path. A profile
+# of another lift only loses its effect on the functions that changed.
+set(PORT_PPU_PROFILE "" CACHE FILEPATH "llvm .profdata for the lifted PPU sources (empty: none)")
+# (applied with the lifted sources' other options, below)
+
 # ---------------------------------------------------------------------------
 # ps3recomp runtime library
 # ---------------------------------------------------------------------------
@@ -379,6 +387,11 @@ else()
     set(_ppu_opts "-w;-ffp-contract=off")
     if(PORT_PPU_MARCH AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
         list(APPEND _ppu_opts "-march=${PORT_PPU_MARCH}")
+    endif()
+    if(PORT_PPU_PROFILE AND EXISTS "${PORT_PPU_PROFILE}")
+        list(APPEND _ppu_opts "-fprofile-use=${PORT_PPU_PROFILE}" "-fsplit-machine-functions"
+             "-Wno-profile-instr-out-of-date" "-Wno-profile-instr-unprofiled")
+        message(STATUS "Lifted PPU PGO:  ${PORT_PPU_PROFILE}")
     endif()
     set_source_files_properties(${RECOMP_SOURCES} PROPERTIES COMPILE_OPTIONS "${_ppu_opts}"
         COMPILE_DEFINITIONS PPU_INLINE_STORES)

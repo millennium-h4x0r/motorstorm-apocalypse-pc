@@ -129,3 +129,127 @@ static int native_4250(spu_context* ctx, uint32_t* out)
     return 0;
 #endif
 }
+
+/* ---- dxtblendjob's DXT1 block decode (LS 0x4358) and min/max (LS 0x4030) ----
+ *
+ * Both run the same SPU float helpers on the same values as the lift, so
+ * they are exact by construction; what they drop is the lift's traffic:
+ * the stack table, the dead stores and the register spills of an 80-vector
+ * SPU function on a 16-register host. Only the outputs the callers read are
+ * written; volatile registers are left as they were (the SPU ABI's callers,
+ * 0x4608 and 0x463C, redefine every one they use). An input layout other
+ * than the expected one returns 0 and the lifted body runs.
+ *
+ * SPU_NATIVE_CHECK=1 checks every 1024th call of each against the lifted
+ * function on a copy of the context sharing the local store: the native
+ * outputs are saved, the lift runs (and rewrites the same bytes), and the
+ * two are compared. */
+static void native_ret(spu_context* ctx)
+{
+    ctx->pc = ctx->gpr[0]._u32[0];
+    if (ctx->host_depth == 0) g_spu_trampoline_fn = spu_indirect_branch;
+}
+static int native_check_on(void)
+{
+    static int s = -1;
+    if (__builtin_expect(s < 0, 0)) s = getenv("SPU_NATIVE_CHECK") ? 1 : 0;
+    return s;
+}
+/* Run `lifted` on a copy of ctx (same local store) and compare the n bytes at
+ * each of up to two LS ranges with what the stand-in left there. */
+static void native_check(spu_context* ctx, void (*lifted)(spu_context*), const char* what,
+                         uint32_t a0, uint32_t n0, uint32_t a1, uint32_t n1,
+                         unsigned long long* calls, unsigned long long* checks, unsigned long long* bad)
+{
+    if ((__atomic_fetch_add(calls, 1, __ATOMIC_RELAXED) & 1023) != 0) return;
+    uint8_t want0[256], want1[256];
+    if (n0 > 256 || n1 > 256) return;
+    for (uint32_t i = 0; i < n0; i++) want0[i] = ctx->ls[(a0 + i) & SPU_LS_MASK];
+    for (uint32_t i = 0; i < n1; i++) want1[i] = ctx->ls[(a1 + i) & SPU_LS_MASK];
+    spu_context* c2 = (spu_context*)malloc(sizeof(spu_context));
+    if (!c2) return;
+    memcpy(c2, ctx, sizeof(spu_context));
+    if (ctx->ls == ctx->ls_store) c2->ls = ctx->ls;   /* the same local store */
+    t_busy = 1;
+    lifted(c2);
+    t_busy = 0;
+    int diff = 0;
+    for (uint32_t i = 0; i < n0; i++) diff |= want0[i] != ctx->ls[(a0 + i) & SPU_LS_MASK];
+    for (uint32_t i = 0; i < n1; i++) diff |= want1[i] != ctx->ls[(a1 + i) & SPU_LS_MASK];
+    const unsigned long long k = __atomic_add_fetch(checks, 1, __ATOMIC_RELAXED);
+    if (diff) {
+        const unsigned long long b = __atomic_add_fetch(bad, 1, __ATOMIC_RELAXED);
+        if (b <= 8) fprintf(stderr, "[spu-native] dxtblend %s MISMATCH (lifted result kept)\n", what);
+    }
+    if ((k & 0x3FF) == 1) fprintf(stderr, "[spu-native] dxtblend %s checks: %llu, mismatches %llu\n", what, k, *bad);
+    free(c2);
+}
+static inline int ls_range_overlap(uint32_t a, uint32_t an, uint32_t b, uint32_t bn)
+{
+    return a < b + bn && b < a + an;
+}
+
+extern void jobmod_d6cae8b8000a_e11C8_spu_func_00004030(spu_context* ctx);
+extern void jobmod_d6cae8b8000a_e11C8_spu_func_00004358(spu_context* ctx);
+
+/* 0x4030(r3 -> 16 pixels, r4 -> min, r5 -> max): per lane, the min of 1.0 and
+ * the pixels, and the max of 0.0 and the pixels, by fcgt/selb in pixel order. */
+int spu_native_jobmod_d6cae8b8000a_e11C8_spu_func_00004030(spu_context* ctx)
+{
+    if (t_busy) return 0;
+    const uint32_t r3 = ctx->gpr[3]._u32[0] & SPU_LS_MASK, r4 = ctx->gpr[4]._u32[0] & SPU_LS_MASK,
+                   r5 = ctx->gpr[5]._u32[0] & SPU_LS_MASK;
+    if ((r3 | r4 | r5) & 15u || r3 + 256u > SPU_LS_MASK + 1u || r4 == r5 ||
+        ls_range_overlap(r3, 256, r4, 16) || ls_range_overlap(r3, 256, r5, 16)) return 0;
+    u128 m = spu_splat_u32(0x3F800000u), M = spu_splat_u32(0);
+    u128 p[16];
+    for (int i = 0; i < 16; i++) p[i] = spu_ls_read128(ctx, r3 + 16u * (uint32_t)i);
+    for (int i = 0; i < 16; i++) m = spu_selb(m, p[i], spu_fcgt(m, p[i]));
+    for (int i = 0; i < 16; i++) M = spu_selb(M, p[i], spu_fcgt(p[i], M));
+    spu_ls_write128(ctx, r4, m);
+    spu_ls_write128(ctx, r5, M);
+    if (native_check_on()) {
+        static unsigned long long calls, checks, bad;
+        native_check(ctx, jobmod_d6cae8b8000a_e11C8_spu_func_00004030, "4030", r4, 16, r5, 16, &calls, &checks, &bad);
+    }
+    native_ret(ctx);
+    return 1;
+}
+
+/* 0x4358(r3 -> an 8-byte DXT1 block, r4 -> 16 pixels out): colours c0, c1
+ * (little-endian RGB565 at r3, r3+2) as floats [R, G, B, 0] times the scale
+ * at LS 0x54F0; d = c1 - c0; palette c0, c1, c0 + d/3, c0 + 2d/3 when
+ * c0 > c1, else c0, c1, c0 + d/2, 0; pixel k = palette[(idx >> 2k) & 3],
+ * idx the big-endian word at r3 + 4. */
+int spu_native_jobmod_d6cae8b8000a_e11C8_spu_func_00004358(spu_context* ctx)
+{
+    if (t_busy) return 0;
+    const uint32_t r3 = ctx->gpr[3]._u32[0] & SPU_LS_MASK, r4 = ctx->gpr[4]._u32[0] & SPU_LS_MASK;
+    if ((r3 & 7u) || (r4 & 15u) || r4 + 256u > SPU_LS_MASK + 1u ||
+        ls_range_overlap(r4, 256, r3, 8) || ls_range_overlap(r4, 256, 0x54F0, 16)) return 0;
+    const uint8_t* b = &ctx->ls[r3];
+    const uint32_t c0 = (uint32_t)b[0] | (uint32_t)b[1] << 8, c1 = (uint32_t)b[2] | (uint32_t)b[3] << 8;
+    const uint32_t idx = (uint32_t)b[4] << 24 | (uint32_t)b[5] << 16 | (uint32_t)b[6] << 8 | b[7];
+    u128 i0, i1;
+    i0._u32[0] = (c0 >> 11) & 31u; i0._u32[1] = (c0 >> 5) & 63u; i0._u32[2] = c0 & 31u; i0._u32[3] = 0;
+    i1._u32[0] = (c1 >> 11) & 31u; i1._u32[1] = (c1 >> 5) & 63u; i1._u32[2] = c1 & 31u; i1._u32[3] = 0;
+    const u128 scale = spu_ls_read128(ctx, 0x54F0);
+    const u128 f0 = spu_fm(spu_csflt(i0, 155), scale), f1 = spu_fm(spu_csflt(i1, 155), scale);
+    const u128 d = spu_fs(f1, f0);
+    u128 pal[4];
+    pal[0] = f0; pal[1] = f1;
+    if (c0 > c1) {
+        pal[2] = spu_fma(d, spu_splat_u32(0x3EAAAAAAu), f0);
+        pal[3] = spu_fma(d, spu_splat_u32(0x3F2AAAAAu), f0);
+    } else {
+        pal[2] = spu_fma(d, spu_splat_u32(0x3F000000u), f0);
+        pal[3] = spu_splat_u32(0);
+    }
+    for (uint32_t k = 0; k < 16; k++) spu_ls_write128(ctx, r4 + 16u * k, pal[(idx >> (2u * k)) & 3u]);
+    if (native_check_on()) {
+        static unsigned long long calls, checks, bad;
+        native_check(ctx, jobmod_d6cae8b8000a_e11C8_spu_func_00004358, "4358", r4, 256, 0, 0, &calls, &checks, &bad);
+    }
+    native_ret(ctx);
+    return 1;
+}

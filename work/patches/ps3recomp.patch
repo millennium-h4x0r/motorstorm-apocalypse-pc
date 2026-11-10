@@ -12586,7 +12586,7 @@ index b1972b11..52086325 100644
  {
      if (argc < 2 || strlen(argv[1]) >= sizeof s_save_root) {
 diff --git a/libs/video/cellGcmSys.c b/libs/video/cellGcmSys.c
-index 298ee7de..4d752ffc 100644
+index 298ee7de..e5e7e448 100644
 --- a/libs/video/cellGcmSys.c
 +++ b/libs/video/cellGcmSys.c
 @@ -182,6 +182,24 @@ static void gcm_fifo_flip_resets_state(rsx_state* state)
@@ -13527,7 +13527,7 @@ index 298ee7de..4d752ffc 100644
 +                s_acq_since = now; s_acq_told = 0;
 +                s_acq_since_us = ps3_qpc_us();
 +                if (g_ps3_tl) ps3_tl("acq-wait", s_sema_offset, v);
-             }
++            }
 +            const u32 cur = vm_read32(la);
 +            const int behind = (s32)(cur - v) < 0;
 +            const int in_time = (long)(now - s_acq_since) < tmo;
@@ -13545,7 +13545,7 @@ index 298ee7de..4d752ffc 100644
 +            if (wait) {
 +                if (PS3_FT_ON() && !s_ft_sema_t0) s_ft_sema_t0 = ps3_ft_now();
 +                sem_blocked = 1; sem_waiting = 1; break;
-+            }
+             }
 +            s_acq_off = ~0u;              /* passed: the next wait starts afresh */
          }
                  }
@@ -13710,7 +13710,29 @@ index 298ee7de..4d752ffc 100644
      ReleaseSRWLockExclusive(&s_ref_pub_lock);
  }
  
-@@ -3150,6 +3823,10 @@ static int gcm_flip_into_fifo(u32 ctx, u32 bufferId)
+@@ -3045,8 +3718,21 @@ u32 cellGcm_display_buffer_count(void)
+     return n;
+ }
+ 
++/* PS3_CAUSAL_MAIN_US / PS3_CAUSAL_RSX_US (experiments, causal profiling):
++ * spin that many microseconds once a frame on the thread that requests the
++ * flip / presents it. If the frame time grows by the same amount, that
++ * thread is on the frame's critical path. */
++void ps3_causal_spin(const char* var, int* cache)
++{
++    if (*cache < 0) { const char* e = getenv(var); *cache = e ? atoi(e) : 0; }
++    if (*cache <= 0) return;
++    struct timespec t0, t; clock_gettime(CLOCK_MONOTONIC, &t0);
++    do { clock_gettime(CLOCK_MONOTONIC, &t); }
++    while ((t.tv_sec - t0.tv_sec) * 1000000000LL + (t.tv_nsec - t0.tv_nsec) < (long long)*cache * 1000LL);
++}
+ static s32 gcm_flip_request(u32 bufferId, int in_fifo)
+ {
++    { static int us = -1; ps3_causal_spin("PS3_CAUSAL_MAIN_US", &us); }
+     /* GCM_FLIPCOUNT=1: every flip, with a timestamp. FLIP_DBG caps at 20 lines,
+      * which answers "did it ever flip?" and not "is it still flipping, and how
+      * fast?" -- the question that matters when a title stops appearing on
+@@ -3150,6 +3836,10 @@ static int gcm_flip_into_fifo(u32 ctx, u32 bufferId)
      const u32 end = vm_read32(ctx + 4), cur = vm_read32(ctx + 8);
      /* Never near the end: those bytes are the title's reserve before its
       * ring wraps, and the recycle above keys on them. */
@@ -13721,7 +13743,7 @@ index 298ee7de..4d752ffc 100644
      if (cur + 8 + GCM_RECYCLE_SLACK > end || gcm_ea2io(cur) == 0xFFFFFFFFu) return 0;
      vm_write32(cur, GCM_FLIP_MARKER | bufferId);
      s_fifo_flips_queued++;
-@@ -4036,7 +4713,7 @@ s32 cellGcmMapLocalMemory(u32* address, u32* size)
+@@ -4036,7 +4726,7 @@ s32 cellGcmMapLocalMemory(u32* address, u32* size)
  
      /* Guest out-params, like every other pointer parameter in this file. */
      vm_write32((uint32_t)(uintptr_t)address, s_config.localAddress);
@@ -15714,7 +15736,7 @@ index c4e4d849..ff1d4eac 100644
  /* ---- decoded state getters -------------------------------------------- */
  
 diff --git a/libs/video/rsx_draw_engine.c b/libs/video/rsx_draw_engine.c
-index 8dff6011..a19078e6 100644
+index 8dff6011..3089d416 100644
 --- a/libs/video/rsx_draw_engine.c
 +++ b/libs/video/rsx_draw_engine.c
 @@ -1,3 +1,9 @@
@@ -22499,7 +22521,7 @@ index 8dff6011..a19078e6 100644
          }
      }
  }
-@@ -3352,20 +5449,241 @@ static u32 eng_present_surface(u32 buffer_id)
+@@ -3352,20 +5449,242 @@ static u32 eng_present_surface(u32 buffer_id)
  {
      if (buffer_id < 8 && g.display_buffers[buffer_id].valid) {
          const eng_display_buffer* d = &g.display_buffers[buffer_id];
@@ -22737,6 +22759,7 @@ index 8dff6011..a19078e6 100644
 +
  static void eng_present(u32 buffer_id)
  {
++    { extern void ps3_causal_spin(const char*, int*); static int us = -1; ps3_causal_spin("PS3_CAUSAL_RSX_US", &us); }
      if (!g.ready) return;
      const u32 target = eng_present_surface(buffer_id);
      if (target == ENG_INVALID) return;
@@ -22744,7 +22767,7 @@ index 8dff6011..a19078e6 100644
      if (getenv("PS3RECOMP_METAL_FRAME_DUMP") && g.frames % 120 == 0) {
          u32 current = eng_current_surface();
          fprintf(stderr, "[rsx capture] frame=%u buffer=%u selected=%u current=%u draws=%u surfaces=%u\n",
-@@ -3375,10 +5693,205 @@ static void eng_present(u32 buffer_id)
+@@ -3375,10 +5694,205 @@ static void eng_present(u32 buffer_id)
                      i, g.surfaces[i].location, g.surfaces[i].offset,
                      g.surfaces[i].w, g.surfaces[i].h, g.surfaces[i].handle);
      }
@@ -22952,7 +22975,7 @@ index 8dff6011..a19078e6 100644
      g.last_guest_draws = g.guest_draws;
      g.guest_draws = 0;
  }
-@@ -3394,7 +5907,7 @@ static void sink_flip(void* user, const rsx_dispatch* r, u32 arg)
+@@ -3394,7 +5908,7 @@ static void sink_flip(void* user, const rsx_dispatch* r, u32 arg)
  
  void rsx_draw_engine_set_backend(const rsx_draw_backend* backend)
  {
@@ -22961,7 +22984,7 @@ index 8dff6011..a19078e6 100644
  }
  
  void rsx_draw_engine_set_default(int on)
-@@ -3426,11 +5939,7 @@ int rsx_draw_engine_init(u32 width, u32 height)
+@@ -3426,11 +5940,7 @@ int rsx_draw_engine_init(u32 width, u32 height)
      if (!g.be) return -1;
      g.width  = width  ? width  : 1280;
      g.height = height ? height : 720;
@@ -22974,7 +22997,7 @@ index 8dff6011..a19078e6 100644
      if (!g.vp_cb) return -1;
      if (g.be->init && g.be->init(g.be->user, g.width, g.height) != 0) {
          free(g.vp_cb); g.vp_cb = NULL;
-@@ -3444,12 +5953,9 @@ int rsx_draw_engine_init(u32 width, u32 height)
+@@ -3444,12 +5954,9 @@ int rsx_draw_engine_init(u32 width, u32 height)
      sink.draw_arrays      = sink_draw_arrays;
      sink.draw_index_array = sink_draw_index;
      sink.inline_array     = sink_inline_array;
@@ -22987,7 +23010,7 @@ index 8dff6011..a19078e6 100644
      fprintf(stderr, "[rsx engine] register-file draw engine up (%ux%u)\n",
              g.width, g.height);
      return 0;
-@@ -3464,24 +5970,47 @@ void rsx_draw_engine_shutdown(void)
+@@ -3464,24 +5971,47 @@ void rsx_draw_engine_shutdown(void)
          if (g.textures[i].handle) g.be->texture_release(g.be->user, g.textures[i].handle);
      for (u32 i = 0; i < g.n_pipelines; i++)
          if (g.pipelines[i].handle) g.be->pipeline_release(g.be->user, g.pipelines[i].handle);
@@ -23042,7 +23065,7 @@ index 8dff6011..a19078e6 100644
  }
  
  void rsx_draw_engine_method(u32 method, u32 arg)
-@@ -3495,6 +6024,928 @@ void rsx_draw_engine_method(u32 method, u32 arg)
+@@ -3495,6 +6025,928 @@ void rsx_draw_engine_method(u32 method, u32 arg)
       * preserve them with the wider mask. */
      u32 m = (method >= 0xE000u) ? (method & 0xFFFCu) : (method & 0x1FFCu);
      rsx_dispatch_method(&g.rsx, m, arg);
@@ -23971,7 +23994,7 @@ index 8dff6011..a19078e6 100644
  }
  
  void rsx_draw_engine_set_display_buffer(u32 buffer_id, u32 location, u32 offset,
-@@ -3524,13 +6975,17 @@ void rsx_draw_engine_present(void)
+@@ -3524,13 +6976,17 @@ void rsx_draw_engine_present(void)
       * re-present a double-buffered title's OTHER scanout. Presenting twice is
       * harmless either way -- the engine never clears the surface, so a second
       * present just blits the same image again. */
@@ -47467,7 +47490,7 @@ index 00000000..9dee71dc
 +}
 +#endif
 diff --git a/runtime/spu/spu_coherency.c b/runtime/spu/spu_coherency.c
-index ed2bcf58..0a6fec10 100644
+index ed2bcf58..bebea2a7 100644
 --- a/runtime/spu/spu_coherency.c
 +++ b/runtime/spu/spu_coherency.c
 @@ -7,17 +7,29 @@
@@ -47607,13 +47630,7 @@ index ed2bcf58..0a6fec10 100644
 -void spu_lockline_lock(void)
 +static _Thread_local unsigned long long t_ll_spins;   /* SPU_LL_STATS */
 +static void ll_take(ll_stripe* s)
- {
--    if (!pthread_mutex_trylock(&g_lockline)) return;
--    const uint64_t give_up = spu_lockline_now_ns() + 20000u;
--    for (unsigned backoff = 16;; backoff = backoff < 1024u ? backoff * 2u : backoff) {
--        for (unsigned i = 0; i < backoff; ++i) spu_lockline_relax();
--        if (!pthread_mutex_trylock(&g_lockline)) return;
--        if (spu_lockline_now_ns() >= give_up) break;
++{
 +    unsigned spins = 0;
 +    while (atomic_exchange_explicit(&s->v, 1, memory_order_acquire)) {
 +        do {
@@ -47621,8 +47638,7 @@ index ed2bcf58..0a6fec10 100644
 +            t_ll_spins++;
 +            if (++spins >= 4096) { spins = 0; sched_yield(); }
 +        } while (atomic_load_explicit(&s->v, memory_order_relaxed));
-     }
--    if (pthread_mutex_lock(&g_lockline)) abort();
++    }
 +    /* Seqlock writer: odd while held, and the increment ordered before any
 +     * write the holder makes (Boehm's seqlock pattern). */
 +    const unsigned q = atomic_load_explicit(&s->seq, memory_order_relaxed);
@@ -47645,10 +47661,9 @@ index ed2bcf58..0a6fec10 100644
 +{
 +    atomic_thread_fence(memory_order_acquire);
 +    return atomic_load_explicit(&s->seq, memory_order_relaxed) == q;
- }
--void spu_lockline_unlock(void) { if (pthread_mutex_unlock(&g_lockline)) abort(); }
- #endif
- 
++}
++#endif
++
 +/* Which stripe guards a line: neighbouring lines and lines a power-of-two
 + * apart (job lists, per-SPU arrays) spread out. */
 +static inline unsigned ll_stripe_of(uint32_t ea)
@@ -47697,7 +47712,13 @@ index ed2bcf58..0a6fec10 100644
 +#define LL_ST_N 64
 +static struct { void* ra; unsigned long long n, stripes, spins; } s_ll_st[LL_ST_N];
 +static __attribute__((noinline, cold)) void ll_stats_note(void* ra, uint64_t mask, unsigned long long spins)
-+{
+ {
+-    if (!pthread_mutex_trylock(&g_lockline)) return;
+-    const uint64_t give_up = spu_lockline_now_ns() + 20000u;
+-    for (unsigned backoff = 16;; backoff = backoff < 1024u ? backoff * 2u : backoff) {
+-        for (unsigned i = 0; i < backoff; ++i) spu_lockline_relax();
+-        if (!pthread_mutex_trylock(&g_lockline)) return;
+-        if (spu_lockline_now_ns() >= give_up) break;
 +    unsigned h = (unsigned)(((uintptr_t)ra >> 2) * 2654435761u) % LL_ST_N;
 +    for (unsigned k = 0; k < LL_ST_N; k++, h = (h + 1) % LL_ST_N) {
 +        void* cur = __atomic_load_n(&s_ll_st[h].ra, __ATOMIC_RELAXED);
@@ -47717,10 +47738,12 @@ index ed2bcf58..0a6fec10 100644
 +                        __atomic_exchange_n(&s_ll_st[k].n, 0, __ATOMIC_RELAXED),
 +                        __atomic_exchange_n(&s_ll_st[k].stripes, 0, __ATOMIC_RELAXED),
 +                        __atomic_exchange_n(&s_ll_st[k].spins, 0, __ATOMIC_RELAXED));
-+    }
-+}
-+#endif
-+
+     }
+-    if (pthread_mutex_lock(&g_lockline)) abort();
+ }
+-void spu_lockline_unlock(void) { if (pthread_mutex_unlock(&g_lockline)) abort(); }
+ #endif
+ 
 +void spu_lockline_lock_mask(uint64_t mask)
 +{
 +#ifndef _MSC_VER
@@ -48311,7 +48334,7 @@ index ed2bcf58..0a6fec10 100644
  #if defined(_MSC_VER)
  void ppu_resv_break_line(uint32_t ea);
  void ppu_resv_break_line_absent(uint32_t ea) { (void)ea; }
-@@ -283,110 +737,260 @@ void ppu_resv_break_line_absent(uint32_t ea) { (void)ea; }
+@@ -283,110 +737,265 @@ void ppu_resv_break_line_absent(uint32_t ea) { (void)ea; }
  __attribute__((weak)) void ppu_resv_break_line(uint32_t ea) { (void)ea; }
  #endif
  
@@ -48370,13 +48393,10 @@ index ed2bcf58..0a6fec10 100644
 +static uint16_t s_coh_watch_n[256];
 +static int s_coh_wfilt = -1;
 +static inline unsigned coh_watch_hash(uint32_t line) { return ((line >> 7) * 0x9E3779B1u) >> 24; }
- 
--static inline int spu_coh_holds(const spu_context* c, uint32_t line)
++
 +void spu_coh_watch_add(spu_coh_watch* watch, uint32_t ea,
 +                       void (*wake)(void*), void* opaque)
- {
--    return __atomic_load_n(&c->resv_valid, __ATOMIC_RELAXED) &&
--           (__atomic_load_n(&c->resv_ea, __ATOMIC_RELAXED) & ~127u) == line;
++{
 +    watch->line = ea & ~127u;
 +    watch->wake = wake;
 +    watch->opaque = opaque;
@@ -48385,8 +48405,8 @@ index ed2bcf58..0a6fec10 100644
 +    __atomic_fetch_add(coh_live_ctr(watch->line), 1u, __ATOMIC_SEQ_CST);   /* a claim (see live claims) */
 +    coh_mark_line(ea);     /* every writer of the line now notifies */
 +    __atomic_store_n(&s_coh_watches, watch, __ATOMIC_RELEASE);
- }
- 
++}
++
 +void spu_coh_watch_remove(spu_coh_watch* watch)
 +{
 +    for (spu_coh_watch** link = &s_coh_watches; *link; link = &(*link)->next) {
@@ -48398,9 +48418,12 @@ index ed2bcf58..0a6fec10 100644
 +        return;
 +    }
 +}
-+
+ 
+-static inline int spu_coh_holds(const spu_context* c, uint32_t line)
 +static void spu_coh_wake_watches(uint32_t line)
-+{
+ {
+-    return __atomic_load_n(&c->resv_valid, __ATOMIC_RELAXED) &&
+-           (__atomic_load_n(&c->resv_ea, __ATOMIC_RELAXED) & ~127u) == line;
 +    int f = __atomic_load_n(&s_coh_wfilt, __ATOMIC_RELAXED);
 +    if (__builtin_expect(f < 0, 0)) {
 +        const char* e = getenv("SPU_COH_WFILT");
@@ -48410,8 +48433,8 @@ index ed2bcf58..0a6fec10 100644
 +    if (f && !__atomic_load_n(&s_coh_watch_n[coh_watch_hash(line)], __ATOMIC_RELAXED)) return;
 +    for (spu_coh_watch* w = __atomic_load_n(&s_coh_watches, __ATOMIC_ACQUIRE); w; w = w->next)
 +        if (w->line == line) w->wake(w->opaque);
-+}
-+
+ }
+ 
 +/* Upstream's lock-free GETLLAR re-reservation. The stripes and the seqlock
 + * read (spu_lockline_read_begin) already keep GETLLAR polls from serializing,
 + * so this always sends the caller down the locked path. */
@@ -48453,6 +48476,7 @@ index ed2bcf58..0a6fec10 100644
 +int g_spu_lw_on;
 +static inline int lw_is(uint32_t line);
 +static void lw_note(uint32_t ea, char kind, uint32_t who);
++static void lw_dump(void);
 +/* PPU writers in the line watch: guest thread id << 25 | the guest lr (the
 + * function that made the store returns there; lifted code updates lr). */
 +#include "../ppu/ppu_context.h"
@@ -48462,6 +48486,7 @@ index ed2bcf58..0a6fec10 100644
 +    const ppu_context* c = g_active_ctx;
 +    return c ? ((uint32_t)c->thread_id << 25) | ((uint32_t)c->lr & 0x1FFFFFFu) : 0u;
 +}
++static unsigned s_lw_dump_at;   /* spu_lw_add: dump the ring once at this many notes */
 +static void lw_init(void)
 +{
 +    int n = 0;
@@ -48526,11 +48551,13 @@ index ed2bcf58..0a6fec10 100644
 +        if (!memcmp(s_lw_last[which] + s_lw_off, vm_base + line + s_lw_off, 4)) return;
 +        memcpy(s_lw_last[which], vm_base + line, 128);
 +    }
-+    const unsigned i = __atomic_fetch_add(&s_lw_pos, 1u, __ATOMIC_RELAXED) & (LW_RING - 1u);
++    const unsigned pos = __atomic_fetch_add(&s_lw_pos, 1u, __ATOMIC_RELAXED);
++    const unsigned i = pos & (LW_RING - 1u);
 +    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
 +    s_lw_ring[i].t = (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000u;
 +    s_lw_ring[i].line = line; s_lw_ring[i].who = who; s_lw_ring[i].kind = kind; s_lw_ring[i].n = ea & 127u;
 +    memcpy(s_lw_ring[i].b, vm_base + line, 128);
++    if (s_lw_dump_at && pos + 1 == s_lw_dump_at) lw_dump();
 +}
 +static void lw_dump(void)
 +{
@@ -48570,14 +48597,14 @@ index ed2bcf58..0a6fec10 100644
      spu_coh_wake_watches(line);
 -    for (spu_coh_entry* entry = s_coh_ctxs; entry; entry = entry->next) {
 -        spu_context* c = entry->ctx;
++    const int skip = coh_claim_skip_on() &&
++                     __atomic_load_n(&s_coh_live_on, __ATOMIC_RELAXED) == 1 &&
++                     !__atomic_load_n(&s_coh_untracked, __ATOMIC_RELAXED);
 +    for (int i = 0; i < SPU_COH_MAX_CTX; i++) {
 +        /* A live reservation on `line` implies the slot's claim is `line`
 +         * (live claims, above): the claims are one small array, the
 +         * contexts 64 cold cache lines. */
-+        if ((__atomic_load_n(&s_coh_claim[i], __ATOMIC_ACQUIRE) & ~1u) != line &&
-+            coh_claim_skip_on() &&
-+            __atomic_load_n(&s_coh_live_on, __ATOMIC_RELAXED) == 1 &&
-+            !__atomic_load_n(&s_coh_untracked, __ATOMIC_RELAXED)) continue;
++        if (skip && (__atomic_load_n(&s_coh_claim[i], __ATOMIC_ACQUIRE) & ~1u) != line) continue;
 +        spu_context* c = __atomic_load_n(&s_coh_ctxs[i], __ATOMIC_ACQUIRE);
          if (!c || (const void*)c == self) continue;
 -        if (spu_coh_holds(c, line)) {
@@ -48618,11 +48645,12 @@ index ed2bcf58..0a6fec10 100644
      spu_coh_wake_watches(line);
 -    for (spu_coh_entry* entry = s_coh_ctxs; entry; entry = entry->next) {
 -        spu_context* c = entry->ctx;
++    /* The mode flags once, not per slot: 64 iterations on every notify. */
++    const int skip = coh_claim_skip_on() &&
++                     __atomic_load_n(&s_coh_live_on, __ATOMIC_RELAXED) == 1 &&
++                     !__atomic_load_n(&s_coh_untracked, __ATOMIC_RELAXED);
 +    for (int i = 0; i < SPU_COH_MAX_CTX; i++) {
-+        if ((__atomic_load_n(&s_coh_claim[i], __ATOMIC_ACQUIRE) & ~1u) != line &&
-+            coh_claim_skip_on() &&
-+            __atomic_load_n(&s_coh_live_on, __ATOMIC_RELAXED) == 1 &&
-+            !__atomic_load_n(&s_coh_untracked, __ATOMIC_RELAXED)) continue;   /* see _except */
++        if (skip && (__atomic_load_n(&s_coh_claim[i], __ATOMIC_ACQUIRE) & ~1u) != line) continue;   /* see _except */
 +        spu_context* c = __atomic_load_n(&s_coh_ctxs[i], __ATOMIC_ACQUIRE);
          if (!c) continue;
 -        if (spu_coh_holds(c, line)) {
@@ -48646,7 +48674,7 @@ index ed2bcf58..0a6fec10 100644
              /* The event_status store has to be visible before the wake. The
               * waiter re-polls its predicate on a timeout as well, so a
               * straggling store costs latency and not the wakeup itself. */
-@@ -395,6 +999,162 @@ void spu_coh_notify_write(uint32_t ea)
+@@ -395,6 +1004,179 @@ void spu_coh_notify_write(uint32_t ea)
      }
  }
  
@@ -48809,6 +48837,23 @@ index ed2bcf58..0a6fec10 100644
  #ifdef __cplusplus
  }
  #endif
++
++/* Watch one more line from now on (a diagnostic hook for the port: a wait
++ * site names the word it waits on at run time), and dump the ring once
++ * after `dump_after` more writes to the watched lines. */
++void spu_lw_add(uint32_t ea, unsigned dump_after)
++{
++    if (s_lw_n < 0) lw_init();
++    const int n = s_lw_n;
++    if (n >= LW_MAX) return;
++    for (int i = 0; i < n; i++) if (s_lw[i] == (ea & ~127u)) return;
++    s_lw[n] = ea & ~127u;
++    coh_mark_line(s_lw[n]);
++    s_lw_dump_at = __atomic_load_n(&s_lw_pos, __ATOMIC_RELAXED) + dump_after;
++    __atomic_store_n(&s_lw_n, n + 1, __ATOMIC_RELEASE);
++    g_spu_lw_on = 1;
++    fprintf(stderr, "[line-watch] watching line 0x%08X (dump after %u writes)\n", s_lw[n], dump_after);
++}
 diff --git a/runtime/spu/spu_coherency.h b/runtime/spu/spu_coherency.h
 index ea2e8351..43549133 100644
 --- a/runtime/spu/spu_coherency.h
@@ -49203,7 +49248,7 @@ index 00000000..055cae6b
 +#endif
 +}
 diff --git a/runtime/spu/spu_context.h b/runtime/spu/spu_context.h
-index c5ccbec7..1c7bbb3e 100644
+index c5ccbec7..774984e1 100644
 --- a/runtime/spu/spu_context.h
 +++ b/runtime/spu/spu_context.h
 @@ -48,21 +48,31 @@ extern "C" {
@@ -50020,6 +50065,31 @@ index c5ccbec7..1c7bbb3e 100644
                  (uint32_t)((ctx)->pc & SPU_LS_MASK);           \
              _tf(ctx);                                          \
          }                                                      \
+@@ -1018,6 +1356,7 @@ static inline void spu_pchist_tick(const spu_context* ctx)
+  * drain step (SPU_LOCKSTEP, SPU_STEPTRACE, SPURS_PM_FLOW, ...) turn it off
+  * too (spu_drain.c). */
+ extern volatile int g_spu_direct;                /* spu_drain.c: -1 unread, 0 off, 1 on */
++extern int g_spu_direct_stats;                   /* spu_drain.c: SPU_DIRECT_STATS */
+ extern uint8_t g_spu_stack_reset_hint[1024];     /* spu_channels.c, by (entry >> 2) & 1023 */
+ void spu_direct_init(void);
+ #if defined(__clang__) && defined(__has_attribute)
+@@ -1026,6 +1365,8 @@ void spu_direct_init(void);
+ #  endif
+ #endif
+ #ifdef SPU_DIRECT_TAILCALLS
++/* SPU_DIRECT_STATS=1 (spu_drain.c): why direct transfers took the trampoline. */
++void spu_direct_fallback(const spu_context* ctx, uint32_t pc);
+ #define SPU_DIRECT(ctx, PC, FN) do {                                          \
+         const uint32_t _dpc = (uint32_t)(PC);                                 \
+         (ctx)->pc = _dpc;                                                     \
+@@ -1033,6 +1374,7 @@ void spu_direct_init(void);
+             (ctx)->steps && !g_spu_stack_reset_hint[(_dpc >> 2) & 1023u] &&    \
+             !((ctx)->int_enable && ((ctx)->event_status & (ctx)->event_mask))) \
+             __attribute__((musttail)) return FN(ctx);                         \
++        if (__builtin_expect(g_spu_direct_stats, 0)) spu_direct_fallback((ctx), _dpc); \
+         g_spu_trampoline_fn = FN;                                             \
+         return;                                                               \
+     } while (0)
 diff --git a/runtime/spu/spu_dispatch_mt.c b/runtime/spu/spu_dispatch_mt.c
 index d9f86bb4..c610dad5 100644
 --- a/runtime/spu/spu_dispatch_mt.c
@@ -51272,7 +51342,7 @@ index 8c4ccaa8..3428c7af 100644
            if (s_tp && spu->image_id == 2) { static int _n = 0; if (PS3_LOG_FIRST(_n, 40))
                fprintf(stderr, "[tagprobe] img=%d upd=%u mask=0x%X completed=0x%X -> RdTagStat=0x%X%s\n",
 diff --git a/runtime/spu/spu_drain.c b/runtime/spu/spu_drain.c
-index 49bc2b94..774e9554 100644
+index 49bc2b94..acba8cb7 100644
 --- a/runtime/spu/spu_drain.c
 +++ b/runtime/spu/spu_drain.c
 @@ -5,6 +5,7 @@
@@ -51339,7 +51409,51 @@ index 49bc2b94..774e9554 100644
      if (!spu_task_launch_diagnostics() && !g_pm_flow_ctx &&
          (!ctx->steps || (ctx->pc & SPU_LS_MASK))) {
          ctx->steps++;
-@@ -170,21 +191,47 @@ static void spu_task_launch_slow(spu_context* ctx)
+@@ -115,9 +136,27 @@ SPU_DRAIN_INLINE void spu_task_launch_check_inline(spu_context* ctx, void* fn,
+  * SPU_PCHIST, SPU_NO_LS0_END, SPU_EXITTRACE, SPU_STEPTRACE, SPU_JOBDRAIN and
+  * SPURS_PM_FLOW. */
+ volatile int g_spu_direct = -1;
++int g_spu_direct_stats;
++/* SPU_DIRECT_STATS=1: every 2^22 drain-loop calls, how many direct transfers
++ * fell back to the trampoline and why (off, LS 0, first step, stack-reset
++ * hint, interrupt pending), and the drain loop's own counts. */
++static __thread unsigned long long t_fb[6], t_drains;
++void spu_direct_fallback(const spu_context* ctx, uint32_t pc)
++{
++    int r = g_spu_direct <= 0 ? 0 : !(pc & SPU_LS_MASK) ? 1 : !ctx->steps ? 2
++          : g_spu_stack_reset_hint[(pc >> 2) & 1023u] ? 3 : 4;
++    t_fb[r]++;
++}
++static void spu_direct_stats_tick(const spu_context* ctx)
++{
++    if (++t_drains & ((1u << 22) - 1)) return;
++    fprintf(stderr, "[spu-direct] spu%d img=%d: %llu drains; fallbacks off=%llu ls0=%llu first=%llu hint=%llu irq=%llu\n",
++            (int)ctx->spu_id, (int)ctx->image_id, t_drains, t_fb[0], t_fb[1], t_fb[2], t_fb[3], t_fb[4]);
++}
+ void spu_direct_init(void)
+ {
+     if (g_spu_direct >= 0) return;
++    { const char* st = getenv("SPU_DIRECT_STATS"); g_spu_direct_stats = st && *st && strcmp(st, "0"); }
+     static const char* const diag[] = {
+         "SPU_LOCKSTEP", "SPU_TAILRET", "SPU_PCHIST", "SPU_NO_LS0_END", "SPU_EXITTRACE",
+         "SPU_STEPTRACE", "SPU_JOBDRAIN", "SPURS_PM_FLOW",
+@@ -129,9 +168,12 @@ void spu_direct_init(void)
+         const char* d = getenv(diag[i]);
+         if (d && *d && strcmp(d, "0")) { on = 0; why = diag[i]; }
+     }
+-#ifndef SPU_DIRECT_TAILCALLS
+-    on = 0; why = "no musttail in this compiler";
+-#endif
++    /* Not "#ifndef SPU_DIRECT_TAILCALLS": that tells whether THIS file's
++     * compiler has musttail, and the flag is read by the lifted code, which
++     * may be built by another one (a port's lifted SPU code by clang, the
++     * runtime by GCC). Lifted code built without musttail never reads it
++     * (its SPU_DIRECT always takes the trampoline). PS3_SPU_DIRECT=0 turns
++     * it off. */
+     if (!on) fprintf(stderr, "[spu] direct tail calls off (%s)\n", why);
+     g_spu_direct = on;
+ }
+@@ -170,21 +212,47 @@ static void spu_task_launch_slow(spu_context* ctx)
       * entry. Planting a return address in r0 catches the jobs that get there
       * via `bi $r0`, but some branch to 0 DIRECTLY, which the lifter turns into
       * a plain trampoline that never reaches spu_indirect_branch. The drain sees
@@ -51391,7 +51505,7 @@ index 49bc2b94..774e9554 100644
          !ctx->policy_mode && ctx->image_id > 0) {
          spu_job_ls0_note(ctx);
          if (s_et >= 0 && ctx->image_id == s_et) {
-@@ -199,9 +246,9 @@ static void spu_task_launch_slow(spu_context* ctx)
+@@ -199,9 +267,9 @@ static void spu_task_launch_slow(spu_context* ctx)
      /* SPU_STEPTRACE=<img>: pc and the argument registers at every trampoline
       * step. This runs on each drain iteration, so it is the finest-grained
       * view of a register file changing under a running job. */
@@ -51403,7 +51517,7 @@ index 49bc2b94..774e9554 100644
        if (s_from == -2) { const char* e = getenv("SPU_STEPTRACE_FROM");
                            s_from = e ? strtol(e,0,16) : -1; }
        static int s_armed = 0;
-@@ -219,7 +266,7 @@ static void spu_task_launch_slow(spu_context* ctx)
+@@ -219,7 +287,7 @@ static void spu_task_launch_slow(spu_context* ctx)
      if (g_pm_flow_ctx == (void*)ctx && g_pm_flow_n < 8192)
          g_pm_flow_buf[g_pm_flow_n++] = ctx->pc;
  
@@ -51412,7 +51526,7 @@ index 49bc2b94..774e9554 100644
      if (s_on < 0) s_on = getenv("SPU_JOBDRAIN") ? 1 : 0;
      if (!s_on || ctx->image_id != 2 || !ctx->policy_mode) return;
  
-@@ -294,12 +341,10 @@ void spu_img_restore(spu_context* ctx, int32_t saved_img)
+@@ -294,12 +362,10 @@ void spu_img_restore(spu_context* ctx, int32_t saved_img)
   * brhz cond1,Exit` to LS 0x2D30, skipping the Load setup.) Default OFF; kept
   * env-gated for experiments: SPU_SN_DEFER=<n> ticks (0 = immediate, faithful
   * to the current synchronous list execution). */
@@ -51426,7 +51540,7 @@ index 49bc2b94..774e9554 100644
      if (s_n < 0) { const char* e = getenv("SPU_SN_DEFER"); s_n = e ? atoi(e) : 0; }
      return (unsigned)(s_n < 0 ? 0 : s_n);
  }
-@@ -323,8 +368,17 @@ unsigned spu_sn_defer_ticks(void)
+@@ -323,8 +389,17 @@ unsigned spu_sn_defer_ticks(void)
   * until iret). */
  static void spu_irq_regs_save(spu_context* ctx)
  {
@@ -51444,7 +51558,7 @@ index 49bc2b94..774e9554 100644
      memcpy(ctx->irq_gpr, ctx->gpr, sizeof ctx->irq_gpr);
  }
  
-@@ -345,6 +399,20 @@ int spu_irq_regs_maybe_restore(spu_context* ctx)
+@@ -345,6 +420,20 @@ int spu_irq_regs_maybe_restore(spu_context* ctx)
          if (ctx->irq_saved) {
              if ((ctx->pc & SPU_LS_MASK) == (ctx->irq_resume_pc & SPU_LS_MASK) &&
                  ctx->int_enable) {
@@ -51465,7 +51579,7 @@ index 49bc2b94..774e9554 100644
                  memcpy(ctx->gpr, ctx->irq_gpr, sizeof ctx->irq_gpr);
                  ctx->irq_saved = 0;
                  /* The iret completed below the frame that took the interrupt:
-@@ -353,7 +421,7 @@ int spu_irq_regs_maybe_restore(spu_context* ctx)
+@@ -353,7 +442,7 @@ int spu_irq_regs_maybe_restore(spu_context* ctx)
                  if (f && ctx->host_depth <= f->depth)
                      ctx->irq_frame = f->prev;      /* returned to its loop the ordinary way */
                  if (f && ctx->host_depth > f->depth) {
@@ -51474,7 +51588,7 @@ index 49bc2b94..774e9554 100644
                        static int _n = 0;
                        if (s_it && PS3_LOG_FIRST(_n, 200))
                            fprintf(stderr, "[irq] IRET at depth %u unwinds to taking frame depth %u (srr0=0x%05X)\n",
-@@ -364,7 +432,7 @@ int spu_irq_regs_maybe_restore(spu_context* ctx)
+@@ -364,7 +453,7 @@ int spu_irq_regs_maybe_restore(spu_context* ctx)
                      /* Taken by the top-level driver loop (depth 0), which
                       * keeps no frame: the driver's own restart re-enters at
                       * srr0 with the host stack empty, which is that frame. */
@@ -51483,7 +51597,7 @@ index 49bc2b94..774e9554 100644
                        static int _n = 0;
                        if (s_it && PS3_LOG_FIRST(_n, 200))
                            fprintf(stderr, "[irq] IRET at depth %u unwinds to the driver (srr0=0x%05X)\n",
-@@ -421,8 +489,8 @@ void (*spu_take_interrupt(spu_context* ctx,
+@@ -421,8 +510,8 @@ void (*spu_take_interrupt(spu_context* ctx,
                            void (*tf)(spu_context*)))(spu_context*)
  {
      /* Stall-and-notify still settling: let the SPU run on (see above). */
@@ -51494,7 +51608,7 @@ index 49bc2b94..774e9554 100644
          return tf;
      }
      const uint8_t* v = ctx->ls;      /* vector word at LS 0, big-endian */
-@@ -439,7 +507,7 @@ void (*spu_take_interrupt(spu_context* ctx,
+@@ -439,7 +528,7 @@ void (*spu_take_interrupt(spu_context* ctx,
          if (PS3_LOG_FIRST(_w, 4))
              fprintf(stderr, "[spu-int] pending (st=0x%X mask=0x%X) but LS0 word "
                      "0x%08X is no branch -- not taken\n",
@@ -51503,7 +51617,7 @@ index 49bc2b94..774e9554 100644
          return tf;
      }
      ctx->srr0 = ctx->pc;             /* resume point for iret */
-@@ -462,7 +530,7 @@ void (*spu_take_interrupt(spu_context* ctx,
+@@ -462,7 +551,7 @@ void (*spu_take_interrupt(spu_context* ctx,
            fprintf(stderr, "[spu-int] TAKEN img=%d events=0x%X&0x%X vector->0x%05X "
                    "(srr0=0x%05X) stallstat=0x%X parked=0x%X loadJobState@12A0=%02X%02X%02X%02X "
                    "%02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X\n", ctx->image_id,
@@ -51512,7 +51626,7 @@ index 49bc2b94..774e9554 100644
                    ctx->list_stall_stat, ctx->list_stall_mask,
                    js[0],js[1],js[2],js[3], js[4],js[5],js[6],js[7],
                    js[8],js[9],js[10],js[11], js[12],js[13],js[14],js[15]); } }
-@@ -483,17 +551,16 @@ SPU_DRAIN_COLD void spu_depth_guard(spu_context* ctx)
+@@ -483,17 +572,16 @@ SPU_DRAIN_COLD void spu_depth_guard(spu_context* ctx)
       * not "where are we" but "what cycle got us here" -- one pc names a point,
       * a ring names the loop. */
      enum { RING = 24 };
@@ -51537,7 +51651,7 @@ index 49bc2b94..774e9554 100644
      if (s_reported < 1) {   /* one report: five SPU threads all trip together */
          s_reported++;
          fprintf(stderr, "[spu-depth] img=%d pc=0x%05X lr=0x%05X host_depth=%u"
-@@ -511,11 +578,11 @@ SPU_DRAIN_COLD void spu_depth_guard(spu_context* ctx)
+@@ -511,11 +599,11 @@ SPU_DRAIN_COLD void spu_depth_guard(spu_context* ctx)
  }
  
  /* See spu_context.h. Env-gated: SPU_TAILRET=1. */
@@ -51552,7 +51666,15 @@ index 49bc2b94..774e9554 100644
  }
  
  /* A return may use any register, not only r0. Running that branch target
-@@ -553,9 +620,6 @@ void spu_drain_call(spu_context* ctx, uint32_t return_pc)
+@@ -541,6 +629,7 @@ extern spu_drain_fn spu_lookup(uint32_t addr, int image_id);
+ void spu_drain_call(spu_context* ctx, uint32_t return_pc)
+ {
+     if (__builtin_expect(g_spu_direct < 0, 0)) spu_direct_init();
++    if (__builtin_expect(g_spu_direct_stats, 0)) spu_direct_stats_tick(ctx);
+     spu_depth_guard_check(ctx);
+     /* On the way out, the enclosing drain's return pc is the innermost one
+      * again. It used to be 0 until that drain's next step re-set it, and with
+@@ -553,9 +642,6 @@ void spu_drain_call(spu_context* ctx, uint32_t return_pc)
       * loop exits, whichever first. */
      spu_irq_frame f;
      f.prev = 0; f.depth = 0; f.image_id = 0;
@@ -51562,7 +51684,7 @@ index 49bc2b94..774e9554 100644
      /* The pending-transfer slot is thread-local, and on Darwin every access
       * to a thread-local is a call to the TLV resolver. The slot's address is
       * fixed for the life of this host thread, and a drain never leaves its
-@@ -574,8 +638,9 @@ void spu_drain_call(spu_context* ctx, uint32_t return_pc)
+@@ -574,8 +660,9 @@ void spu_drain_call(spu_context* ctx, uint32_t return_pc)
              void (*fn)(spu_context*) = *tramp;
              *tramp = 0;
              ctx->drain_ret_pc = return_pc & SPU_LS_MASK;   /* re-set: a nested drain changed it */
@@ -51574,7 +51696,7 @@ index 49bc2b94..774e9554 100644
                  void (*vf)(spu_context*) = spu_take_interrupt(ctx, fn);
                  if (!ctx->int_enable) {   /* taken (a take clears the enable; a deferral leaves it) */
                      /* Interrupt taken here: this loop is the frame the iret
-@@ -608,8 +673,17 @@ void spu_drain_call(spu_context* ctx, uint32_t return_pc)
+@@ -608,8 +695,17 @@ void spu_drain_call(spu_context* ctx, uint32_t return_pc)
          }
          {
              uint32_t pc = ctx->pc & SPU_LS_MASK;
@@ -63080,7 +63202,7 @@ index 8bdacb48..93e36df8 100644
  /* Preserve upstream's current broadcast fallback for signal_to. */
  int64_t sys_cond_signal_to(ppu_context* ctx) { return signal_cond(LV2_ARG_U32(ctx, 0), 1); }
 diff --git a/runtime/syscalls/sys_event.c b/runtime/syscalls/sys_event.c
-index adabcc56..e5a0a5d5 100644
+index adabcc56..7776c9bb 100644
 --- a/runtime/syscalls/sys_event.c
 +++ b/runtime/syscalls/sys_event.c
 @@ -10,7 +10,7 @@
@@ -63092,7 +63214,7 @@ index adabcc56..e5a0a5d5 100644
  
  /* Recorded by sys_spu_thread_initialize (lv2_register.c): the SPURS kernel
   * context EA the title's SPU task runtime is dispatched against. */
-@@ -290,9 +290,28 @@ void sys_event_queue_cancel_by_id(uint32_t queue_id)
+@@ -290,9 +290,57 @@ void sys_event_queue_cancel_by_id(uint32_t queue_id)
  }
  
  /* Diagnostic gates polled on every receive (~140k/s in GH3): read once. */
@@ -63108,7 +63230,36 @@ index adabcc56..e5a0a5d5 100644
 +    extern int lv2_diag_ring_on(void);
 +    const uint32_t q = LV2_ARG_U32(ctx, 0), ev = LV2_ARG_PTR(ctx, 1);
 +    const uint32_t tid = (uint32_t)ctx->thread_id, lr = (uint32_t)ctx->lr;
++    /* PS3_EVQ_WHO=1: the main thread's receives (tid 1), every 10 s: per
++     * (caller lr, queue, event source) the count and the ms waited. */
++    static int s_who = -1;
++    if (__builtin_expect(s_who < 0, 0)) s_who = getenv("PS3_EVQ_WHO") ? 1 : 0;
++    struct timespec w0 = {0, 0};
++    if (s_who && tid == 1) clock_gettime(CLOCK_MONOTONIC, &w0);
 +    const int64_t r = sys_event_queue_receive_impl(ctx);
++    if (s_who && tid == 1) {
++        struct timespec w1; clock_gettime(CLOCK_MONOTONIC, &w1);
++        const uint64_t ns = (uint64_t)((w1.tv_sec - w0.tv_sec) * 1000000000LL + (w1.tv_nsec - w0.tv_nsec));
++        enum { N = 32 };
++        static struct { uint32_t lr, q; uint64_t src, n, ns; } t[N];
++        static uint64_t next;
++        const uint64_t src = ctx->gpr[4];
++        int k = 0;
++        while (k < N && t[k].n && !(t[k].lr == lr && t[k].q == q && t[k].src == src)) k++;
++        if (k < N) { t[k].lr = lr; t[k].q = q; t[k].src = src; t[k].n++; t[k].ns += ns; }
++        const uint64_t now = (uint64_t)w1.tv_sec * 1000000000ull + (uint64_t)w1.tv_nsec;
++        if (!next) next = now + 10000000000ull;
++        else if (now >= next) {
++            next = now + 10000000000ull;
++            fprintf(stderr, "[evq-who] 10 s, main thread (lr q src: n, ms):");
++            for (int i = 0; i < N && t[i].n; i++) {
++                fprintf(stderr, " %08X q%u %llX: %llu,%llu", t[i].lr, t[i].q, (unsigned long long)t[i].src,
++                        (unsigned long long)t[i].n, (unsigned long long)(t[i].ns / 1000000ull));
++                t[i].n = 0; t[i].ns = 0;
++            }
++            fprintf(stderr, "\n");
++        }
++    }
 +    if (lv2_diag_ring_on()) {
 +        uint32_t d1 = 0, d2 = 0;
 +        if (ev) { const uint8_t* p = vm_to_host(ev);
@@ -63122,7 +63273,7 @@ index adabcc56..e5a0a5d5 100644
  {
      uint32_t queue_id    = LV2_ARG_U32(ctx, 0);
      uint32_t event_addr  = LV2_ARG_PTR(ctx, 1);
-@@ -338,7 +357,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
+@@ -338,7 +386,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
       * which is a boot-time answer; when a title runs for a while and then stops
       * doing something, the question is where it is parked at the END, and the
       * last dump in the log answers that. */
@@ -63131,7 +63282,7 @@ index adabcc56..e5a0a5d5 100644
        if (every < 0) { const char* e = getenv("WAITBT_EVERY"); every = e ? atoi(e) : 0; }
        if (every > 0) {
            static unsigned n[8][8] = {{0}};
-@@ -430,7 +449,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
+@@ -430,7 +478,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
       * blocks forever) so the loader thread proceeds. Tests whether the game's
       * render/draw code is reachable once the completion waits are satisfied. */
      if ((s_ydkj_hle_draw < 0 ? (s_ydkj_hle_draw = getenv("YDKJ_HLE_DRAW") ? 1 : 0) : s_ydkj_hle_draw) && queue_id == 1 && timeout_us == 0 && q->count == 0) {
@@ -63140,7 +63291,33 @@ index adabcc56..e5a0a5d5 100644
          if (s_n1 < 256) { s_n1++;
              if (event_addr != 0) {
                  uint64_t* out = (uint64_t*)vm_to_host(event_addr);
-@@ -625,7 +644,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
+@@ -552,6 +600,25 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
+ 
+     LeaveCriticalSection(&q->lock);
+ #else
++    /* PS3_EVQ_SPIN_US=<us>: an empty queue is watched that long before the
++     * condition wait, so an event that lands within it (an SPU's completion,
++     * a few hundred microseconds a frame on MotorStorm's main thread) costs
++     * no sleep and wake-up. Timing only: the receive below is unchanged. */
++    { static int s_spin = -1;
++      if (__builtin_expect(s_spin < 0, 0)) { const char* e = getenv("PS3_EVQ_SPIN_US"); s_spin = e ? atoi(e) : 0; }
++      if (s_spin > 0 && __atomic_load_n(&q->count, __ATOMIC_ACQUIRE) == 0) {
++          struct timespec a0, a1; clock_gettime(CLOCK_MONOTONIC, &a0);
++          for (unsigned k = 0;; k++) {
++              if (__atomic_load_n(&q->count, __ATOMIC_ACQUIRE) != 0 || !q->active || q->cancelled) break;
++#if defined(__x86_64__) || defined(__i386__)
++              __builtin_ia32_pause();
++#endif
++              if ((k & 63) == 63) {
++                  clock_gettime(CLOCK_MONOTONIC, &a1);
++                  if ((a1.tv_sec - a0.tv_sec) * 1000000LL + (a1.tv_nsec - a0.tv_nsec) / 1000 >= s_spin) break;
++              }
++          }
++      } }
+     pthread_mutex_lock(&q->lock);
+ 
+     if (timeout_us == 0) {
+@@ -625,7 +692,7 @@ int64_t sys_event_queue_receive(ppu_context* ctx)
       * PS3_EVT_RECV=<queue id> follows a different one; PS3_EVT_RECV=all follows
       * every queue. Default stays queue 1 so existing logs read the same. */
      {
@@ -63149,7 +63326,7 @@ index adabcc56..e5a0a5d5 100644
          if (_sel == -2) { const char* e = getenv("PS3_EVT_RECV");
                            _sel = !e ? 1 : (strcmp(e, "all") == 0 ? -1 : atoi(e)); }
      if (_sel == -1 || (int)queue_id == _sel) {
-@@ -747,7 +766,7 @@ static int event_queue_push(sys_event_queue_info* q, const sys_event_t* evt)
+@@ -747,7 +814,7 @@ static int event_queue_push(sys_event_queue_info* q, const sys_event_t* evt)
       * means nothing produced the event (the guest's, or a missing HLE
       * producer). Those need opposite fixes, and nothing else distinguishes
       * them. */
@@ -63158,7 +63335,7 @@ index adabcc56..e5a0a5d5 100644
        if (s_es < 0) { const char* e = getenv("PS3_EVQSTAT");
                        s_es = e ? (atoi(e) > 0 ? atoi(e) : 2000) : 0; }
        if (s_es) { static unsigned long long np[SYS_EVENT_QUEUE_MAX + 1], n;
-@@ -928,6 +947,14 @@ int64_t sys_event_port_disconnect(ppu_context* ctx)
+@@ -928,6 +995,14 @@ int64_t sys_event_port_disconnect(ppu_context* ctx)
      return CELL_OK;
  }
  
@@ -63173,7 +63350,7 @@ index adabcc56..e5a0a5d5 100644
  /* Public helper for non-syscall callers: push an event into a queue by
   * ID. Returns 0 on success, -1 if the queue is unknown/inactive or full. */
  int sys_event_queue_push_by_id(uint32_t queue_id,
-@@ -945,6 +972,45 @@ int sys_event_queue_push_by_id(uint32_t queue_id,
+@@ -945,6 +1020,45 @@ int sys_event_queue_push_by_id(uint32_t queue_id,
      return event_queue_push(q, &evt);
  }
  
@@ -63219,7 +63396,7 @@ index adabcc56..e5a0a5d5 100644
  /* Public helper: resolve an event queue by its ipc_key (as registered at
   * sys_event_queue_create). Returns the queue_id (1-based) or 0 if none. Used by
   * cellAudio to route the audio-period notify event to the game's queue. */
-@@ -964,7 +1030,7 @@ int64_t sys_event_port_send(ppu_context* ctx)
+@@ -964,7 +1078,7 @@ int64_t sys_event_port_send(ppu_context* ctx)
      uint64_t data1   = LV2_ARG_U64(ctx, 1);
      uint64_t data2   = LV2_ARG_U64(ctx, 2);
      uint64_t data3   = LV2_ARG_U64(ctx, 3);
@@ -63228,7 +63405,7 @@ index adabcc56..e5a0a5d5 100644
      if (s_send_stack) { static unsigned char seen[8]={0}; unsigned pk=port_id&7;
          if(!seen[pk]){ seen[pk]=1; extern void ppu_dump_guest_stack(ppu_context*,const char*);
              char tag[40]; snprintf(tag,sizeof tag,"port_send producer port=%u",port_id); ppu_dump_guest_stack(ctx,tag); } }
-@@ -1031,8 +1097,13 @@ int64_t sys_event_port_send(ppu_context* ctx)
+@@ -1031,8 +1145,13 @@ int64_t sys_event_port_send(ppu_context* ctx)
        /* Stage the full event for the SPU's sys_spu_thread_receive_event
         * (stop 0x110): the worker reads back {CELL_OK, data1, data2, data3} and
         * takes its work-descriptor EA from those, so data2 alone is not enough. */
@@ -63244,7 +63421,7 @@ index adabcc56..e5a0a5d5 100644
        g_spu_pending_evt[0] = (uint32_t)data1;
        g_spu_pending_evt[1] = (uint32_t)data2;
        g_spu_pending_evt[2] = (uint32_t)data3;
-@@ -1054,28 +1125,49 @@ int64_t sys_event_port_send(ppu_context* ctx)
+@@ -1054,28 +1173,49 @@ int64_t sys_event_port_send(ppu_context* ctx)
   * EVENT FLAGS
   * ========================================================================= */
  
@@ -63307,7 +63484,7 @@ index adabcc56..e5a0a5d5 100644
      if (attr_addr != 0) {
          uint8_t* attr_raw = (uint8_t*)vm_to_host(attr_addr);
          uint32_t proto_be, type_be;
-@@ -1087,30 +1179,46 @@ int64_t sys_event_flag_create(ppu_context* ctx)
+@@ -1087,30 +1227,46 @@ int64_t sys_event_flag_create(ppu_context* ctx)
          type_be  = ((type_be >> 24) & 0xFF)  | ((type_be >> 8) & 0xFF00) |
                     ((type_be << 8) & 0xFF0000) | ((type_be << 24) & 0xFF000000u);
  #endif
@@ -63341,7 +63518,7 @@ index adabcc56..e5a0a5d5 100644
 -              flag_id, nm, (unsigned long long)init_pattern, f->type); }
 +    return CELL_OK;
 +}
-+
+ 
 +uint32_t sys_event_flag_create_direct(uint64_t init_pattern, uint32_t type, const char* name)
 +{
 +    uint8_t nm[8] = {0};
@@ -63351,7 +63528,7 @@ index adabcc56..e5a0a5d5 100644
 +    evt_table_unlock();
 +    return id;
 +}
- 
++
 +void sys_event_flag_destroy_direct(uint32_t flag_id)
 +{
 +    if (flag_id == 0 || flag_id > SYS_EVENT_FLAG_MAX) return;
@@ -63371,7 +63548,7 @@ index adabcc56..e5a0a5d5 100644
  }
  
  int64_t sys_event_flag_destroy(ppu_context* ctx)
-@@ -1199,7 +1307,7 @@ int64_t sys_event_flag_wait(ppu_context* ctx)
+@@ -1199,7 +1355,7 @@ int64_t sys_event_flag_wait(ppu_context* ctx)
       * NEVER-CREATED flag -> ESRCH each time. Test whether returning CELL_OK
       * (as if the flag were set) breaks the spin and lets the game progress into
       * real render code. Diagnostic only; identifies whether the spin is the gate. */
@@ -63380,7 +63557,7 @@ index adabcc56..e5a0a5d5 100644
        if (s_f && !g_sys_event_flags[flag_id-1].active) {
          static int _n=0; if(PS3_LOG_FIRST(_n, 4)) fprintf(stderr,"[evt] PS3_EVF_OK_IF_MISSING: flag=%u -> return CELL_OK (break spin)\n", flag_id);
          if (result_addr != 0) { write_be32(result_addr, (uint32_t)(bitpat>>32)); write_be32(result_addr+4, (uint32_t)bitpat); }
-@@ -1228,7 +1336,7 @@ int64_t sys_event_flag_wait(ppu_context* ctx)
+@@ -1228,7 +1384,7 @@ int64_t sys_event_flag_wait(ppu_context* ctx)
  #endif
          return (int64_t)(int32_t)CELL_ESRCH;
      }
@@ -63389,7 +63566,7 @@ index adabcc56..e5a0a5d5 100644
  
      if (bitpat == 0)
          return (int64_t)(int32_t)CELL_EINVAL;
-@@ -1238,7 +1346,7 @@ int64_t sys_event_flag_wait(ppu_context* ctx)
+@@ -1238,7 +1394,7 @@ int64_t sys_event_flag_wait(ppu_context* ctx)
       * so boot stalls on a black screen. Force-satisfy the wait (set the awaited
       * bits) to see if the game advances into its real render/content code. Blunt;
       * identifies the gate. */
@@ -65785,7 +65962,7 @@ index 00000000..00fe68b7
 +if __name__ == "__main__":
 +    main()
 diff --git a/tools/lift_jobmods.py b/tools/lift_jobmods.py
-index f8783799..748aaa6e 100644
+index f8783799..d9bd404e 100644
 --- a/tools/lift_jobmods.py
 +++ b/tools/lift_jobmods.py
 @@ -66,7 +66,8 @@ CODE_END = {
@@ -65807,7 +65984,7 @@ index f8783799..748aaa6e 100644
      """Lift one module image at `base` into <outdir>/<name>/. Returns its
      manifest entry, or None if the lifter failed. `base` is the LS address the
      module is linked for -- module_base() reads it out of the header, and it is
-@@ -266,8 +267,16 @@ def lift_module(raw, name, outdir, tmp_elf, merge_chunks, code_end=None,
+@@ -266,8 +267,17 @@ def lift_module(raw, name, outdir, tmp_elf, merge_chunks, code_end=None,
      end = code_end or CODE_END.get(name)
      if end:
          cmd += ["--code-end", hex(end)]
@@ -65816,7 +65993,8 @@ index f8783799..748aaa6e 100644
          cmd += ["--merge-chunks"]
 +    cmd += list(lifter_args)
 +    # Native stand-ins (work/port/spu-native, SPU_NATIVE=1) for these functions.
-+    NATIVE_AT = {"jobmod_d6cae8b8000a": [0x4250]}   # dxtblendjob: the DXT colour-index search
++    # dxtblendjob: the DXT colour-index search, the DXT1 block decode, the min/max
++    NATIVE_AT = {"jobmod_d6cae8b8000a": [0x4250, 0x4358, 0x4030]}
 +    # The hook is inert unless SPU_NATIVE=1 at run time; SPU_LIFT_NATIVE=0 leaves it out.
 +    if os.environ.get("SPU_LIFT_NATIVE", "1") != "0" and NATIVE_AT.get(name.split("_e")[0]):
 +        cmd += ["--native-at", ",".join(hex(a) for a in NATIVE_AT[name.split("_e")[0]])]
@@ -65825,7 +66003,7 @@ index f8783799..748aaa6e 100644
      inside = module_seeds(raw, base)
      if code_end:
          inside = [a for a in inside if int(a, 0) < code_end]
-@@ -332,6 +341,8 @@ def find_engine_modules(elf):
+@@ -332,6 +342,8 @@ def find_engine_modules(elf):
  def main():
      ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -65834,7 +66012,7 @@ index f8783799..748aaa6e 100644
      src = ap.add_mutually_exclusive_group(required=True)
      src.add_argument("--jobmods",
                       help="Directory of extracted jobmod_*.bin (extract_jobmods.py --out).")
-@@ -342,6 +353,9 @@ def main():
+@@ -342,6 +354,9 @@ def main():
                      help="Directory to lift into: <out>/<modname>/spu_recomp.{c,h}.")
      ap.add_argument("--register", default=None, metavar="FILE",
                      help="Write the registration TU here (default: <out>/jobmods_register.c).")
@@ -65844,7 +66022,7 @@ index f8783799..748aaa6e 100644
      ap.add_argument("--symbol-prefix", default="port", metavar="NAME",
                      help="C symbol prefix for the registration functions, so two "
                           "ports linked in one tree cannot collide (default: port).")
-@@ -353,6 +367,7 @@ def main():
+@@ -353,6 +368,7 @@ def main():
      OUTDIR  = args.out
      register_c = args.register or os.path.join(OUTDIR, "jobmods_register.c")
  
@@ -65852,7 +66030,7 @@ index f8783799..748aaa6e 100644
      if EXTRA_FUNCS:
          print(f"  extra function entries: {', '.join(EXTRA_FUNCS)}")
      if args.engine_elf:
-@@ -368,7 +383,7 @@ def main():
+@@ -368,7 +384,7 @@ def main():
          raw = open(path, "rb").read()
          name = os.path.splitext(os.path.basename(path))[0]         # jobmod_<sha>_e<entry>
          m = lift_module(raw, name, OUTDIR, tmp_elf, args.merge_chunks,
@@ -65861,7 +66039,7 @@ index f8783799..748aaa6e 100644
          if m:
              manifest.append(m)
  
-@@ -402,7 +417,8 @@ def lift_engine_elf(args, register_c):
+@@ -402,7 +418,8 @@ def lift_engine_elf(args, register_c):
          if code_end is None:
              print(f"  SKIP {name}: no reachable code", file=sys.stderr)
              continue

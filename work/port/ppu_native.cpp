@@ -46,6 +46,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <linux/futex.h>
+#include <algorithm>
 #include <atomic>
 #include <utility>
 #include <vector>
@@ -223,6 +224,7 @@ static int lk_stats_on(void)
     return v;
 }
 extern "C" void ps3_tl(const char* tag, uint32_t a, uint32_t b);
+extern "C" void spu_lw_add(uint32_t ea, unsigned dump_after);
 extern "C" int g_ps3_tl;
 /* The caller a contended acquire is named by (see lk_stats_note). */
 static uint32_t lk_site(const ppu_context* c)
@@ -269,6 +271,61 @@ static void lk_stats_note(const ppu_context* c, uint32_t ea, uint64_t ns)
     fprintf(stderr, "%s\n", buf);
 }
 
+/* PS3_LOCK_STATS=1 also names the holders: per (thread, acquire site, lock),
+ * the time the lock was held, every 10 s, the 16 longest. A thread's held
+ * locks sit in a small thread-local list from acquire to release. */
+struct lk_held { uint32_t ea, site; uint64_t t0; };
+static thread_local lk_held t_held[8];
+static thread_local int t_nheld;
+static void lk_hold_begin(const ppu_context* c, uint32_t ea)
+{
+    if (t_nheld < 8) t_held[t_nheld++] = { ea, lk_site(c), lk_now_ns() };
+}
+static void lk_hold_end(const ppu_context* c, uint32_t ea)
+{
+    int i = t_nheld - 1;
+    while (i >= 0 && t_held[i].ea != ea) i--;
+    if (i < 0) {
+        /* Released by a thread that did not take it: an event's Set. Named
+         * in the same table with the site's top bit set (0x8xxxxxxx = lr). */
+        static thread_local lk_held fake;
+        fake = { ea, 0x80000000u | (uint32_t)c->lr, lk_now_ns() };
+        if (t_nheld < 8) { t_held[t_nheld++] = fake; i = t_nheld - 1; } else return;
+    }
+    const lk_held h = t_held[i];
+    t_held[i] = t_held[--t_nheld];
+    const uint64_t now = lk_now_ns(), ns = now - h.t0;
+    enum { N = 256 };
+    static std::atomic<uint64_t> key[N], tot[N], cnt[N];
+    static std::atomic<uint32_t> lockea[N];
+    const uint64_t k = ((uint64_t)(uint32_t)c->thread_id << 32) | h.site;
+    const uint64_t hk = k ^ ((uint64_t)ea * 0x9E3779B97F4A7C15ull);
+    for (unsigned j = (unsigned)(hk * 0x9E3779B97F4A7C15ull >> 56), n = 0; n < N; n++, j = (j + 1) % N) {
+        uint64_t cur = key[j].load(std::memory_order_relaxed);
+        if (cur == 0 && key[j].compare_exchange_strong(cur, k)) { cur = k; lockea[j].store(ea); }
+        if (cur != k || lockea[j].load(std::memory_order_relaxed) != ea) continue;
+        tot[j].fetch_add(ns, std::memory_order_relaxed);
+        cnt[j].fetch_add(1, std::memory_order_relaxed);
+        break;
+    }
+    static std::atomic<uint64_t> next;
+    uint64_t t = next.load(std::memory_order_relaxed);
+    if (!t) { next.compare_exchange_strong(t, now + 10000000000ull); return; }
+    if (now < t || !next.compare_exchange_strong(t, now + 10000000000ull)) return;
+    struct row { uint64_t k, ms100, n; uint32_t ea; } rows[N]; int nr = 0;
+    for (unsigned j = 0; j < N; j++) {
+        const uint64_t kk = key[j].load(), n = cnt[j].exchange(0), us = tot[j].exchange(0) / 1000ull;
+        if (kk && n && (us >= 1000 || ((uint32_t)kk & 0x80000000u))) rows[nr++] = { kk, us + (((uint32_t)kk & 0x80000000u) ? 100000000ull : 0), n, lockea[j].load() };
+    }
+    std::sort(rows, rows + nr, [](const row& a, const row& b) { return a.ms100 > b.ms100; });
+    char buf[2048]; int p = snprintf(buf, sizeof buf, "[lock-hold] 10 s, held (tid site lock: n, ms):");
+    for (int j = 0; j < nr && j < 16 && p < (int)sizeof buf - 64; j++)
+        p += snprintf(buf + p, sizeof buf - p, " %u@%08X(%08X):%llu,%llu", (unsigned)(rows[j].k >> 32),
+                      (uint32_t)rows[j].k, rows[j].ea, (unsigned long long)rows[j].n,
+                      (unsigned long long)(rows[j].ms100 / 1000));
+    fprintf(stderr, "%s\n", buf);
+}
+
 /* func_00675D3C(lock r3): lwarx/stwcx. 0 -> 1, or wait. Leaves r3 = 0 (the
  * word its last lwarx read) and r4 as the guest's spin count would not matter:
  * both are volatile. */
@@ -277,14 +334,22 @@ static int nat_lock(ppu_context* c)
     if (!lk_native()) return 0;
     const uint32_t ea = (uint32_t)c->gpr[3];
     if (ea < 0x10000u || (ea & 3u)) return 0;
-    if (nat_trylock(c, ea)) { c->gpr[3] = 0; return 1; }
+    if (nat_trylock(c, ea)) { if (lk_stats_on()) lk_hold_begin(c, ea); c->gpr[3] = 0; return 1; }
     const uint64_t t0 = lk_stats_on() ? lk_now_ns() : 0;
     /* PS3_TIMELINE: a contended acquire's start and end ("lkw0"/"lkw1": thread, caller lr). */
     const int tl = g_ps3_tl;
     if (tl) ps3_tl("lkw0", (uint32_t)c->thread_id, lk_site(c));
     do lk_wait(ea); while (!nat_trylock(c, ea));
     if (tl) ps3_tl("lkw1", (uint32_t)c->thread_id, lk_site(c));
-    if (t0) lk_stats_note(c, ea, lk_now_ns() - t0);
+    if (t0) { lk_stats_note(c, ea, lk_now_ns() - t0); lk_hold_begin(c, ea); }
+    /* PS3_LOCK_WATCH_SITE=<hex lr>: the first contended wait from that site
+     * puts its word under SPU_LINE_WATCH (who writes it), dumped 4000
+     * writes later. */
+    { static uint32_t ws = 1; static std::atomic<int> done;
+      if (ws == 1) { const char* e = getenv("PS3_LOCK_WATCH_SITE"); ws = e ? (uint32_t)strtoul(e, 0, 16) : 0; }
+      if (ws && lk_site(c) == ws && !done.exchange(1)) {
+          spu_lw_add(ea, 4000);
+      } }
     c->gpr[3] = 0;
     return 1;
 }
@@ -294,6 +359,7 @@ static int nat_unlock_fn(ppu_context* c)
     if (!lk_native()) return 0;
     const uint32_t ea = (uint32_t)c->gpr[3];
     if (ea < 0x10000u || (ea & 3u)) return 0;
+    if (lk_stats_on()) lk_hold_end(c, ea);
     nat_unlock(ea);
     c->gpr[4] = 0;
     return 1;
@@ -311,7 +377,16 @@ static void nat_usleep250(ppu_context* c)
 }
 static int nat_event_set(ppu_context* c)
 {
-    if ((uint8_t)c->gpr[4]) return 0;               /* Set(true): lifted */
+    if ((uint8_t)c->gpr[4]) {                       /* Set(true): lifted */
+        if (lk_stats_on()) {
+            /* who sets which event (PS3_LOCK_STATS): the release of obj+12
+             * that follows is named by this caller */
+            static thread_local lk_held fake;
+            fake = { (uint32_t)c->gpr[3] + 12u, 0x80000000u | (uint32_t)c->lr, lk_now_ns() };
+            if (t_nheld < 8) t_held[t_nheld++] = fake;
+        }
+        return 0;
+    }
     /* The out-of-line accessors (vm_read32/vm_write32/ppu_stwcx32) take any
      * guest address and tell SPU reservations themselves, so no range test:
      * the job batches' events live at 0x4A8xxxxx, where range_wr_ok declined. */
