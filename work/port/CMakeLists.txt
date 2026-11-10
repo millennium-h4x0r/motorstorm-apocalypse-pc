@@ -230,6 +230,10 @@ add_executable(${PROJECT_NAME}
 #                          port_cpu_check.c stops an x86-64-vN build with a
 #                          message on a CPU below that level.
 option(PORT_SPU_LS_DEBUG "Keep the SPU local-store debug hooks in the lifted code" OFF)
+set(PORT_SPU_PROFILE "" CACHE FILEPATH "llvm .profdata for the lifted SPU sources (empty: none)")
+option(PORT_SPU_PROFILE_GEN "Instrument the lifted SPU sources for PGO training" OFF)
+set(PORT_PGO_RT "" CACHE FILEPATH "libclang_rt.profile for a PGO training build")
+set(PORT_PGO_DUMP "" CACHE FILEPATH "the counter-dump source for a PGO training build")
 set(PORT_SPU_MARCH "x86-64-v3" CACHE STRING
     "-march for the lifted SPU sources on x86-64 (empty: compiler default)")
 if(SPU_SOURCES)
@@ -256,8 +260,25 @@ if(SPU_SOURCES)
         if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
             list(APPEND _spu_opts "--param=inline-unit-growth=1000")
         endif()
+        # PGO for the lifted SPU code (clang): PORT_SPU_PROFILE_GEN=ON builds
+        # an instrumented binary (PORT_PGO_RT: libclang_rt.profile; PORT_PGO_DUMP:
+        # a source that writes the counters while the game runs, since it is
+        # killed rather than exited), PORT_SPU_PROFILE=<.profdata> uses one.
+        # scripts/build.sh passes work/pgo/spu.profdata when it exists.
+        if(PORT_SPU_PROFILE_GEN)
+            list(APPEND _spu_opts "-fprofile-generate")
+            message(STATUS "Lifted SPU PGO:  instrumented (training build)")
+        elseif(PORT_SPU_PROFILE AND EXISTS "${PORT_SPU_PROFILE}")
+            list(APPEND _spu_opts "-fprofile-use=${PORT_SPU_PROFILE}"
+                 "-Wno-profile-instr-out-of-date" "-Wno-profile-instr-unprofiled")
+            message(STATUS "Lifted SPU PGO:  ${PORT_SPU_PROFILE}")
+        endif()
         set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "${_spu_opts}")
     endif()
+endif()
+if(PORT_SPU_PROFILE_GEN)
+    target_sources(${PROJECT_NAME} PRIVATE "${PORT_PGO_DUMP}")
+    target_link_libraries(${PROJECT_NAME} PRIVATE "${PORT_PGO_RT}")
 endif()
 if(PORT_SPU_MARCH MATCHES "^x86-64-v[234]$" AND SPU_SOURCES)
     set_source_files_properties(port_cpu_check.c PROPERTIES

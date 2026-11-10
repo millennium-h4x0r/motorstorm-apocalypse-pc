@@ -738,6 +738,14 @@ int main(int argc, char** argv)
      * ~4 ms a frame with the SPUs ~90% busy: 54.3 -> 56.4 fps (1P race,
      * whole machine, 2026-11-10). */
     env_default("SPURS_NSPUS_MIN", "6");
+    /* The Havok "physics stopped" hang: a raycast task posts main's batch
+     * semaphore and then PUTs its batch header back; here the PPU can wake
+     * and rebuild the next batch on that header before the PUT lands, which
+     * zeroes the new count. SPU_EVENT_DEFER (spu_channels.c) delivers a task's
+     * port event after its next DMA completes, as the slower wake-up on the
+     * PS3 did. first_race x8 each side: 8/8 with it, 6/8 without; fps the
+     * same (docs/NOTES.md). */
+    env_default("SPU_EVENT_DEFER", "1");
     /* Cheaper overlay checks on SPU GETs: sample before the full compare,
      * and only GETs covering a fixed-address lift's first byte count. */
     env_default("SPU_OVL_SAMPLE", "1");

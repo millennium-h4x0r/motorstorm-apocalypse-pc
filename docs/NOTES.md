@@ -2507,3 +2507,22 @@ one binary differ by about +-2 fps, so changes are read over pairs.
 main thread's own CPU (runtime overhead ~18% of it: notify_spus, ppu_lookup,
 ll_take, reservation helpers) and pvsjob's batch (about half of pvsjob's SPU
 time is DMA handling: gm_copy_from, spu_overlay_note_get, MFC).
+
+### Havok hang fix on by default (2026-11-11)
+
+`SPU_EVENT_DEFER=1` (ppu2's fix for the "physics stopped" shape, spu_channels.c)
+is now a main.cpp default. first_race, 4 rounds of 2 on + 2 off at once on
+the two CCDs (work/runs/edab): on 8/8 finished; off 6/8 (both hangs in the
+most loaded round, "no Havok task for 120 s" at 498 and 611 s). 1P race fps
+with it: 59.5 / 58.8 vs 59.1 / 58.1 without.
+
+### PGO for the lifted SPU code
+
+CMake PORT_SPU_PROFILE / PORT_SPU_PROFILE_GEN (scripts/build.sh: work/pgo/
+spu.profdata when present; `PORT_SPU_PROFILE_GEN=1 PORT_PGO_RT=<libclang_rt.
+profile-x86_64.a> PORT_PGO_DUMP=work/codegen/pgo_dump.cpp` for the training
+build, which only recompiles the SPU sources). Trained on union_v1,
+mainline_v1 and dogpatch_v1 races (counters reset at 30 s, written every
+20 s), merged with llvm-profdata-18. Measured neutral to slightly positive
+(58.6 vs 58.4 fps over two pairs): the SPU work on the critical path is a
+small part of the frame.

@@ -39,6 +39,11 @@ MARCH="$PORT_SPU_MARCH"
 # picks another, PORT_PPU_PROFILE= none. clang only.
 PROFILE="${PORT_PPU_PROFILE-$ROOT/work/pgo/ppu.profdata}"
 if [ -n "${PORT_PPU_GCC:-}" ] || [ ! -f "$PROFILE" ]; then PROFILE=""; fi
+# The same for the lifted SPU code: work/pgo/spu.profdata. PORT_SPU_PROFILE_GEN=1
+# (with PORT_PGO_RT and PORT_PGO_DUMP) builds the instrumented training binary.
+SPU_PROFILE="${PORT_SPU_PROFILE-$ROOT/work/pgo/spu.profdata}"
+if [ -n "${PORT_SPU_GCC:-}" ] || [ ! -f "$SPU_PROFILE" ]; then SPU_PROFILE=""; fi
+SPU_GEN=OFF; [ -n "${PORT_SPU_PROFILE_GEN:-}" ] && SPU_GEN=ON
 
 [ -f "$ROOT/work/src/recomp/ppu_recomp.h" ] || { echo "nothing lifted yet -- run scripts/lift.sh" >&2; exit 1; }
 
@@ -48,7 +53,8 @@ configure() {   # <build dir> <vulkan ON|OFF>
         -DPS3RECOMP_RSX_VULKAN="$2" -DPython3_EXECUTABLE="${PYTHON:-$ROOT/.venv/bin/python}" -DPORT_SPU_MARCH="$MARCH" \
         -DCMAKE_C_COMPILER_LAUNCHER="$PORT/tools/spu_cc.sh" \
         -DCMAKE_CXX_COMPILER_LAUNCHER="$PORT/tools/ppu_cxx.sh" \
-        -DPORT_PPU_PROFILE="$PROFILE"
+        -DPORT_PPU_PROFILE="$PROFILE" -DPORT_SPU_PROFILE="$SPU_PROFILE" -DPORT_SPU_PROFILE_GEN="$SPU_GEN" \
+        -DPORT_PGO_RT="${PORT_PGO_RT:-}" -DPORT_PGO_DUMP="${PORT_PGO_DUMP:-}"
 }
 build() {
     if command -v systemd-run >/dev/null && systemd-run --user --scope -q true 2>/dev/null; then
