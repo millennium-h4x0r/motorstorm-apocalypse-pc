@@ -127,14 +127,15 @@ def dev_flash_dir():
     return None
 
 
-# Every image is lifted with its registers in locals (--local-regs), each run of
-# contiguous chunks as one C function (--merge-chunks) and `bi` on a register
-# just loaded from a constant dispatched directly (--const-bi), as in the
-# inFAMOUS 2 port.
-LIFT_ARGS = ["--local-regs", "--merge-chunks", "--const-bi"] + os.environ.get("SPU_LIFT_EXTRA", "").split()
-# SPU_LIFT_NO_MERGE=1 (experiments): smaller C functions, one per chunk.
-if os.environ.get("SPU_LIFT_NO_MERGE") == "1":
-    LIFT_ARGS = [a for a in LIFT_ARGS if a != "--merge-chunks"]
+# Every image is lifted with its registers in locals (--local-regs) and `bi`
+# on a register just loaded from a constant dispatched directly (--const-bi).
+# One C function per chunk: merging contiguous chunks (--merge-chunks, as in
+# the inFAMOUS 2 port) made functions too large for clang to keep values in
+# registers; without it the job code takes 24% fewer cycles (race fly-by
+# 42-43 -> 45-46 fps, 2026-11-09). SPU_LIFT_MERGE=1 merges as before.
+LIFT_ARGS = ["--local-regs", "--const-bi"] + os.environ.get("SPU_LIFT_EXTRA", "").split()
+if os.environ.get("SPU_LIFT_MERGE") == "1":
+    LIFT_ARGS.insert(1, "--merge-chunks")
 
 # Extra function entries for taskset tasks, found at run time (SPU_MISS_LOG=1
 # and the "[spu] img=N branched into unlifted LS ..." lines): the targets of
