@@ -17,8 +17,7 @@ Linux, without an emulator. The game's code, PowerPC (PPU) and SPU, is
 translated to C before compilation by static recompilation with
 [ps3recomp](https://github.com/sp00nznet/ps3recomp). The PS3 system is
 reimplemented, and the GPU (RSX) runs the game's own shaders translated to
-Vulkan. The runtime started as a copy of the
-[inFAMOUS 2 port](https://github.com/ThiagoFraga761/infamous2-pc)'s.
+Vulkan.
 
 > **No game files come with this project.** To play you need your own copy of
 > the game, dumped from your own disc. The build turns **your** executable into
