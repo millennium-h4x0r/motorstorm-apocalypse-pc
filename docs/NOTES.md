@@ -2702,3 +2702,44 @@ union_v1, market_v3. All 39 passed on 2026-11-07.
 - yerbabuena_v3: stuck with 1000 too. Saved binaries: 2026-11-07 (bin_base)
   started the race only at 228 s, 2026-11-09 and 2026-11-11 not within 240 s.
   A long, variable wait before START RACE is taken, older than today.
+
+### RSX command pipeline, phase 1: FIFO parser on its own thread (2026-11-11)
+
+`PS3RECOMP_RSX_SPLIT=1` (default off; `=2` lockstep: the parser waits for the
+executor after every pass; `PS3RECOMP_RSX_SPLIT_STATS=1` ring counters every
+5 s; `PS3RECOMP_RSX_SPLIT_RING_MB`, default 16). Design:
+docs/superpowers/specs/2026-11-11-rsx-pipeline-design.md.
+- A new "rsx-parse" thread runs the unchanged walk (put/get, JUMP/CALL/RET,
+  NOP runs, parks, watchdogs, resync, semaphore ACQUIRE waits) and copies
+  each method header's data words into a single-producer ring
+  (cellGcmSys.c: gcm_split_push_methods). It publishes `get` every 4 KB
+  outside a CALL, at JUMPs, at RELEASEs and at the end of a pass.
+- The "rsx" thread's cellGcm_rsx_process_fifo is the executor
+  (gcm_split_exec_pass): it replays the records in order through the same
+  calls the per-word walk made (draw engine method, gcm_3d_method, 2D, user
+  commands, E920 flips, report and back-end label writes, SET_REFERENCE with
+  the record's IO offset). RELEASE label writes, a resync's rescued fences
+  and labels, and the flip-marker counters are records too, so every
+  guest-visible effect lands after the draws before it. A 0xFEAD flip word
+  ends the executor's pass (MotorStorm has none: it flips with E920).
+- Not in split mode (it stays off and says so): GCM_SUBCH7, GCM_OBJDBG,
+  GCM_SUBCH_GATE, GCM_VAL_WATCH, RSX_LIVE_FEED_DBG, GCM_WORD_STATS,
+  GCM_METHOD_HIST, RSX_LIVE_DRAW; and Windows.
+- A race: ~180k records, ~4.3 MB a 4P frame; the parser never waited for
+  ring space.
+
+union_v1, windowed, player's settings, bench.py (fps; rsx / rsx-parse /
+ppu main CPU ms per frame):
+
+| | 4P off | 4P on | 1P off | 1P on |
+|---|---|---|---|---|
+| fps | 32.5, 31.4, 30.9 | 35.8, 33.1, 39.5 (+38.0, 39.6) | 59.5 | 59.3 |
+| rsx | 28.4, 30.0, 30.6 | 27.2, 29.1, 25.0 | 12.0 | 11.7 |
+| rsx-parse | - | 2.6, 2.7, 2.5 | - | < 1.5 |
+| ppu main | 13.3, 13.7, 13.5 | 13.2, 13.4, 12.5 | 8.1 | 8.1 |
+
+Tests on, copied binary: first_frame, main_menu, splitscreen (x2, four views
+correct) PASS; first_race 1 PASS, 1 "physics stopped" at 588 s while a
+splitscreen ran beside it (HavokWorkerThread polling, main in the Havok
+wait, FIFO idle: the known Havok hang shape, not a FIFO stall). Off:
+first_frame, splitscreen, first_race PASS.
