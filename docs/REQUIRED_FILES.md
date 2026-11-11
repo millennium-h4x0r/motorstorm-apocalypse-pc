@@ -47,7 +47,7 @@ disc/PS3_GAME/
 Linking the dump instead of copying it (adjust `SRC`):
 
 ```sh
-SRC=~/Games/PS3/MotorStorm_Apocalypse/BCES-00484/PS3_GAME
+SRC=/path/to/your/dump/PS3_GAME
 mkdir -p disc/PS3_GAME/USRDIR
 for f in "$SRC"/*; do [ "$(basename "$f")" = USRDIR ] || ln -s "$f" disc/PS3_GAME/; done
 for f in "$SRC"/USRDIR/*; do [ "$(basename "$f")" = EBOOT.BIN ] || ln -s "$f" disc/PS3_GAME/USRDIR/; done
