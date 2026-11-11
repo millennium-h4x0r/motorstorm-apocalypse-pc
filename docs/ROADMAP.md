@@ -2,7 +2,7 @@
 
 Goal: the whole game playable natively, split-screen included, with the
 finish of the inFAMOUS 2 port (port menu, options, up to 4K, a real 60+ fps
-simulation). Design: [superpowers/specs/2026-11-03-motorstorm-recomp-design.md](superpowers/specs/2026-11-03-motorstorm-recomp-design.md).
+simulation).
 
 | # | Milestone | Done when | State |
 |---|---|---|---|

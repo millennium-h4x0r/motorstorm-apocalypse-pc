@@ -2707,8 +2707,7 @@ union_v1, market_v3. All 39 passed on 2026-11-07.
 
 `PS3RECOMP_RSX_SPLIT=1` (default off; `=2` lockstep: the parser waits for the
 executor after every pass; `PS3RECOMP_RSX_SPLIT_STATS=1` ring counters every
-5 s; `PS3RECOMP_RSX_SPLIT_RING_MB`, default 16). Design:
-docs/superpowers/specs/2026-11-11-rsx-pipeline-design.md.
+5 s; `PS3RECOMP_RSX_SPLIT_RING_MB`, default 16).
 - A new "rsx-parse" thread runs the unchanged walk (put/get, JUMP/CALL/RET,
   NOP runs, parks, watchdogs, resync, semaphore ACQUIRE waits) and copies
   each method header's data words into a single-producer ring

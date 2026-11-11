@@ -11,4 +11,3 @@
 - **[RPCS3](https://rpcs3.net)** (GPL-2.0): the behavioral reference for many
   RSX and lv2 details (cited where they are used), and the tool used to decrypt
   the executable.
-  
