@@ -88,7 +88,7 @@ compiler. FFmpeg is loaded at run time for the intro videos.
 ### 1. Get the code
 
 ```sh
-git clone <this repository> motorstorm_apoca
+git clone https://github.com/millennium-h4x0r/motorstorm-apocalypse-pc.git motorstorm_apoca
 cd motorstorm_apoca
 scripts/install-hooks.sh    # optional: blocks commits of game files
 ```
