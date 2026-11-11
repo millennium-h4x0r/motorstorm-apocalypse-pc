@@ -2662,3 +2662,27 @@ Checked: windowed 2560x1440 pixels at scale 2 (1280x720 at 1), full screen
 3840x2160, 9 full screen / windowed toggles with and without the recording
 thread and no Wayland errors (`PS3RECOMP_VK_TOGGLE_TEST=<s>` toggles every
 <s> seconds; `PS3RECOMP_VK_WINEV=1` logs SDL's events).
+
+### 1P dips: the fly-over and light frames took the SPU MLAA (2026-11-11)
+
+Three tracks, 120 s windowed with the player's settings (work/codegen/runs/
+dip_*): 59.5-59.8 fps, median 16.70 ms. Two things made the "~47 fps" dips:
+- bench.py's frame dump (a GPU readback and a PPM write) every 600 frames:
+  one 25-45 ms frame every 10 s. Play has none.
+- Frames with at most 1000 guest draws went the guest's MLAA way (the bound
+  kept the boot's and loading screens' frames, 0-5 draws, off native MLAA:
+  the "EDGE MLAA barrier hang"). The pre-race fly-over ("START RACE", 86-1100
+  draws) and light moments of a race fell under it: the five SPU MLAA tasks
+  ran (45% of all samples in a fly-over perf), the RSX waited ~16 ms a frame
+  on label 0x4B0/0x4C0 and the main thread on command-buffer space. Mainline
+  fly-over 35.6 fps, a 30-frame stretch mid-race at 25-29 ms a frame.
+The bound is now PS3RECOMP_ENG_MLAA_MIN_DRAWS, default 50. Fly-over (its own frames, 50-1300 draws): mainline
+32.6 -> 55.8 fps (median 28.5 -> 16.7 ms), union 59.7 / 54.2, dogpatch 61 / 64
+(short fly-overs there); a perf of the fly-over no longer shows the MLAA
+tasks. Fly-over frames side by side (SPU path, native): edges antialiased in
+both (camera positions differ run to run).
+
+Not physics: Havok is 0.4% of a race's samples; renderablejob (img 241) 6.9%,
+pvsjob (239) 5.6%, the SPU runtime 15.5%. In-race the RSX waits ~8 ms a
+frame on 0x480 (the main thread's next frame), and 0x4B0/0x4C0 are released
+before it gets there.
