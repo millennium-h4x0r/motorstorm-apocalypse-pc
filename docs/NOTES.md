@@ -2743,3 +2743,14 @@ correct) PASS; first_race 1 PASS, 1 "physics stopped" at 588 s while a
 splitscreen ran beside it (HavokWorkerThread polling, main in the Havok
 wait, FIFO idle: the known Havok hang shape, not a FIFO stall). Off:
 first_frame, splitscreen, first_race PASS.
+
+### START RACE "stalls" were the test (2026-11-11)
+
+all_tracks tapped CROSS only until its HUD test passed, and that test (yellow
+pixels in the POS box) passes on some fly-overs (yerbabuena's foliage,
+market's lights): the taps stopped before the race started, the game never
+saw a button (no "[cellPad] file pad" line in those logs) and sat on START
+RACE. It now taps until the race clock runs. yerbabuena_v3, interstate_v2,
+market_v2, market_v3: GO at 33-35 s; with the earlier 35 that is 39/39. The
+union_v1 stalls with PS3RECOMP_ENG_MLAA_MIN_DRAWS=50 were this too (3/3 GO
+with 50 on the current build).

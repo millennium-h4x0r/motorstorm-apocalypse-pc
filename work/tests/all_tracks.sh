@@ -248,7 +248,11 @@ class Run:
         m = BAD.search(t)
         if m: return self.finish(f"FAIL {m.group(0).strip()!r} at {el:.0f} s")
         if self.p.poll() is not None: return self.finish(f"FAIL the game exited at {el:.0f} s")
-        if self.hud_t is None and now >= self.next_tap:       # START RACE etc.
+        # START RACE etc.: tap until the race clock runs, not just until the
+        # HUD test passes -- a fly-over with enough yellow in the HUD box
+        # (yerbabuena's foliage, market's lights) passed it before the race,
+        # the taps stopped, and the race never started.
+        if self.ticks == 0 and now >= self.next_tap:
             self.set("CROSS"); time.sleep(0.25); self.set(""); self.next_tap = now + 3
         frames = sorted(self.dir.joinpath("d").glob("frame_*.ppm"))
         for fr in frames[self.seen:-1]:                        # the last may still be written
