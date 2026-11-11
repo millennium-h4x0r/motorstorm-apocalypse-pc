@@ -2757,3 +2757,11 @@ with 50 on the current build).
 With the test fixed, PS3RECOMP_ENG_MLAA_MIN_DRAWS is 50 again by default:
 all_tracks 39/39 GO, and every track's [mlaa-skip] line shows 0 copies read
 as the SPU left them.
+
+### Engine features in the "not carried" list, checked (2026-11-11)
+
+- 3D textures: supported (volume images; races use 32x32x16 and 16x16x16).
+- Scissored CLEAR_SURFACE: done (split-screen clears per view, [rsx clearlog]).
+- User clip planes (PS3RECOMP_ENG_USER_CLIP, off): MotorStorm never sets
+  0x1478 in a race (dogpatch, pier, haight, market, alcatraz, vertigo); the
+  engine now says once if a title does while they are off.

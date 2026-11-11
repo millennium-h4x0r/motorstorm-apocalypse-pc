@@ -16421,7 +16421,7 @@ index c4e4d849..ff1d4eac 100644
  /* ---- decoded state getters -------------------------------------------- */
  
 diff --git a/libs/video/rsx_draw_engine.c b/libs/video/rsx_draw_engine.c
-index 8dff6011..b23ac0a5 100644
+index 8dff6011..01db3075 100644
 --- a/libs/video/rsx_draw_engine.c
 +++ b/libs/video/rsx_draw_engine.c
 @@ -1,3 +1,9 @@
@@ -21449,6 +21449,13 @@ index 8dff6011..b23ac0a5 100644
 -    if (dc.n_immediate == ENG_MAX_IMMEDIATE_VERTICES) {
 -        dc.fetch_ok = 0;
 -        return;
+-    }
+-    if (dc.n_immediate == dc.cap_immediate) {
+-        const u32 next = dc.cap_immediate ? dc.cap_immediate * 2u : 64u;
+-        void* p = realloc(dc.immediate, (size_t)next * sizeof(*dc.immediate));
+-        if (!p) { dc.fetch_ok = 0; return; }
+-        dc.immediate = p;
+-        dc.cap_immediate = next;
 +    const u32 ea = cellGcmResolveLocated(t->location == RSX_LOCATION_LOCAL, t->offset);
 +    const int which = ea == s_nlt.d.normals_ea ? 0 : ea == s_nlt.d.depth_ea ? 1 : -1;
 +    if (which < 0 || !s_nlt.latch_seq) return 0;
@@ -21461,13 +21468,6 @@ index 8dff6011..b23ac0a5 100644
 +                "pitch %u%s\n", which ? "specular" : "diffuse", t->format, t->remap & 0xFFFFu,
 +                t->width, t->height, t->pitch, fits ? "" : " -- does not fit, guest texture kept");
      }
--    if (dc.n_immediate == dc.cap_immediate) {
--        const u32 next = dc.cap_immediate ? dc.cap_immediate * 2u : 64u;
--        void* p = realloc(dc.immediate, (size_t)next * sizeof(*dc.immediate));
--        if (!p) { dc.fetch_ok = 0; return; }
--        dc.immediate = p;
--        dc.cap_immediate = next;
--    }
 -    for (u32 attr = 0; attr < RSX_DSP_NUM_VERTEX_ATTR; attr++) {
 -        float* value = dc.immediate[dc.n_immediate][attr];
 -        rsx_dsp_vertex_default(r, attr, value);
@@ -21997,14 +21997,10 @@ index 8dff6011..b23ac0a5 100644
 +                            : 0;
 +                        textures[u] = view ? view : snap;
 +                    }
-                     break;
-                 }
-             if (textures[u]) continue;
-         }
--        textures[u] = eng_texture_slot(t.location, t.offset, t.format,
--                                       t.width, t.height, t.mipmaps, t.pitch,
--                                       (int)t.cubemap, t.remap & 0xFFFFu,
--                                       (t.dimension == 3 && !t.cubemap) ? t.depth : 1u);
++                    break;
++                }
++            if (textures[u]) continue;
++        }
 +        /* A colour format over a depth buffer reads the depth bytes (fog,
 +         * depth-of-field, SSAO); the copy reflects depth before this draw, so
 +         * the current zeta qualifies too. */
@@ -22025,10 +22021,14 @@ index 8dff6011..b23ac0a5 100644
 +                            : 0;
 +                        textures[u] = view ? view : snap;
 +                    }
-+                    break;
-+                }
-+            if (textures[u]) continue;
-+        }
+                     break;
+                 }
+             if (textures[u]) continue;
+         }
+-        textures[u] = eng_texture_slot(t.location, t.offset, t.format,
+-                                       t.width, t.height, t.mipmaps, t.pitch,
+-                                       (int)t.cubemap, t.remap & 0xFFFFu,
+-                                       (t.dimension == 3 && !t.cubemap) ? t.depth : 1u);
 +        { const u64 tx0 = eng_ds_enabled() ? eng_ds_now() : 0;
 +          textures[u] = eng_texture_slot(t.location, t.offset, t.format,
 +                                         t.width, t.height, t.mipmaps, t.pitch,
@@ -22206,7 +22206,10 @@ index 8dff6011..b23ac0a5 100644
 -}
 -
 -static float pd_half(u16 h)
--{
++/* PS3RECOMP_ENG_DROPLOG=1: name each draw sink_end drops (first 6 per
++ * reason), with the primitive, packet/vertex counts and target address. */
++static void eng_drop(const char* why, u32 prim)
+ {
 -    const u32 e = (h >> 10) & 0x1Fu, m = h & 0x3FFu;
 -    float v;
 -    if (e == 0)       v = (float)m / 16777216.0f;              /* m * 2^-24 */
@@ -22228,10 +22231,7 @@ index 8dff6011..b23ac0a5 100644
 -
 -/* One colour surface to a binary PPM, alpha dropped, floats clamped to [0,1]. */
 -static void pd_write_surface(u32 slot, const char* path)
-+/* PS3RECOMP_ENG_DROPLOG=1: name each draw sink_end drops (first 6 per
-+ * reason), with the primitive, packet/vertex counts and target address. */
-+static void eng_drop(const char* why, u32 prim)
- {
+-{
 -    const eng_surface* s = &g.surfaces[slot];
 -    u32 bpp;
 -    switch (s->fmt) {
@@ -23916,10 +23916,18 @@ index 8dff6011..b23ac0a5 100644
  }
  
  void rsx_draw_engine_method(u32 method, u32 arg)
-@@ -3495,6 +6124,985 @@ void rsx_draw_engine_method(u32 method, u32 arg)
+@@ -3495,6 +6124,993 @@ void rsx_draw_engine_method(u32 method, u32 arg)
       * preserve them with the wider mask. */
      u32 m = (method >= 0xE000u) ? (method & 0xFFFCu) : (method & 0x1FFCu);
      rsx_dispatch_method(&g.rsx, m, arg);
++    /* Once: a title that enables user clip planes (0x1478) while they are
++     * off here (PS3RECOMP_ENG_USER_CLIP) draws unclipped geometry there. */
++    if (m == 0x1478u && arg) {
++        static int said;
++        if (!said) { said = 1;
++            fprintf(stderr, "[rsx engine] user clip planes enabled by the title: control 0x%08X%s\n", arg,
++                    eng_user_clip_key() ? "" : " (PS3RECOMP_ENG_USER_CLIP is off: not applied)"); }
++    }
 +    /* ZPASS reports, counted on the GPU (rsx_draw_backend.zpass_*). The FIFO
 +     * walker has already stored a provisional "visible" value; the backend
 +     * overwrites it with the real count once the draws have run. */
@@ -24902,7 +24910,7 @@ index 8dff6011..b23ac0a5 100644
  }
  
  void rsx_draw_engine_set_display_buffer(u32 buffer_id, u32 location, u32 offset,
-@@ -3524,13 +7132,17 @@ void rsx_draw_engine_present(void)
+@@ -3524,13 +7140,17 @@ void rsx_draw_engine_present(void)
       * re-present a double-buffered title's OTHER scanout. Presenting twice is
       * harmless either way -- the engine never clears the surface, so a second
       * present just blits the same image again. */
