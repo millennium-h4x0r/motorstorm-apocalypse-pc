@@ -2754,3 +2754,6 @@ RACE. It now taps until the race clock runs. yerbabuena_v3, interstate_v2,
 market_v2, market_v3: GO at 33-35 s; with the earlier 35 that is 39/39. The
 union_v1 stalls with PS3RECOMP_ENG_MLAA_MIN_DRAWS=50 were this too (3/3 GO
 with 50 on the current build).
+With the test fixed, PS3RECOMP_ENG_MLAA_MIN_DRAWS is 50 again by default:
+all_tracks 39/39 GO, and every track's [mlaa-skip] line shows 0 copies read
+as the SPU left them.

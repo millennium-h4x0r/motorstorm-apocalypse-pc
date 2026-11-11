@@ -16421,7 +16421,7 @@ index c4e4d849..ff1d4eac 100644
  /* ---- decoded state getters -------------------------------------------- */
  
 diff --git a/libs/video/rsx_draw_engine.c b/libs/video/rsx_draw_engine.c
-index 8dff6011..3b62d458 100644
+index 8dff6011..b23ac0a5 100644
 --- a/libs/video/rsx_draw_engine.c
 +++ b/libs/video/rsx_draw_engine.c
 @@ -1,3 +1,9 @@
@@ -23916,7 +23916,7 @@ index 8dff6011..3b62d458 100644
  }
  
  void rsx_draw_engine_method(u32 method, u32 arg)
-@@ -3495,6 +6124,986 @@ void rsx_draw_engine_method(u32 method, u32 arg)
+@@ -3495,6 +6124,985 @@ void rsx_draw_engine_method(u32 method, u32 arg)
       * preserve them with the wider mask. */
      u32 m = (method >= 0xE000u) ? (method & 0xFFFCu) : (method & 0x1FFCu);
      rsx_dispatch_method(&g.rsx, m, arg);
@@ -24603,7 +24603,7 @@ index 8dff6011..3b62d458 100644
 +        m->pend = 0;
 +        s_mlaa.open = 1;
 +        /* World frames only (more than PS3RECOMP_ENG_MLAA_MIN_DRAWS guest
-+         * draws in the last one, default 1000, as PS3RECOMP_ENG_WORLDLOG counts
++         * draws in the last one, default 50, as PS3RECOMP_ENG_WORLDLOG counts
 +         * them): the boot's and the loading screens' frames (0-5 draws) cost
 +         * nothing to antialias, and with the SPU tasks running over a stale
 +         * near-black buffer there they finish so fast that the boot hung now
@@ -24612,13 +24612,12 @@ index 8dff6011..3b62d458 100644
 +         * timing the race never showed. The bound was 1000: the pre-race
 +         * fly-over (86-1100 draws) and light moments of a race then took the
 +         * SPU path, ~16 ms of SPU work a frame the GPU thread waited for
-+         * (label 0x4B0/0x4C0): 35-47 fps there. But with 50 the race did
-+         * not start on union_v1 and yerbabuena_v3 (all_tracks: the fly-over
-+         * kept running and START RACE was never taken, 2026-11-11), so the
-+         * default stays 1000 until that is understood. */
++         * (label 0x4B0/0x4C0): 35-47 fps there. (The START RACE stalls once
++         * blamed on 50 were all_tracks' own: it stopped tapping CROSS when a
++         * fly-over passed its HUD test.) */
 +        static long min_draws = -1;
 +        if (min_draws < 0) { const char* e = getenv("PS3RECOMP_ENG_MLAA_MIN_DRAWS");
-+                             min_draws = e && *e ? atol(e) : 1000; }
++                             min_draws = e && *e ? atol(e) : 50; }
 +        m->guest = (s32)(g.frames - m->cool_until) < 0 || m->verified < MLAA_VERIFY ||
 +                   g.last_guest_draws <= (u32)min_draws;
 +    }
@@ -24903,7 +24902,7 @@ index 8dff6011..3b62d458 100644
  }
  
  void rsx_draw_engine_set_display_buffer(u32 buffer_id, u32 location, u32 offset,
-@@ -3524,13 +7133,17 @@ void rsx_draw_engine_present(void)
+@@ -3524,13 +7132,17 @@ void rsx_draw_engine_present(void)
       * re-present a double-buffered title's OTHER scanout. Presenting twice is
       * harmless either way -- the engine never clears the surface, so a second
       * present just blits the same image again. */
