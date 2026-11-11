@@ -10,6 +10,8 @@
 
 <p align="center"><b>MotorStorm Apocalypse PC port</b> · native on Linux · PS3 static recompilation · Vulkan</p>
 
+<p align="center"><img src="docs/screenshots/haight.jpg" width="900" alt="A race in Haight: the player's car on a sunlit street, race HUD on"></p>
+
 **MotorStorm Apocalypse** (PS3, BCES-00484, version 01.00) running natively on
 Linux, without an emulator. The game's code, PowerPC (PPU) and SPU, is
 translated to C before compilation by static recompilation with
@@ -21,6 +23,12 @@ Vulkan. The runtime started as a copy of the
 > **No game files come with this project.** To play you need your own copy of
 > the game, dumped from your own disc. The build turns **your** executable into
 > code on **your** machine, and that code must not be distributed.
+
+<p align="center">
+  <img src="docs/screenshots/union.jpg" width="445" alt="A crash beside an exploding excavator on the Union track">
+  <img src="docs/screenshots/dogpatch.jpg" width="445" alt="The Dogpatch docks with the LAP 1 banner">
+</p>
+<p align="center"><i>1440p, native MLAA anti-aliasing, 60 fps simulation (shown here scaled to 1280×720).</i></p>
 
 ## Status
 
@@ -148,7 +156,7 @@ scripts/lift.sh     # translates the PPU and SPU code of YOUR EBOOT.elf (checks 
 scripts/build.sh    # compiles into work/port/build-vk
 ```
 
-`lift.sh` takes a few minutes. `build.sh` takes long: about an hour with the
+`lift.sh` takes about 12 minutes. `build.sh` takes long: about an hour with the
 defaults (4 jobs, 14 GB memory cap). With more RAM, raise both, for example
 `JOBS=16 PORT_BUILD_MEM=48G scripts/build.sh` (each job can need ~3 GB).
 A build that runs out of memory is stopped by the cap rather than freezing
