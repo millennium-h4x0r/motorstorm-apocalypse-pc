@@ -12586,7 +12586,7 @@ index b1972b11..52086325 100644
  {
      if (argc < 2 || strlen(argv[1]) >= sizeof s_save_root) {
 diff --git a/libs/video/cellGcmSys.c b/libs/video/cellGcmSys.c
-index 298ee7de..14c772c2 100644
+index 298ee7de..46be8d86 100644
 --- a/libs/video/cellGcmSys.c
 +++ b/libs/video/cellGcmSys.c
 @@ -32,7 +32,9 @@ static u32 s_gcm_context_ea = 0;
@@ -14089,7 +14089,7 @@ index 298ee7de..14c772c2 100644
            stuck = 0; last = s_fifo_getoff; s_sema_blocked_pass = 0; s_park_pass = 0; }
        else if (s_fifo_getoff == last && s_fifo_getoff != put) {
            if (++stuck >= 8) { gcm_fifo_dump_around(s_fifo_getoff);
-@@ -2877,10 +3757,269 @@ static void gcm_rsx_process_fifo_unlocked(void)
+@@ -2877,10 +3757,273 @@ static void gcm_rsx_process_fifo_unlocked(void)
       * walker says it is drained: is the title reading `get`, or something else?
       * If the overflow survives this, `get` is not what it consults. */
      vm_write32(GCM_CONTROL_GUEST_ADDR + 4, gcm_get_eq_put() ? put : s_fifo_getoff);
@@ -14312,15 +14312,19 @@ index 298ee7de..14c772c2 100644
 +}
 +#endif
 +
-+/* PS3RECOMP_RSX_SPLIT=1 (2: lockstep, the parser waits for the executor after
-+ * every pass), read on the rsx thread's first drain. */
++/* The FIFO parser on its own thread: on by default (2026-11-11: 4P ~32 -> ~37
++ * fps, 1P unchanged; splitscreen, first_race and 39/39 tracks; no freeze in
++ * the Havok hunt's split-on races). PS3RECOMP_RSX_SPLIT=0 keeps one RSX
++ * thread; =2 is lockstep (the parser waits for the executor after every
++ * pass). Read on the rsx thread's first drain. */
 +static int gcm_split_on(void)
 +{
 +    static int on = -1;
 +    if (on >= 0) return on;
 +    on = 0;
 +    const char* e = getenv("PS3RECOMP_RSX_SPLIT");
-+    if (!e || atoi(e) == 0) return 0;
++    if (e && *e && atoi(e) == 0) return 0;
++    if (!e || !*e) e = "1";
 +#ifdef _WIN32
 +    fprintf(stderr, "[gcm] PS3RECOMP_RSX_SPLIT: not supported on this host -- one RSX thread\n");
 +    return 0;
@@ -14359,7 +14363,7 @@ index 298ee7de..14c772c2 100644
  }
  
  /* FIFO command-buffer-full callback body. The title's inline gcmReserve calls
-@@ -3045,8 +4184,21 @@ u32 cellGcm_display_buffer_count(void)
+@@ -3045,8 +4188,21 @@ u32 cellGcm_display_buffer_count(void)
      return n;
  }
  
@@ -14381,7 +14385,7 @@ index 298ee7de..14c772c2 100644
      /* GCM_FLIPCOUNT=1: every flip, with a timestamp. FLIP_DBG caps at 20 lines,
       * which answers "did it ever flip?" and not "is it still flipping, and how
       * fast?" -- the question that matters when a title stops appearing on
-@@ -3150,6 +4302,10 @@ static int gcm_flip_into_fifo(u32 ctx, u32 bufferId)
+@@ -3150,6 +4306,10 @@ static int gcm_flip_into_fifo(u32 ctx, u32 bufferId)
      const u32 end = vm_read32(ctx + 4), cur = vm_read32(ctx + 8);
      /* Never near the end: those bytes are the title's reserve before its
       * ring wraps, and the recycle above keys on them. */
@@ -14392,7 +14396,7 @@ index 298ee7de..14c772c2 100644
      if (cur + 8 + GCM_RECYCLE_SLACK > end || gcm_ea2io(cur) == 0xFFFFFFFFu) return 0;
      vm_write32(cur, GCM_FLIP_MARKER | bufferId);
      s_fifo_flips_queued++;
-@@ -4036,7 +5192,7 @@ s32 cellGcmMapLocalMemory(u32* address, u32* size)
+@@ -4036,7 +5196,7 @@ s32 cellGcmMapLocalMemory(u32* address, u32* size)
  
      /* Guest out-params, like every other pointer parameter in this file. */
      vm_write32((uint32_t)(uintptr_t)address, s_config.localAddress);

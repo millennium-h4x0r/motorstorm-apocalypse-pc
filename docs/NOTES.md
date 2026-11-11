@@ -2764,3 +2764,10 @@ as the SPU left them.
 - User clip planes (PS3RECOMP_ENG_USER_CLIP, off): MotorStorm never sets
   0x1478 in a race (dogpatch, pier, haight, market, alcatraz, vertigo); the
   engine now says once if a title does while they are off.
+
+### RSX parser thread on by default (2026-11-11)
+
+PS3RECOMP_RSX_SPLIT is on unless set to 0. On the default-on build:
+splitscreen PASS (4 views), first_race PASS (race finished, Havok running
+throughout), all_tracks 39/39. No freeze in the hunt's split-on races (5 of
+10 seven-minute windowed mainline races).
