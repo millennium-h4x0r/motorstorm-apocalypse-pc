@@ -2632,3 +2632,9 @@ guest display copy as the SPU left it -- the one outcome that would change
 a displayed pixel. 1P windowed with the player's settings: 7372 / 0 / 0 / 0.
 1P headless 720p: 7372 / 0 / 0 / 0. 4P split screen: 16377 / 0 / 0 / 0
 (the skip engages in 4P too, every view shown natively).
+- Pixel comparison with a control (work/runs/pixchk): race_intro with
+  PS3_SIM_60=0 (fixed 1/30 s step, so frame numbers line up), frame dumps
+  of world frames 2300+ compared pairwise. Mean |difference|: skip on vs off
+  18.4 and 31.7; skip off vs off 41.0; on vs on 35.1. Two runs with the same
+  setting differ more than runs with and without the skip: the game is not
+  frame-deterministic, and the skip's effect is below that noise.
