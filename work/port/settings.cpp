@@ -296,7 +296,11 @@ void port_settings_export(const port_settings* s)
     /* The GPU reads the guest's vertex bytes itself: in inFAMOUS 2 the CPU
      * fetch it replaces made turning the camera drop to ~40 fps in the city,
      * where most geometry was rebuilt by the SPUs every frame. */
-    put("PS3RECOMP_ENG_VPULL", "1");   /* inherited from inFAMOUS 2; revisit for MotorStorm */
+    /* Vertex pulling (the GPU decodes the guest's vertex bytes) came from
+     * inFAMOUS 2. In MotorStorm it costs: 1P race at 1440p 46.7 fps with a
+     * 54 ms p90 (stutter) against 60.0 / 17.7 ms without (2026-11-11); the
+     * CPU decode it replaces gives the same vertices. */
+    put("PS3RECOMP_ENG_VPULL", "0");
     snprintf(b, sizeof b, "%d", s->aniso);         put("PS3RECOMP_ANISO", b);
     put("PS3RECOMP_FULLRES_PARTICLES", s->fullres_particles ? "1" : "0");
     if (s->skip_launcher) put("PS3_SKIP_LAUNCHER", "1");

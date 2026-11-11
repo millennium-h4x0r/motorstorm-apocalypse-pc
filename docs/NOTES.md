@@ -2554,3 +2554,52 @@ buffer (usleep(30) at 0x85D1A0, 23% of its wall time) while the RSX thread
 decodes and dispatches the FIFO (cellGcm_rsx_process_fifo, rsx_dispatch_method,
 vertex fetch, sink_end_draw): the next thing to make faster. SLOW suite on
 dc3277e: 12/12, main_menu x2.
+
+### Real play differs from the benchmarks (2026-11-11)
+
+user/settings.ini is applied only when a window is open (main.cpp), so every
+headless benchmark ran without what play.sh gets from it. One of those
+exports was `PS3RECOMP_ENG_VPULL=1` (vertex pulling, from inFAMOUS 2): with
+it the 1P race at 1440p ran 46.7 fps with a 54 ms p90 (stutter), against
+60.0 fps / 17.7 ms without; full-resolution particles, 16x anisotropic and
+the recording thread each kept 60. settings.cpp now exports 0. bench.py
+`BENCH_VIDEO=wayland` with `PS3RECOMP_VK_WINDOW=1 PS3_USER_DIR=<copy of
+user/>` measures the windowed path with the player's settings.
+
+### The second SPU MLAA pass
+
+The MLAA task's per-frame routine 0x3120 also calls 0x5FB0 twice (through
+"return address + 8" jumps that its static call graph does not show): the
+pass that streams rows in and out and runs the edge kernels (0x7508,
+0x8660, 0x6B90). Skipping only 0x4740 removed 24% of the tasks' work;
+with 0x5FB0 too, their samples went 18207 -> 121 in a race (task threads'
+total 63k -> 31k). 0x5FB0 does its own DMA and tag waits and no
+synchronization (no atomics, signals or mailboxes). In boot and menus the
+passes run (42540 run in a race_intro boot): native MLAA is for world
+frames only.
+
+### RSX thread: two cache fixes, and where 4P stands
+
+- Fragment programs with patched inline constants (titles rewrite them in
+  place, draw after draw) were a memo miss each time: size, structural hash,
+  constants and texture mask derived again, and a new entry. Now an entry at
+  the same address whose bytes differ only in the constant payloads is
+  reused with its constants re-read (`PS3RECOMP_ENG_FPPATCH=0` off).
+- The recording queue dropped every kept snapshot and view whenever the
+  backend released anything (a snapshot made again at another size, which
+  4P does all frame), and each later snapshot then waited for the queue to
+  empty. The backend now names the released handles (freed_since) and only
+  those answers go: 4P queue syncs 14-26 k -> 4-6 k per 10 s.
+- 4-player split screen: 30-37 fps, the RSX thread busy the whole frame at
+  ~2.8 us a draw over ~10 000 draws (1P: ~3.3 us over ~3 700). A draw costs
+  the same; 4P has 2.7x the draws. 60 fps needs ~1.5 us a draw: the FIFO
+  decode and the draw processing on separate threads (~25% of the thread is
+  decode), vertex decode off the thread (~12%), and more besides.
+
+Validation of the above (2026-11-11): SLOW suite on the build: 9/12 with
+three race tests stopping on the Havok integrate hang (shape B) while other
+work loaded the second CCD; on a quiet host first_race, sim_speed (48/49
+windows at full speed) and festival pass, and 8/8 first_race runs (four at
+once, MLAA skip on and off alike) finished. Windowed with the player's
+settings (scale 2, VSync off, HUD on), 1P race: 59.6 / 59.9 fps, median
+16.70 ms, p99 19.5-20.8 ms; 4P split screen 34 fps.

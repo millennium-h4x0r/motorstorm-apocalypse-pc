@@ -175,7 +175,9 @@ NATIVE_ENTRIES = {}
 # the lifted body is skipped. work/port/spu-native/ holds them.
 NATIVE_DIRECT = {
     # The EDGE MLAA pass, skipped while native MLAA draws the picture (mlaa_skip.c).
-    "task_edge_post_mlaa_012D3B00": {0x4740: "spu_native_mlaa_pass"},
+    # 0x4740 and 0x5FB0 are the task's two passes (each called twice a frame
+    # from 0x3120, 0x5FB0 through code its static graph does not show).
+    "task_edge_post_mlaa_012D3B00": {0x4740: "spu_native_mlaa_pass", 0x5FB0: "spu_native_mlaa_pass"},
 }
 
 # What this script owns in --spu-dir (removed before each run).

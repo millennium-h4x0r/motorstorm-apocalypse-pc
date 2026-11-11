@@ -8,10 +8,13 @@
  * they wrote: ~7% of the process at 720p, ~10% at 1440p, on the RSX's chain
  * (it waits on the tasks' completion label before the display copy).
  *
- * 0x4740 is one MLAA pass over the task's part of the buffer, already in its
- * local store; the task calls it twice a frame around its barrier and does
- * the DMA and the start / barrier / completion protocol itself (0x3120), so
- * returning from it at once leaves every handshake as it was. It is skipped
+ * 0x4740 and 0x5FB0 are the task's two MLAA passes over its part of the
+ * buffer (0x4740 on what is in local store; 0x5FB0 streams rows in and out
+ * itself and waits on its own DMA tags), each called twice a frame by 0x3120,
+ * which does the start / barrier / completion protocol around them. Neither
+ * holds any of that protocol (no atomics, signals or mailboxes), so returning
+ * from them at once leaves every handshake as it was; the buffer they would
+ * have rewritten is not read while native MLAA is armed. It is skipped
  * only while the engine reports this frame's copy as left out
  * (rsx_draw_engine_mlaa_left_out); when the frame goes the guest's way (a
  * fallback, the cool-down after it, a second view) the pass runs.
