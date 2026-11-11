@@ -263,7 +263,13 @@ class Run:
                 self.last = None
         self.seen = max(self.seen, len(frames) - 1)
         if self.ticks >= 3:
+            # The HUD and the clock ticks can all be read in one poll (several
+            # dumps at once), the same moment havok0 was counted: give the
+            # physics up to 20 s after the HUD to show a new task run before
+            # calling it stopped.
             if self.havok(t) <= (self.havok0 or 0):
+                if el - self.hud_t < 20:
+                    return None
                 return self.finish(f"FAIL HUD and clock but no Havok task since the HUD ({el:.0f} s)")
             return self.finish(f"PASS GO at <= {el:.0f} s (HUD at {self.hud_t:.0f} s)")
         if el > LIMIT:

@@ -2686,3 +2686,19 @@ Not physics: Havok is 0.4% of a race's samples; renderablejob (img 241) 6.9%,
 pvsjob (239) 5.6%, the SPU runtime 15.5%. In-race the RSX waits ~8 ms a
 frame on 0x480 (the main thread's next frame), and 0x4B0/0x4C0 are released
 before it gets there.
+
+### Fly-over native MLAA reverted; START RACE waits (open, 2026-11-11)
+
+all_tracks (39 layouts, headless): 15 "no Havok task since the HUD" were the
+test's own race (the HUD and three clock ticks read in one poll, the moment
+havok0 was counted; the logs show Havok tasks to the end). Fixed: up to 20 s
+after the HUD for a new task run. 4 layouts never left the fly-over (START
+RACE shown, CROSS tapped every 3 s for 600 s): yerbabuena_v3, interstate_v2,
+union_v1, market_v3. All 39 passed on 2026-11-07.
+- union_v1: with PS3RECOMP_ENG_MLAA_MIN_DRAWS=50 stuck 2 of 2, with 1000
+  GO at 31 s. The default is back to 1000: native MLAA in the fly-over keeps
+  the race from starting there. Why is open (the SPU MLAA tasks' completion,
+  which the fly-over would no longer run, is the first suspect).
+- yerbabuena_v3: stuck with 1000 too. Saved binaries: 2026-11-07 (bin_base)
+  started the race only at 228 s, 2026-11-09 and 2026-11-11 not within 240 s.
+  A long, variable wait before START RACE is taken, older than today.
