@@ -2603,3 +2603,21 @@ windows at full speed) and festival pass, and 8/8 first_race runs (four at
 once, MLAA skip on and off alike) finished. Windowed with the player's
 settings (scale 2, VSync off, HUD on), 1P race: 59.6 / 59.9 fps, median
 16.70 ms, p99 19.5-20.8 ms; 4P split screen 34 fps.
+
+### 4P, continued (2026-11-11)
+
+- Fragment programs uploaded into a ring (every 4P memo miss was a new
+  address): a miss now looks for an entry with the same code outside the
+  constant payloads, copies its analysis and reads only the constants; the
+  memo holds 256 programs. ~60% of the remaining misses served that way.
+- Build flags: distribution compilers add stack-protector canaries and CET
+  markers to every function (the canary check showed in rsx_dispatch_method's
+  hottest instructions); scripts/build.sh now passes -fno-stack-protector
+  -fcf-protection=none (PORT_HARDEN=1 keeps them). Measured neutral.
+- Fence publication pacing (GCM_REF_PACE_US=0): no change.
+- Causal test in 4P (whole machine, frame time per draw): +4 ms on the main
+  thread or on the RSX thread each adds ~3.2 ms a frame; the main thread
+  waits for command-buffer space a third of its time (usleep(30) at
+  0x85D1A0) while the RSX thread is busy the whole frame. 4P is bound by the
+  RSX thread's ~2.8 us a draw over ~10 000 draws; it needs about half that
+  for 60 fps.

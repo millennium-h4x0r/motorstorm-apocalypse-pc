@@ -47,12 +47,20 @@ SPU_GEN=OFF; [ -n "${PORT_SPU_PROFILE_GEN:-}" ] && SPU_GEN=ON
 
 [ -f "$ROOT/work/src/recomp/ppu_recomp.h" ] || { echo "nothing lifted yet -- run scripts/lift.sh" >&2; exit 1; }
 
+# Distribution compilers (Ubuntu's GCC and clang) add a stack-protector canary
+# to every function with a local array and CET markers to every function: a
+# cost on each call of the runtime's per-method and per-draw paths (the RSX
+# thread's method dispatch showed the canary check among its hottest
+# instructions). PORT_HARDEN=1 keeps the distribution's defaults.
+HARDEN="-fno-stack-protector -fcf-protection=none"
+[ -n "${PORT_HARDEN:-}" ] && HARDEN=""
 configure() {   # <build dir> <vulkan ON|OFF>
     cmake -S "$PORT" -B "$1" -G Ninja -DCMAKE_BUILD_TYPE=Release \
         -DPS3RECOMP_DIR="$DIR" -DRECOMP_DIR="$ROOT/work/src/recomp" -DSPU_DIR="$PORT/spu" \
         -DPS3RECOMP_RSX_VULKAN="$2" -DPython3_EXECUTABLE="${PYTHON:-$ROOT/.venv/bin/python}" -DPORT_SPU_MARCH="$MARCH" \
         -DCMAKE_C_COMPILER_LAUNCHER="$PORT/tools/spu_cc.sh" \
         -DCMAKE_CXX_COMPILER_LAUNCHER="$PORT/tools/ppu_cxx.sh" \
+        -DCMAKE_C_FLAGS="${PORT_CFLAGS-$HARDEN}" -DCMAKE_CXX_FLAGS="${PORT_CXXFLAGS-$HARDEN}" \
         -DPORT_PPU_PROFILE="$PROFILE" -DPORT_SPU_PROFILE="$SPU_PROFILE" -DPORT_SPU_PROFILE_GEN="$SPU_GEN" \
         -DPORT_PGO_RT="${PORT_PGO_RT:-}" -DPORT_PGO_DUMP="${PORT_PGO_DUMP:-}"
 }
