@@ -2542,3 +2542,15 @@ while `rsx_draw_engine_mlaa_left_out()` says the frame's copy was left out
 go the guest's way) and passes with the same view lumas. race_intro at 1440p
 with and without: same picture quality. 1P race at 1440p: 58.8 / 59.6 fps
 vs 57.9.
+
+### Where it stands (2026-11-11)
+
+1P race, whole 5950X, bench.py with `BENCH_DUMP_EVERY=600` (its default
+dump every 30 frames is a GPU readback plus a PPM write: a spike every 0.5 s
+that play does not have): 720p mean frame 16.73-16.77 ms (59.9 fps), 1440p
+16.68-16.75 ms (59.7-59.9 fps); median 16.70 ms, p99 under 20 ms. 4-player
+split screen 37 fps: there the main thread waits on space in the command
+buffer (usleep(30) at 0x85D1A0, 23% of its wall time) while the RSX thread
+decodes and dispatches the FIFO (cellGcm_rsx_process_fifo, rsx_dispatch_method,
+vertex fetch, sink_end_draw): the next thing to make faster. SLOW suite on
+dc3277e: 12/12, main_menu x2.
