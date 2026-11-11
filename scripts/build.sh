@@ -6,9 +6,9 @@
 #
 # The lifted PPU code compiles with clang++ (work/port/tools/ppu_cxx.sh) in
 # chunks of about 2 GB each (PORT_PPU_GCC=1: GCC, ~5 GB a chunk). The job
-# count follows the machine: as many as there are CPU threads, but no more
-# than the available memory allows at 3 GB a job (5 with GCC), and at least
-# one. On systemd hosts the build runs in a memory scope with no swap, 85% of
+# count follows the machine: up to 8 (or the CPU threads, if fewer), but no
+# more than the available memory allows at 3 GB a job (5 with GCC), and at
+# least one. On systemd hosts the build runs in a memory scope with no swap, 85% of
 # the memory available at the start: a wide parallel build can exhaust RAM and
 # take the desktop down. JOBS=<n>, PORT_BUILD_MEM=<size> (with a unit, e.g.
 # 24G) and PORT_SPU_MARCH=<march> override (x86-64-v3 for a CPU without
@@ -29,6 +29,7 @@ if [ -z "${JOBS:-}" ]; then
     PER_JOB_MB=3072; [ -n "${PORT_PPU_GCC:-}" ] && PER_JOB_MB=5120
     JOBS=$(( AVAIL_MB * 85 / 100 / PER_JOB_MB ))
     NPROC=$(nproc 2>/dev/null || echo 4)
+    [ "$NPROC" -gt 8 ] && NPROC=8      # at most 8 by default: the desktop stays usable
     [ "$JOBS" -gt "$NPROC" ] && JOBS=$NPROC
     [ "$JOBS" -lt 1 ] && JOBS=1
 fi
