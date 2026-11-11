@@ -5,13 +5,14 @@
 #   scripts/build.sh --tests  work/port/build too, the headless build tests use
 #
 # The lifted PPU code compiles with clang++ (work/port/tools/ppu_cxx.sh) in
-# chunks of about 2 GB each, so the default is four jobs, and on systemd hosts
-# the build runs in a 14 GB memory scope with no swap: a wide parallel build
-# can exhaust RAM and take the desktop down. PORT_PPU_GCC=1 compiles them with
-# GCC instead, ~5 GB a chunk, and two jobs. PORT_BUILD_MEM=<size> raises the
-# memory scope on a bigger machine. JOBS=<n> and PORT_SPU_MARCH=<march>
-# override (x86-64-v3 for a CPU without AVX-512; the port checks at start-up
-# that the CPU has what it was built for).
+# chunks of about 2 GB each (PORT_PPU_GCC=1: GCC, ~5 GB a chunk). The job
+# count follows the machine: as many as there are CPU threads, but no more
+# than the available memory allows at 3 GB a job (5 with GCC), and at least
+# one. On systemd hosts the build runs in a memory scope with no swap, 85% of
+# the memory available at the start: a wide parallel build can exhaust RAM and
+# take the desktop down. JOBS=<n>, PORT_BUILD_MEM=<size> (with a unit, e.g.
+# 24G) and PORT_SPU_MARCH=<march> override (x86-64-v3 for a CPU without
+# AVX-512; the port checks at start-up that the CPU has what it was built for).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # One build at a time: several agents share this tree, and two builds in the
@@ -22,7 +23,17 @@ if [ -z "${PORT_BUILD_LOCKED:-}" ] && command -v flock >/dev/null; then
 fi
 DIR="${PS3RECOMP_DIR:-$ROOT/ps3recomp}"
 PORT="$ROOT/work/port"
-if [ -n "${PORT_PPU_GCC:-}" ]; then JOBS="${JOBS:-2}"; else JOBS="${JOBS:-4}"; fi
+AVAIL_MB=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null || echo 0)
+[ "${AVAIL_MB:-0}" -gt 0 ] || AVAIL_MB=16384
+if [ -z "${JOBS:-}" ]; then
+    PER_JOB_MB=3072; [ -n "${PORT_PPU_GCC:-}" ] && PER_JOB_MB=5120
+    JOBS=$(( AVAIL_MB * 85 / 100 / PER_JOB_MB ))
+    NPROC=$(nproc 2>/dev/null || echo 4)
+    [ "$JOBS" -gt "$NPROC" ] && JOBS=$NPROC
+    [ "$JOBS" -lt 1 ] && JOBS=1
+fi
+PORT_BUILD_MEM="${PORT_BUILD_MEM:-$(( AVAIL_MB * 85 / 100 ))M}"
+echo "build: $JOBS jobs, memory scope $PORT_BUILD_MEM (${AVAIL_MB} MB available)"
 # The SPU code's -march: AVX-512 (x86-64-v4) when this CPU has it, else
 # x86-64-v3 (AVX2). PORT_SPU_MARCH overrides, e.g. to build for another machine.
 if [ -z "${PORT_SPU_MARCH:-}" ]; then
@@ -66,7 +77,7 @@ configure() {   # <build dir> <vulkan ON|OFF>
 }
 build() {
     if command -v systemd-run >/dev/null && systemd-run --user --scope -q true 2>/dev/null; then
-        systemd-run --user --scope -q -p MemoryMax="${PORT_BUILD_MEM:-14G}" -p MemorySwapMax=0 nice -n 10 \
+        systemd-run --user --scope -q -p MemoryMax="$PORT_BUILD_MEM" -p MemorySwapMax=0 nice -n 10 \
             cmake --build "$1" -j "$JOBS" -- -k 0
     else
         nice -n 10 cmake --build "$1" -j "$JOBS" -- -k 0

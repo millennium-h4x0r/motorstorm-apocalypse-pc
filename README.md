@@ -155,11 +155,13 @@ scripts/lift.sh     # translates the PPU and SPU code of YOUR EBOOT.elf (checks 
 scripts/build.sh    # compiles into work/port/build-vk
 ```
 
-`lift.sh` takes about 12 minutes and `build.sh` about 35 with the defaults
-(4 jobs, 14 GB memory cap), measured from a fresh clone on a Ryzen 9 5950X. With more RAM, raise both, for example
-`JOBS=16 PORT_BUILD_MEM=48G scripts/build.sh` (each job can need ~3 GB).
-A build that runs out of memory is stopped by the cap rather than freezing
-the machine; run it again with fewer jobs and it carries on where it stopped.
+`lift.sh` takes about 12 minutes. `build.sh` sizes itself to the machine: as
+many parallel jobs as CPU threads, but no more than the free memory allows at
+about 3 GB a job, inside a memory cap of 85% of the free memory (on a Ryzen 9
+5950X with 128 GB: 24 jobs). With 4 jobs a fresh build took about 35 minutes.
+`JOBS=<n>` and `PORT_BUILD_MEM=<size>` (with a unit, e.g. `24G`) override it.
+A build that hits the cap is stopped rather than freezing the machine; run it
+again with fewer jobs and it carries on where it stopped.
 
 Optional: `work/pgo/ppu.profdata` and `work/pgo/spu.profdata`, when present,
 are used for profile-guided optimisation. They are not shipped; the port runs
