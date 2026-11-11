@@ -15772,7 +15772,7 @@ index c4e4d849..ff1d4eac 100644
  /* ---- decoded state getters -------------------------------------------- */
  
 diff --git a/libs/video/rsx_draw_engine.c b/libs/video/rsx_draw_engine.c
-index 8dff6011..2475eb66 100644
+index 8dff6011..0d45054b 100644
 --- a/libs/video/rsx_draw_engine.c
 +++ b/libs/video/rsx_draw_engine.c
 @@ -1,3 +1,9 @@
@@ -22152,7 +22152,7 @@ index 8dff6011..2475eb66 100644
  
      /* Textures before any pipeline or target binding: a cache refresh can
       * replace a resource, and the backend is free to submit while doing it. */
-@@ -3104,65 +5085,150 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -3104,65 +5085,151 @@ static void sink_end(void* user, const rsx_dispatch* r)
      memset(samplers, 0, sizeof samplers);
      memset(vtextures, 0, sizeof vtextures);
      memset(vsamplers, 0, sizeof vsamplers);
@@ -22255,12 +22255,13 @@ index 8dff6011..2475eb66 100644
 +    static int vpc_force_full = -1;
 +    if (vpc_force_full < 0) vpc_force_full = getenv("PS3RECOMP_ENG_VPC_FULL") ? 1 : 0;
 +    const int vpc_range = g.be->bind_vs_constants_range && !g.vpc_full && !vpc_force_full;
-+    /* PS3RECOMP_BQ_VSC_DELTA=1: only the rows written since they last went
-+     * (rsx_dispatch.cdirty) cross to the recording thread, which keeps the
-+     * rest; the RSX thread copied ~5 KB of rows a draw before (4P: 64 MB a
-+     * frame). */
++    /* Only the rows written since they last went (rsx_dispatch.cdirty)
++     * cross to the recording thread, which keeps the rest; the RSX thread
++     * copied ~5 KB of rows a draw before (4P: 33-64 MB a frame). On by
++     * default (2026-11-11: 4P 33.6/35.4 fps vs 25.6/33.0, the splitscreen
++     * test's four views right, 1P unchanged); PS3RECOMP_BQ_VSC_DELTA=0 off. */
 +    static int vsc_delta_on = -1;
-+    if (vsc_delta_on < 0) { const char* e = getenv("PS3RECOMP_BQ_VSC_DELTA"); vsc_delta_on = e && e[0] == '1'; }
++    if (vsc_delta_on < 0) { const char* e = getenv("PS3RECOMP_BQ_VSC_DELTA"); vsc_delta_on = !(e && e[0] == '0'); }
 +    const int vsc_delta = vsc_delta_on && vpc_range && g.be->bind_vs_constants_delta;
 +    if (!vpc_range) {
 +        if (ds_t0 && !memcmp(g.vp_cb, g.rsx.constants, RSX_DSP_NUM_CONSTANTS * 16u)) ds.cb_same++;
@@ -22335,7 +22336,7 @@ index 8dff6011..2475eb66 100644
  
      /* The depth attachment is cleared the first time it is bound, so a title
       * that never clears its shadow zeta still tests against something. */
-@@ -3179,64 +5245,210 @@ static void sink_end(void* user, const rsx_dispatch* r)
+@@ -3179,64 +5246,210 @@ static void sink_end(void* user, const rsx_dispatch* r)
      for (u32 i = 0; i < n_targets; i++) handles[i] = g.surfaces[targets[i]].handle;
      g.be->bind_targets(g.be->user, handles, n_targets, depth_handle);
      g.be->bind_pipeline(g.be->user, pipeline);
@@ -22584,7 +22585,7 @@ index 8dff6011..2475eb66 100644
  }
  
  static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
-@@ -3246,16 +5458,14 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
+@@ -3246,16 +5459,14 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
      u32 targets[RSX_BE_MAX_COLOR_TARGETS];
      const u32 n_targets = eng_current_target_set(targets);
      if (!n_targets) return;
@@ -22608,7 +22609,7 @@ index 8dff6011..2475eb66 100644
      if (mask & (RSX_CLEAR_COLOR_R | RSX_CLEAR_COLOR_G |
                  RSX_CLEAR_COLOR_B | RSX_CLEAR_COLOR_A)) {
          const u32 c = rsx_dsp_clear_color(&g.rsx);
-@@ -3267,79 +5477,64 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
+@@ -3267,79 +5478,64 @@ static void sink_clear(void* user, const rsx_dispatch* r, u32 mask)
          };
          /* Every target the set names, not only A: a deferred pass clears its
           * whole G-buffer in one CLEAR_SURFACE, and B, C and D would otherwise
@@ -22731,7 +22732,7 @@ index 8dff6011..2475eb66 100644
          }
      }
  }
-@@ -3352,20 +5547,242 @@ static u32 eng_present_surface(u32 buffer_id)
+@@ -3352,20 +5548,242 @@ static u32 eng_present_surface(u32 buffer_id)
  {
      if (buffer_id < 8 && g.display_buffers[buffer_id].valid) {
          const eng_display_buffer* d = &g.display_buffers[buffer_id];
@@ -22977,7 +22978,7 @@ index 8dff6011..2475eb66 100644
      if (getenv("PS3RECOMP_METAL_FRAME_DUMP") && g.frames % 120 == 0) {
          u32 current = eng_current_surface();
          fprintf(stderr, "[rsx capture] frame=%u buffer=%u selected=%u current=%u draws=%u surfaces=%u\n",
-@@ -3375,10 +5792,205 @@ static void eng_present(u32 buffer_id)
+@@ -3375,10 +5793,205 @@ static void eng_present(u32 buffer_id)
                      i, g.surfaces[i].location, g.surfaces[i].offset,
                      g.surfaces[i].w, g.surfaces[i].h, g.surfaces[i].handle);
      }
@@ -23185,7 +23186,7 @@ index 8dff6011..2475eb66 100644
      g.last_guest_draws = g.guest_draws;
      g.guest_draws = 0;
  }
-@@ -3394,7 +6006,7 @@ static void sink_flip(void* user, const rsx_dispatch* r, u32 arg)
+@@ -3394,7 +6007,7 @@ static void sink_flip(void* user, const rsx_dispatch* r, u32 arg)
  
  void rsx_draw_engine_set_backend(const rsx_draw_backend* backend)
  {
@@ -23194,7 +23195,7 @@ index 8dff6011..2475eb66 100644
  }
  
  void rsx_draw_engine_set_default(int on)
-@@ -3426,11 +6038,7 @@ int rsx_draw_engine_init(u32 width, u32 height)
+@@ -3426,11 +6039,7 @@ int rsx_draw_engine_init(u32 width, u32 height)
      if (!g.be) return -1;
      g.width  = width  ? width  : 1280;
      g.height = height ? height : 720;
@@ -23207,7 +23208,7 @@ index 8dff6011..2475eb66 100644
      if (!g.vp_cb) return -1;
      if (g.be->init && g.be->init(g.be->user, g.width, g.height) != 0) {
          free(g.vp_cb); g.vp_cb = NULL;
-@@ -3444,12 +6052,9 @@ int rsx_draw_engine_init(u32 width, u32 height)
+@@ -3444,12 +6053,9 @@ int rsx_draw_engine_init(u32 width, u32 height)
      sink.draw_arrays      = sink_draw_arrays;
      sink.draw_index_array = sink_draw_index;
      sink.inline_array     = sink_inline_array;
@@ -23220,7 +23221,7 @@ index 8dff6011..2475eb66 100644
      fprintf(stderr, "[rsx engine] register-file draw engine up (%ux%u)\n",
              g.width, g.height);
      return 0;
-@@ -3464,24 +6069,47 @@ void rsx_draw_engine_shutdown(void)
+@@ -3464,24 +6070,47 @@ void rsx_draw_engine_shutdown(void)
          if (g.textures[i].handle) g.be->texture_release(g.be->user, g.textures[i].handle);
      for (u32 i = 0; i < g.n_pipelines; i++)
          if (g.pipelines[i].handle) g.be->pipeline_release(g.be->user, g.pipelines[i].handle);
@@ -23275,7 +23276,7 @@ index 8dff6011..2475eb66 100644
  }
  
  void rsx_draw_engine_method(u32 method, u32 arg)
-@@ -3495,6 +6123,978 @@ void rsx_draw_engine_method(u32 method, u32 arg)
+@@ -3495,6 +6124,978 @@ void rsx_draw_engine_method(u32 method, u32 arg)
       * preserve them with the wider mask. */
      u32 m = (method >= 0xE000u) ? (method & 0xFFFCu) : (method & 0x1FFCu);
      rsx_dispatch_method(&g.rsx, m, arg);
@@ -24254,7 +24255,7 @@ index 8dff6011..2475eb66 100644
  }
  
  void rsx_draw_engine_set_display_buffer(u32 buffer_id, u32 location, u32 offset,
-@@ -3524,13 +7124,17 @@ void rsx_draw_engine_present(void)
+@@ -3524,13 +7125,17 @@ void rsx_draw_engine_present(void)
       * re-present a double-buffered title's OTHER scanout. Presenting twice is
       * harmless either way -- the engine never clears the surface, so a second
       * present just blits the same image again. */
