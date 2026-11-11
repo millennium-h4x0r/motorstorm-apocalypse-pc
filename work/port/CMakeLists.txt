@@ -150,7 +150,8 @@ set(SPU_SOURCES "")
 # Native stand-ins for lifted SPU functions (spu_lifter.py --native-at; run
 # with SPU_NATIVE=1). Under spu-native/ so tools/spu_cc.sh builds them with
 # clang like the lifts. Unused unless a lift references them.
-set(PORT_NATIVE_SPU_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/spu-native/dxtblend_native.c")
+set(PORT_NATIVE_SPU_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/spu-native/dxtblend_native.c"
+                            "${CMAKE_CURRENT_SOURCE_DIR}/spu-native/mlaa_skip.c")
 if(PORT_ENABLE_SPU)
     file(GLOB SPU_LIFTED CONFIGURE_DEPENDS "${SPU_DIR}/*/spu_recomp.c")
     if(SPU_LIFTED)

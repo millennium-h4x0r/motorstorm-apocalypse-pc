@@ -170,6 +170,14 @@ TASK_EXTRA_OUTSIDE_TEXT = set()   # (task, lsa) pairs exempt from the check belo
 # directory name -> LS addresses). None yet for this title.
 NATIVE_ENTRIES = {}
 
+# Native stand-ins called directly at a lifted function's entry: the named C
+# function returns nonzero when it did the call's work (and the return), and
+# the lifted body is skipped. work/port/spu-native/ holds them.
+NATIVE_DIRECT = {
+    # The EDGE MLAA pass, skipped while native MLAA draws the picture (mlaa_skip.c).
+    "task_edge_post_mlaa_012D3B00": {0x4740: "spu_native_mlaa_pass"},
+}
+
 # What this script owns in --spu-dir (removed before each run).
 GENERATED_FILES = ("spu_workloads.c", "spu_elf_workloads.c", "jobmods_register.c",
                    "jobmods_manifest.json", "spu_manifest.json", "_tmp.elf")
@@ -555,6 +563,22 @@ def require_entry(spu, name, prefix, entry):
         die(f"{name}: no lifted function at its entry 0x{entry:X} ({sym[:-1]})")
 
 
+def add_native_direct(spu):
+    for name, entries in NATIVE_DIRECT.items():
+        p = Path(spu, name, "spu_recomp.c")
+        if not p.exists():
+            die(f"native stand-ins for {name}, which was not lifted")
+        src = p.read_text(encoding="utf-8")
+        for a, fn in entries.items():
+            head = f"void {name}_spu_func_{a:08X}(spu_context* ctx) {{\n"
+            hook = f"    {{ extern int {fn}(spu_context*); if ({fn}(ctx)) return; }}\n"
+            if head not in src:
+                die(f"{name}: no function at 0x{a:X} for {fn}")
+            if head + hook not in src:
+                src = src.replace(head, head + hook, 1)
+        p.write_text(src, encoding="utf-8", newline="\n")
+
+
 def add_native_entries(spu):
     for name, addrs in NATIVE_ENTRIES.items():
         p = Path(spu, name, "spu_recomp.c")
@@ -863,6 +887,7 @@ __attribute__((constructor)) static void port_spu_register_all_ctor(void)
 """
     Path(spu, "spu_workloads.c").write_text(src, encoding="utf-8", newline="\n")
     add_native_entries(spu)
+    add_native_direct(spu)
 
     for m in manifest:
         for k in ("ea", "size", "ls", "entry", "text_ea", "text_size", "link_base"):

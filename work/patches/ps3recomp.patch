@@ -15736,7 +15736,7 @@ index c4e4d849..ff1d4eac 100644
  /* ---- decoded state getters -------------------------------------------- */
  
 diff --git a/libs/video/rsx_draw_engine.c b/libs/video/rsx_draw_engine.c
-index 8dff6011..3089d416 100644
+index 8dff6011..248d7abf 100644
 --- a/libs/video/rsx_draw_engine.c
 +++ b/libs/video/rsx_draw_engine.c
 @@ -1,3 +1,9 @@
@@ -20055,8 +20055,8 @@ index 8dff6011..3089d416 100644
 +    const eng_fp_memo* fp = NULL;
 +    if (!eng_guest_programs(NULL, &fp)) return 0xFFFFu;
 +    return fp->tex_mask;
-+}
-+
+ }
+ 
 +/* ---- native ambient occlusion ---------------------------------------------
 + * rsx_draw_engine_set_native_ssao: the GPU computes what a title's SPU job
 + * derives from NV3089 copies of its G-buffer, and the texture units that
@@ -20458,7 +20458,7 @@ index 8dff6011..3089d416 100644
 +static void eng_nlt_lock(void)
 +{
 +    while (__atomic_exchange_n(&s_nlt_lock, 1, __ATOMIC_ACQUIRE)) eng_spin_pause();
- }
++}
 +static void eng_nlt_unlock(void) { __atomic_store_n(&s_nlt_lock, 0, __ATOMIC_RELEASE); }
 +
 +/* The SPU does the lighting from the next job on, and out[] is not a result
@@ -20789,7 +20789,7 @@ index 8dff6011..3089d416 100644
 +}
 +static void eng_mlaa_tex_guard(u32 location, u32 offset);   /* the native MLAA pass, below */
 +static int s_mlaa_armed;                                      /* it left a buffer copy out */
- 
++
  static u32 sink_bind_textures(const u32* target_slots, u32 n_targets,
 -                              u32 current_zslot, u32 tex_used,
 +                              u32 current_zslot,
@@ -20917,7 +20917,7 @@ index 8dff6011..3089d416 100644
 -            if (surface_at < 0 || z->depth_serial > g.surfaces[surface_at].color_serial) {
 -                zsrc = (int)i;
 -                g.zdepths[i].last_use = g.frames;
--            }
+             }
 -            break;
 -        }
 -        if (zsrc >= 0) {
@@ -20926,7 +20926,7 @@ index 8dff6011..3089d416 100644
 -            if (base_fmt == RSX_TEX_FMT_DEPTH24_D8 && current_zslot != (u32)zsrc) {
 -                const u32 snap = eng_zdepth_snapshot((u32)zsrc, t.width, t.height);
 -                if (snap) { textures[u] = snap; continue; }
-             }
+-            }
 -            const u32 conv = eng_zdepth_as_color((u32)zsrc, &t);
 -            if (conv) { textures[u] = conv; continue; }
 -            if (eng_zdepth_to_guest((u32)zsrc)) {
@@ -21364,10 +21364,7 @@ index 8dff6011..3089d416 100644
 -}
 -
 -static u8 pd_unit(float v)
-+/* PS3RECOMP_ENG_DROPLOG=1: name each draw sink_end drops (first 6 per
-+ * reason), with the primitive, packet/vertex counts and target address. */
-+static void eng_drop(const char* why, u32 prim)
- {
+-{
 -    if (!(v > 0.0f)) return 0;
 -    if (v >= 1.0f) return 255;
 -    return (u8)(v * 255.0f + 0.5f);
@@ -21375,7 +21372,10 @@ index 8dff6011..3089d416 100644
 -
 -/* One colour surface to a binary PPM, alpha dropped, floats clamped to [0,1]. */
 -static void pd_write_surface(u32 slot, const char* path)
--{
++/* PS3RECOMP_ENG_DROPLOG=1: name each draw sink_end drops (first 6 per
++ * reason), with the primitive, packet/vertex counts and target address. */
++static void eng_drop(const char* why, u32 prim)
+ {
 -    const eng_surface* s = &g.surfaces[slot];
 -    u32 bpp;
 -    switch (s->fmt) {
@@ -21842,7 +21842,8 @@ index 8dff6011..3089d416 100644
 +        dc_fetch(&layout, rebuild);
 +        if (!s_geo_arm.on) s_geo_arm.ok = 0;
 +        s_geo_arm.on = 0;
-+    }
+     }
+-    if (!n_draw) return;
 +    const u64 ds_t0 = eng_ds_enabled() ? eng_ds_now() : 0;
 +    u64 ds_m = ds_t0;   /* stage marks within the rest of sink_end */
 +#define DS_MARK(field) do { if (ds_t0) { const u64 _t = eng_ds_now(); ds.field += _t - ds_m; ds_m = _t; } } while (0)
@@ -21882,8 +21883,7 @@ index 8dff6011..3089d416 100644
 +                eng_geo_store(geo, geo_key, &layout, indexed, n_draw);
 +            }
 +        }
-     }
--    if (!n_draw) return;
++    }
 +    if (!n_draw) { eng_drop("n_draw0", prim); return; }
  
      rsx_be_render_state rs;
@@ -23065,7 +23065,7 @@ index 8dff6011..3089d416 100644
  }
  
  void rsx_draw_engine_method(u32 method, u32 arg)
-@@ -3495,6 +6025,928 @@ void rsx_draw_engine_method(u32 method, u32 arg)
+@@ -3495,6 +6025,943 @@ void rsx_draw_engine_method(u32 method, u32 arg)
       * preserve them with the wider mask. */
      u32 m = (method >= 0xE000u) ? (method & 0xFFFCu) : (method & 0x1FFCu);
      rsx_dispatch_method(&g.rsx, m, arg);
@@ -23588,6 +23588,21 @@ index 8dff6011..3089d416 100644
 +    return 0;
 +}
 +
++/* For the SPU side (work/port/spu-native/mlaa_skip.c): the buffer copy of the
++ * frame now being anti-aliased was left out of guest memory (native MLAA
++ * armed), so the SPU MLAA tasks would only rework stale bytes that no
++ * display copy reads. Racy by design: a stale 1 costs one frame of the SPU
++ * result while the engine is on its own path anyway; a stale 0 runs the
++ * tasks as before. */
++int rsx_draw_engine_mlaa_left_out(void)
++{
++    if (s_mlaa.d.mode != 1u) return 0;
++    for (u32 i = 0; i < eng_mlaa_nviews(); i++)
++        if (__atomic_load_n(&s_mlaa.v[i].pend, __ATOMIC_RELAXED) &&
++            !__atomic_load_n(&s_mlaa.v[i].used, __ATOMIC_RELAXED)) return 1;
++    return 0;
++}
++
 +static void eng_mlaa_fallback(eng_mlaa_view* m, const char* why)
 +{
 +    s_mlaa.n_fallback++;
@@ -23994,7 +24009,7 @@ index 8dff6011..3089d416 100644
  }
  
  void rsx_draw_engine_set_display_buffer(u32 buffer_id, u32 location, u32 offset,
-@@ -3524,13 +6976,17 @@ void rsx_draw_engine_present(void)
+@@ -3524,13 +6991,17 @@ void rsx_draw_engine_present(void)
       * re-present a double-buffered title's OTHER scanout. Presenting twice is
       * harmless either way -- the engine never clears the surface, so a second
       * present just blits the same image again. */
@@ -24013,7 +24028,7 @@ index 8dff6011..3089d416 100644
  
  void rsx_draw_engine_note_flip(u32 buffer_id)
 diff --git a/libs/video/rsx_draw_engine.h b/libs/video/rsx_draw_engine.h
-index a25ecc29..75bf1f23 100644
+index a25ecc29..35a5a122 100644
 --- a/libs/video/rsx_draw_engine.h
 +++ b/libs/video/rsx_draw_engine.h
 @@ -65,15 +65,9 @@ typedef enum {
@@ -24461,7 +24476,7 @@ index a25ecc29..75bf1f23 100644
  /* --- test hooks ---------------------------------------------------------- */
  
  /* Draws that ran the guest's OWN programs in the last presented frame. A draw
-@@ -371,6 +525,121 @@ u32  rsx_draw_engine_guest_draws(void);
+@@ -371,6 +525,123 @@ u32  rsx_draw_engine_guest_draws(void);
   * 8-bit-per-channel one. */
  u32  rsx_draw_engine_readback_center(void);
  
@@ -24579,6 +24594,8 @@ index a25ecc29..75bf1f23 100644
 + * native MLAA pass stands in for what the RSX would wait for there and the
 + * description asked for the wait to be passed (skip_acquire). */
 +int  rsx_draw_engine_acquire_skip(u32 label);
++/* 1 while the frame's MLAA buffer copy was left out (native MLAA armed). */
++int  rsx_draw_engine_mlaa_left_out(void);
 +
  /* ---- pieces the engine exposes for its own tests ------------------------ */
  /*

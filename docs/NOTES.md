@@ -2526,3 +2526,19 @@ mainline_v1 and dogpatch_v1 races (counters reset at 30 s, written every
 20 s), merged with llvm-profdata-18. Measured neutral to slightly positive
 (58.6 vs 58.4 fps over two pairs): the SPU work on the critical path is a
 small part of the frame.
+
+### SPU MLAA work skipped under native MLAA (2026-11-11)
+
+With native MLAA the engine leaves the frame's copy into the MLAA buffer out
+of guest memory and draws its own MLAA over the target; the five EDGE MLAA
+tasks still reworked the buffer's stale bytes every frame (largest single
+module at 1440p: ~10% of the process, on the RSX's chain). Their pass
+(task_edge_post_mlaa 0x4740: computation on LS only; the DMA and the start /
+barrier / completion protocol are in 0x3120 around it) now returns at once
+while `rsx_draw_engine_mlaa_left_out()` says the frame's copy was left out
+(work/port/spu-native/mlaa_skip.c, lift_spu.py NATIVE_DIRECT;
+`PS3_MLAA_SPU_SKIP=0` runs it always). A race: 65536 passes skipped, 60 run
+(the frames that went the guest's way). Split screen never skips (its views
+go the guest's way) and passes with the same view lumas. race_intro at 1440p
+with and without: same picture quality. 1P race at 1440p: 58.8 / 59.6 fps
+vs 57.9.
