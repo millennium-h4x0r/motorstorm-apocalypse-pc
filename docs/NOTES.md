@@ -2638,3 +2638,27 @@ a displayed pixel. 1P windowed with the player's settings: 7372 / 0 / 0 / 0.
   18.4 and 31.7; skip off vs off 41.0; on vs on 35.1. Two runs with the same
   setting differ more than runs with and without the skip: the game is not
   frame-deterministic, and the skip's effect is below that noise.
+
+### The window on a scaled Wayland desktop (2026-11-11)
+
+COSMIC at 125% on a 4K monitor (3072x1728 logical). Through Xwayland (SDL's
+default driver) the compositor enlarged the window by the scale: 2560x1440
+asked became 3200x1800 screen pixels, blurred, and was cut to 2560x1305.
+Now (rsx_vulkan_backend.c vk_window_open):
+- SDL's Wayland driver first when WAYLAND_DISPLAY is set (`SDL_VIDEODRIVER`
+  or `PS3RECOMP_VK_X11=1` still choose), with SDL_WINDOW_ALLOW_HIGHDPI; the
+  desktop scale is the window's pixels over its logical size, and the
+  window is asked for at the picture's size (1280x720 x resolution scale)
+  divided by it, fitted to the display.
+- COSMIC sizes a newly shown window itself (title bar off the height asked,
+  at most 2048x1044 here); asked again 0.6 s after opening it takes the size.
+- Growing a Wayland window: SDL sets the new wp_viewport source in the event
+  pump, and a present of the old, smaller buffer after that is a protocol
+  error -- COSMIC dropped the client (SDL_QUIT) on going full screen. The
+  pump and each present now share a lock, and a present whose swapchain no
+  longer matches the window's pixels is dropped and the swapchain made again.
+- Full screen at start is asked once the window is up (0.3 s).
+Checked: windowed 2560x1440 pixels at scale 2 (1280x720 at 1), full screen
+3840x2160, 9 full screen / windowed toggles with and without the recording
+thread and no Wayland errors (`PS3RECOMP_VK_TOGGLE_TEST=<s>` toggles every
+<s> seconds; `PS3RECOMP_VK_WINEV=1` logs SDL's events).
