@@ -24,6 +24,7 @@
 #include <stdlib.h>
 
 extern int rsx_draw_engine_mlaa_left_out(void);
+extern void rsx_draw_engine_mlaa_check(unsigned long long out[4]);
 
 int spu_native_mlaa_pass(spu_context* ctx)
 {
@@ -33,9 +34,13 @@ int spu_native_mlaa_pass(spu_context* ctx)
     static unsigned long long s_skip, s_run;
     if (!rsx_draw_engine_mlaa_left_out()) { __atomic_fetch_add(&s_run, 1, __ATOMIC_RELAXED); return 0; }
     const unsigned long long k = __atomic_add_fetch(&s_skip, 1, __ATOMIC_RELAXED);
-    if (k == 1 || (k & 0x3FFF) == 0)
-        fprintf(stderr, "[mlaa-skip] SPU MLAA passes skipped %llu, run %llu (native MLAA draws the picture)\n",
-                k, __atomic_load_n(&s_run, __ATOMIC_RELAXED));
+    if (k == 1 || (k & 0x3FFF) == 0) {
+        unsigned long long c[4];
+        rsx_draw_engine_mlaa_check(c);
+        fprintf(stderr, "[mlaa-skip] SPU MLAA passes skipped %llu, run %llu; skipped copies shown by the native pass %llu,"
+                " after the target's bytes replaced the buffer %llu, never shown %llu, read as the SPU left them %llu\n",
+                k, __atomic_load_n(&s_run, __ATOMIC_RELAXED), c[0], c[1], c[2], c[3]);
+    }
     ctx->pc = ctx->gpr[0]._u32[0];                 /* bi $r0 */
     if (ctx->host_depth == 0) g_spu_trampoline_fn = spu_indirect_branch;
     return 1;

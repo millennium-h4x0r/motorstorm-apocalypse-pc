@@ -15772,7 +15772,7 @@ index c4e4d849..ff1d4eac 100644
  /* ---- decoded state getters -------------------------------------------- */
  
 diff --git a/libs/video/rsx_draw_engine.c b/libs/video/rsx_draw_engine.c
-index 8dff6011..809da7ed 100644
+index 8dff6011..8e3e62eb 100644
 --- a/libs/video/rsx_draw_engine.c
 +++ b/libs/video/rsx_draw_engine.c
 @@ -1,3 +1,9 @@
@@ -19452,7 +19452,8 @@ index 8dff6011..809da7ed 100644
          dc.fetch_ok = 0;
          return;
      }
-     dc.n_verts = dc.n_refs;
+-    dc.n_verts = dc.n_refs;
++    dc.n_verts = dc.n_refs;
 +    if (dso) {
 +        ds.ns_fetch += eng_ds_now() - t0;
 +        ds.refs += dc.n_source_refs;
@@ -19688,10 +19689,10 @@ index 8dff6011..809da7ed 100644
 +    }
 +    *slot = tmp;
 +    s_geo_bytes += vbytes + ibytes;
- }
- 
- /* ---- sink ---------------------------------------------------------------- */
- 
++}
++
++/* ---- sink ---------------------------------------------------------------- */
++
 +/* PS3RECOMP_ENG_VPLOG=1: print each distinct (viewport y scale sign, y
 + * offset, SHADER_WINDOW 0x1D88, color offset 0x0210, surface clip 0x0200)
 + * combination the first time a draw uses it -- which way each pass maps
@@ -19712,17 +19713,13 @@ index 8dff6011..809da7ed 100644
 +            vp.scale[0], vp.scale[1], vp.translate[0], vp.translate[1], vp.w, vp.h, vp.x, vp.y, win, coff, clip);
 +}
 +
- static void sink_begin(void* user, const rsx_dispatch* r, u32 prim)
- {
-     (void)user; (void)prim;
++static void sink_begin(void* user, const rsx_dispatch* r, u32 prim)
++{
++    (void)user; (void)prim;
 +    eng_vplog(r);
-     dc_reset();
--    dc.inline_dropped_at_begin = r->inline_dropped;
- }
- 
--/* A malformed/unbounded group must not render a truncated primitive. */
--#define ENG_MAX_IMMEDIATE_VERTICES 4096u
--static void sink_immediate_vertex(void* user, const rsx_dispatch* r)
++    dc_reset();
++}
++
 +/* PS3RECOMP_ENG_DRAWTRACE=<world frame>|f<frame>[,<dir>[,<first>,<last>|t<hex>]]: during
 + * that world frame -- or, with f, the engine's own frame count, which is the
 + * PS3RECOMP_VK_DUMP numbering -- 
@@ -20118,8 +20115,8 @@ index 8dff6011..809da7ed 100644
 + * read the vertices out of it (rsx_vertex_fetch_plan_set_inline). */
 +static void sink_inline_array(void* user, const rsx_dispatch* r,
 +                              const u8* data, u32 bytes)
- {
-     (void)user;
++{
++    (void)user;
 +    const u32 stride = rsx_vertex_inline_layout(r, NULL);
 +    if (!stride || bytes < stride) {
 +        static int n;
@@ -20129,10 +20126,7 @@ index 8dff6011..809da7ed 100644
 +    }
 +    dc.inl = data;
 +    dc.inl_bytes = bytes;
-     dc.n_packets++;
--    if (!dc.fetch_ok) return;
--    if (dc.n_immediate == ENG_MAX_IMMEDIATE_VERTICES) {
--        dc.fetch_ok = 0;
++    dc.n_packets++;
 +    if (dc.n_arr >= ENG_MAX_BATCHES) return;
 +    dc.arr[dc.n_arr].first = 0;
 +    dc.arr[dc.n_arr].count = bytes / stride;
@@ -20243,14 +20237,8 @@ index 8dff6011..809da7ed 100644
 +{
 +    if (!vm_base || (ppu_vm_size && (u64)s_nao.d.params_ea + 0x140u > ppu_vm_size)) {
 +        eng_nao_fail("no parameter block");
-         return;
-     }
--    if (dc.n_immediate == dc.cap_immediate) {
--        const u32 next = dc.cap_immediate ? dc.cap_immediate * 2u : 64u;
--        void* p = realloc(dc.immediate, (size_t)next * sizeof(*dc.immediate));
--        if (!p) { dc.fetch_ok = 0; return; }
--        dc.immediate = p;
--        dc.cap_immediate = next;
++        return;
++    }
 +    float pb[80];
 +    const u8* bp = vm_base + s_nao.d.params_ea;
 +    for (int i = 0; i < 80; i++) {
@@ -20814,16 +20802,7 @@ index 8dff6011..809da7ed 100644
 +        fprintf(stderr, "[rsx engine] native lighting: %s texture fmt 0x%02X remap 0x%04X %ux%u "
 +                "pitch %u%s\n", which ? "specular" : "diffuse", t->format, t->remap & 0xFFFFu,
 +                t->width, t->height, t->pitch, fits ? "" : " -- does not fit, guest texture kept");
-     }
--    for (u32 attr = 0; attr < RSX_DSP_NUM_VERTEX_ATTR; attr++) {
--        float* value = dc.immediate[dc.n_immediate][attr];
--        rsx_dsp_vertex_default(r, attr, value);
--        /* The legacy default getter treats all-zero words as unwritten.
--         * Direct and folded constants may explicitly set W/alpha to zero. */
--        const u32 base = (0x1C00u + attr * 16u) >> 2;
--        if (r->seen[base] || r->seen[base + 1] ||
--            r->seen[base + 2] || r->seen[base + 3])
--            memcpy(value, &r->regs[base], 16u);
++    }
 +    if (!fits) { eng_nlt_fail("a lighting texture is bound in another format or size"); return 0; }
 +    /* While the next frame's pair is being latched, the last result stands;
 +     * otherwise light the pair (or refuse: the job did this frame itself). */
@@ -20841,8 +20820,7 @@ index 8dff6011..809da7ed 100644
 +            s_nlt.check_pitch = t->pitch ? t->pitch : t->width * 4u;
 +        }
 +        return 0;
-     }
--    dc.n_immediate++;
++    }
 +    const u32 v = g.be->surface_view
 +        ? g.be->surface_view(g.be->user, s_nlt.out[which], t->remap, t->format) : 0;
 +    if (!v) { eng_nlt_fail("no view of the lighting image"); return 0; }
@@ -20852,7 +20830,9 @@ index 8dff6011..809da7ed 100644
 +    return 1;
  }
  
--static void sink_draw_arrays(void* user, const rsx_dispatch* r, u32 first, u32 count)
+-/* ---- sink ---------------------------------------------------------------- */
+-
+-static void sink_begin(void* user, const rsx_dispatch* r, u32 prim)
 +/* A unit's last binding of a plain guest texture -- no colour or depth target
 + * at its address -- kept for the rest of the frame: the next draw with the
 + * same registers gets the same handle and sampler without the target scans,
@@ -20872,12 +20852,9 @@ index 8dff6011..809da7ed 100644
 +static eng_tmemo s_tmemo[RSX_BE_MAX_TEXTURES];
 +static int eng_tmemo_on(void)
  {
--    (void)user; (void)r;
--    dc.n_packets++;
--    if (dc.n_arr >= ENG_MAX_BATCHES) return;
--    dc.arr[dc.n_arr].first = first;
--    dc.arr[dc.n_arr].count = count;
--    dc.n_arr++;
+-    (void)user; (void)prim;
+-    dc_reset();
+-    dc.inline_dropped_at_begin = r->inline_dropped;
 +    static int on = -1;
 +    if (on < 0) {
 +        const char* e = getenv("PS3RECOMP_ENG_TEXMEMO");
@@ -20889,12 +20866,65 @@ index 8dff6011..809da7ed 100644
 +    return on;
  }
  
+-/* A malformed/unbounded group must not render a truncated primitive. */
+-#define ENG_MAX_IMMEDIATE_VERTICES 4096u
+-static void sink_immediate_vertex(void* user, const rsx_dispatch* r)
++static void eng_tbloom_rebuild(void)
+ {
+-    (void)user;
+-    dc.n_packets++;
+-    if (!dc.fetch_ok) return;
+-    if (dc.n_immediate == ENG_MAX_IMMEDIATE_VERTICES) {
+-        dc.fetch_ok = 0;
+-        return;
+-    }
+-    if (dc.n_immediate == dc.cap_immediate) {
+-        const u32 next = dc.cap_immediate ? dc.cap_immediate * 2u : 64u;
+-        void* p = realloc(dc.immediate, (size_t)next * sizeof(*dc.immediate));
+-        if (!p) { dc.fetch_ok = 0; return; }
+-        dc.immediate = p;
+-        dc.cap_immediate = next;
++    memset(s_tbloom, 0, sizeof s_tbloom);
++    for (u32 i = 0; i < g.n_surfaces; i++) if (g.surfaces[i].handle) {
++        const u32 b = eng_tbloom_bit(g.surfaces[i].location, g.surfaces[i].offset);
++        s_tbloom[b >> 6] |= 1ull << (b & 63);
+     }
+-    for (u32 attr = 0; attr < RSX_DSP_NUM_VERTEX_ATTR; attr++) {
+-        float* value = dc.immediate[dc.n_immediate][attr];
+-        rsx_dsp_vertex_default(r, attr, value);
+-        /* The legacy default getter treats all-zero words as unwritten.
+-         * Direct and folded constants may explicitly set W/alpha to zero. */
+-        const u32 base = (0x1C00u + attr * 16u) >> 2;
+-        if (r->seen[base] || r->seen[base + 1] ||
+-            r->seen[base + 2] || r->seen[base + 3])
+-            memcpy(value, &r->regs[base], 16u);
++    for (u32 i = 0; i < g.n_zdepths; i++) if (g.zdepths[i].handle) {
++        const u32 b = eng_tbloom_bit(g.zdepths[i].location, g.zdepths[i].offset);
++        s_tbloom[b >> 6] |= 1ull << (b & 63);
+     }
+-    dc.n_immediate++;
+ }
+ 
+-static void sink_draw_arrays(void* user, const rsx_dispatch* r, u32 first, u32 count)
++static int eng_zwins_on(void)
+ {
+-    (void)user; (void)r;
+-    dc.n_packets++;
+-    if (dc.n_arr >= ENG_MAX_BATCHES) return;
+-    dc.arr[dc.n_arr].first = first;
+-    dc.arr[dc.n_arr].count = count;
+-    dc.n_arr++;
++    static int on = -1;
++    if (on < 0) { const char* e = getenv("PS3RECOMP_ENG_ZWINS"); on = !(e && e[0] == '0'); }
++    return on;
+ }
+-
 -/* INLINE_ARRAY delivers one finished stream rather than a (first, count)
 - * range; queue it as an ordinary consecutive batch and let the fetch plan
 - * read the vertices out of it (rsx_vertex_fetch_plan_set_inline). */
 -static void sink_inline_array(void* user, const rsx_dispatch* r,
 -                              const u8* data, u32 bytes)
-+static void eng_tbloom_rebuild(void)
++static int eng_zview_on(void)
  {
 -    (void)user;
 -    /* Record source presence even when its declaration or length is invalid,
@@ -20908,19 +20938,13 @@ index 8dff6011..809da7ed 100644
 -    dc.arr[dc.n_arr].first = 0;
 -    dc.arr[dc.n_arr].count = bytes / stride;
 -    dc.n_arr++;
-+    memset(s_tbloom, 0, sizeof s_tbloom);
-+    for (u32 i = 0; i < g.n_surfaces; i++) if (g.surfaces[i].handle) {
-+        const u32 b = eng_tbloom_bit(g.surfaces[i].location, g.surfaces[i].offset);
-+        s_tbloom[b >> 6] |= 1ull << (b & 63);
-+    }
-+    for (u32 i = 0; i < g.n_zdepths; i++) if (g.zdepths[i].handle) {
-+        const u32 b = eng_tbloom_bit(g.zdepths[i].location, g.zdepths[i].offset);
-+        s_tbloom[b >> 6] |= 1ull << (b & 63);
-+    }
++    static int on = -1;
++    if (on < 0) { const char* e = getenv("PS3RECOMP_ENG_ZVIEW"); on = e && e[0] == '1'; }
++    return on;
  }
- 
+-
 -static void sink_draw_index(void* user, const rsx_dispatch* r, u32 first, u32 count)
-+static int eng_zwins_on(void)
++static int eng_own_rect_on(void)
  {
 -    (void)user; (void)r;
 -    dc.n_packets++;
@@ -20928,10 +20952,7 @@ index 8dff6011..809da7ed 100644
 -    dc.idx[dc.n_idx].first = first;
 -    dc.idx[dc.n_idx].count = count;
 -    dc.n_idx++;
-+    static int on = -1;
-+    if (on < 0) { const char* e = getenv("PS3RECOMP_ENG_ZWINS"); on = !(e && e[0] == '0'); }
-+    return on;
- }
+-}
 -
 -/* Which texture units this draw binds, and from where: a unit naming a
 - * registered colour surface samples that live target rather than guest
@@ -20978,14 +20999,6 @@ index 8dff6011..809da7ed 100644
 -                s->pitch, t->width, t->height, t->format, t->pitch,
 -                t->dimension, t->mipmaps, t->cubemap, sf.color_format, sf.raster_type);
 -    return ENG_INVALID;
-+static int eng_zview_on(void)
-+{
-+    static int on = -1;
-+    if (on < 0) { const char* e = getenv("PS3RECOMP_ENG_ZVIEW"); on = e && e[0] == '1'; }
-+    return on;
-+}
-+static int eng_own_rect_on(void)
-+{
 +    static int on = -1;
 +    if (on < 0) { const char* e = getenv("PS3RECOMP_ENG_OWN_RECT"); on = e && e[0] == '1'; }
 +    return on;
@@ -21120,7 +21133,7 @@ index 8dff6011..809da7ed 100644
 -            if (surface_at < 0 || z->depth_serial > g.surfaces[surface_at].color_serial) {
 -                zsrc = (int)i;
 -                g.zdepths[i].last_use = g.frames;
-             }
+-            }
 -            break;
 -        }
 -        if (zsrc >= 0) {
@@ -21129,7 +21142,7 @@ index 8dff6011..809da7ed 100644
 -            if (base_fmt == RSX_TEX_FMT_DEPTH24_D8 && current_zslot != (u32)zsrc) {
 -                const u32 snap = eng_zdepth_snapshot((u32)zsrc, t.width, t.height);
 -                if (snap) { textures[u] = snap; continue; }
--            }
+             }
 -            const u32 conv = eng_zdepth_as_color((u32)zsrc, &t);
 -            if (conv) { textures[u] = conv; continue; }
 -            if (eng_zdepth_to_guest((u32)zsrc)) {
@@ -21534,7 +21547,10 @@ index 8dff6011..809da7ed 100644
 -}
 -
 -static int pd_capturing(void)
--{
++/* PS3RECOMP_ENG_DROPLOG=1: name each draw sink_end drops (first 6 per
++ * reason), with the primitive, packet/vertex counts and target address. */
++static void eng_drop(const char* why, u32 prim)
+ {
 -    if (s_pd.state == 0) {
 -        s_pd.dir = getenv("RSX_ENGINE_PASS_DUMP");
 -        const char* m = getenv("RSX_ENGINE_PASS_DUMP_MINDRAWS");
@@ -21575,10 +21591,7 @@ index 8dff6011..809da7ed 100644
 -
 -/* One colour surface to a binary PPM, alpha dropped, floats clamped to [0,1]. */
 -static void pd_write_surface(u32 slot, const char* path)
-+/* PS3RECOMP_ENG_DROPLOG=1: name each draw sink_end drops (first 6 per
-+ * reason), with the primitive, packet/vertex counts and target address. */
-+static void eng_drop(const char* why, u32 prim)
- {
+-{
 -    const eng_surface* s = &g.surfaces[slot];
 -    u32 bpp;
 -    switch (s->fmt) {
@@ -22389,9 +22402,39 @@ index 8dff6011..809da7ed 100644
 +        g.be->set_scissor(g.be->user, sx, sy, sw, sh);
      }
      /* Dynamic, and deliberately outside the pipeline key. */
+-    g.be->set_stencil_ref(g.be->user,
+-                          rsx_dsp_reg(&g.rsx, M_STENCIL_FUNC_REF) & 0xFFu);
+-    /* The bounds too: a deferred renderer moves them between its light and
+-     * sky passes without changing anything else. Raw floats, as written. */
+-    if (g.be->set_depth_bounds) {
+-        const u32 lo = rsx_dsp_reg(&g.rsx, M_DEPTH_BOUNDS_MIN);
+-        const u32 hi = rsx_dsp_reg(&g.rsx, M_DEPTH_BOUNDS_MAX);
+-        float fmin, fmax;
+-        memcpy(&fmin, &lo, sizeof fmin);
+-        memcpy(&fmax, &hi, sizeof fmax);
+-        g.be->set_depth_bounds(g.be->user, fmin, fmax);
+-    }
+-
+-    /* Polygon offset: dynamic state, like the stencil reference. The
+-     * enable that applies is the one for what the primitive rasterises as. */
 +    /* Shadow passes offset their depth (SET_POLYGON_OFFSET_*): without it
 +     * a lit surface compares equal to its own shadow-map texel. */
-+    if (g.be->set_depth_bias) {
+     if (g.be->set_depth_bias) {
+-        float slope = 0.0f, units = 0.0f;
+-        const u32 en = topology == RSX_TOPOLOGY_POINTS ? M_POLY_OFFSET_POINT
+-                     : (topology == RSX_TOPOLOGY_LINES || topology == RSX_TOPOLOGY_LINE_STRIP)
+-                       ? M_POLY_OFFSET_LINE : M_POLY_OFFSET_FILL;
+-        if (eng_poly_offset_on() && (rsx_dsp_reg(&g.rsx, en) & 1u)) {
+-            const u32 f = rsx_dsp_reg(&g.rsx, M_POLY_OFFSET_FACTOR);
+-            const u32 b = rsx_dsp_reg(&g.rsx, M_POLY_OFFSET_BIAS);
+-            memcpy(&slope, &f, sizeof slope);
+-            memcpy(&units, &b, sizeof units);
+-            if (slope != slope) slope = 0.0f;   /* NaN */
+-            if (units != units) units = 0.0f;
+-        }
+-        g.be->set_depth_bias(g.be->user, slope, units,
+-                             /* SURFACE_FORMAT depth: 1 Z16, 2 Z24S8 */
+-                             sf.depth_format == 1u ? 16u : 24u);
 +        const u32 sraw = rsx_dsp_reg(&g.rsx, M_POLY_OFFSET_SCALE);
 +        const u32 braw = rsx_dsp_reg(&g.rsx, M_POLY_OFFSET_BIAS);
 +        float sf, bf;
@@ -22422,20 +22465,13 @@ index 8dff6011..809da7ed 100644
 +            hi = hi < 0.0f ? 0.0f : (hi > 1.0f ? 1.0f : hi);
 +        }
 +        g.be->set_depth_bounds(g.be->user, lo, hi);
-+    }
-     g.be->set_stencil_ref(g.be->user,
-                           rsx_dsp_reg(&g.rsx, M_STENCIL_FUNC_REF) & 0xFFu);
--    /* The bounds too: a deferred renderer moves them between its light and
--     * sky passes without changing anything else. Raw floats, as written. */
--    if (g.be->set_depth_bounds) {
--        const u32 lo = rsx_dsp_reg(&g.rsx, M_DEPTH_BOUNDS_MIN);
--        const u32 hi = rsx_dsp_reg(&g.rsx, M_DEPTH_BOUNDS_MAX);
--        float fmin, fmax;
--        memcpy(&fmin, &lo, sizeof fmin);
--        memcpy(&fmax, &hi, sizeof fmax);
--        g.be->set_depth_bounds(g.be->user, fmin, fmax);
-+
-+    const u32 uploaded = indexed ? dc.n_verts : n_draw;
+     }
++    g.be->set_stencil_ref(g.be->user,
++                          rsx_dsp_reg(&g.rsx, M_STENCIL_FUNC_REF) & 0xFFu);
+ 
+     const u32 uploaded = indexed ? dc.n_verts : n_draw;
+-    g.be->draw(g.be->user, topology, dc.verts, uploaded, layout.stride,
+-               indexed ? g.indices : NULL, indexed ? n_draw : 0);
 +    DS_MARK(ns_bind);
 +    if (!draw_verts) { draw_verts = dc.verts; draw_indices = g.indices; }
 +    if (pulled) {
@@ -22451,10 +22487,10 @@ index 8dff6011..809da7ed 100644
 +                   indexed ? draw_indices : NULL, indexed ? n_draw : 0);
 +    DS_MARK(ns_draw);
 +#undef DS_MARK
-+    /* Counted only when the draw ran the guest's OWN programs, which is what
-+     * the test hook means: a draw through the built-in pair is a draw, not
-+     * evidence that the decompile-translate-compile path worked. */
-+    if (!pipeline_is_fixed) g.guest_draws++;
+     /* Counted only when the draw ran the guest's OWN programs, which is what
+      * the test hook means: a draw through the built-in pair is a draw, not
+      * evidence that the decompile-translate-compile path worked. */
+     if (!pipeline_is_fixed) g.guest_draws++;
 +    s_dt_zslot = zslot;
 +    s_dt_verts = draw_verts; s_dt_stride = layout.stride; s_dt_nverts = uploaded;
 +    eng_drawtrace(pipeline, targets, n_targets, indexed ? n_draw : uploaded, tex_mask, textures);
@@ -22477,26 +22513,9 @@ index 8dff6011..809da7ed 100644
 +        ds.cbytes += vpc_range ? g.vpc_n * 16u + sizeof xf : ENG_VP_CB_BYTES;
 +        if (vpc_range) ds.cb_range++;
 +        ds.ns_rest += eng_ds_now() - ds_t0;
-     }
++    }
  
--    /* Polygon offset: dynamic state, like the stencil reference. The
--     * enable that applies is the one for what the primitive rasterises as. */
--    if (g.be->set_depth_bias) {
--        float slope = 0.0f, units = 0.0f;
--        const u32 en = topology == RSX_TOPOLOGY_POINTS ? M_POLY_OFFSET_POINT
--                     : (topology == RSX_TOPOLOGY_LINES || topology == RSX_TOPOLOGY_LINE_STRIP)
--                       ? M_POLY_OFFSET_LINE : M_POLY_OFFSET_FILL;
--        if (eng_poly_offset_on() && (rsx_dsp_reg(&g.rsx, en) & 1u)) {
--            const u32 f = rsx_dsp_reg(&g.rsx, M_POLY_OFFSET_FACTOR);
--            const u32 b = rsx_dsp_reg(&g.rsx, M_POLY_OFFSET_BIAS);
--            memcpy(&slope, &f, sizeof slope);
--            memcpy(&units, &b, sizeof units);
--            if (slope != slope) slope = 0.0f;   /* NaN */
--            if (units != units) units = 0.0f;
--        }
--        g.be->set_depth_bias(g.be->user, slope, units,
--                             /* SURFACE_FORMAT depth: 1 Z16, 2 Z24S8 */
--                             sf.depth_format == 1u ? 16u : 24u);
+-    if (rs.color_mask) eng_surfaces_wrote(targets, n_targets);
 +    if (rs.color_mask || rs.color_mask_mrt) {
 +        const u32 cw = ++s_surf_clock;
 +        for (u32 i = 0; i < n_targets; i++) g.surfaces[targets[i]].cwstamp = cw;
@@ -22504,8 +22523,9 @@ index 8dff6011..809da7ed 100644
 +    /* A draw that changed the zeta outdates what was read of it: the
 +     * snapshots are retaken by the next sampler, and the write-back by the
 +     * next copy. A stencil-only pass changes the stencil byte both carry. */
-+    if (zslot != ENG_INVALID && rs.depth_test && rs.depth_write) {
-+        g.zdepths[zslot].had_write = 1;
+     if (zslot != ENG_INVALID && rs.depth_test && rs.depth_write) {
+         g.zdepths[zslot].had_write = 1;
+-        eng_zdepth_wrote(zslot, &sf);
 +        g.zdepths[zslot].write_seq++; g.zdepths[zslot].wstamp = ++s_surf_clock;
 +        g.zdepths[zslot].snapshot_valid = 0;
 +        g.zdepths[zslot].snapshot_rgba_valid = 0;
@@ -22548,20 +22568,7 @@ index 8dff6011..809da7ed 100644
 +        if (gy + gh < bottom) bottom = gy + gh;
 +        sw = right > sx ? right - sx : 0;
 +        sh = bottom > sy ? bottom - sy : 0;
-     }
--
--    const u32 uploaded = indexed ? dc.n_verts : n_draw;
--    g.be->draw(g.be->user, topology, dc.verts, uploaded, layout.stride,
--               indexed ? g.indices : NULL, indexed ? n_draw : 0);
--    /* Counted only when the draw ran the guest's OWN programs, which is what
--     * the test hook means: a draw through the built-in pair is a draw, not
--     * evidence that the decompile-translate-compile path worked. */
--    if (!pipeline_is_fixed) g.guest_draws++;
--
--    if (rs.color_mask) eng_surfaces_wrote(targets, n_targets);
--    if (zslot != ENG_INVALID && rs.depth_test && rs.depth_write) {
--        g.zdepths[zslot].had_write = 1;
--        eng_zdepth_wrote(zslot, &sf);
++    }
 +    out[0] = sx; out[1] = sy; out[2] = sw; out[3] = sh;
 +    { static int cl = -1; static u32 n;   /* PS3RECOMP_ENG_CLEARLOG=1: every clear's rectangle (first 400) */
 +      if (cl < 0) { const char* e = getenv("PS3RECOMP_ENG_CLEARLOG"); cl = e && e[0] == '1'; }
@@ -23268,7 +23275,7 @@ index 8dff6011..809da7ed 100644
  }
  
  void rsx_draw_engine_method(u32 method, u32 arg)
-@@ -3495,6 +6123,948 @@ void rsx_draw_engine_method(u32 method, u32 arg)
+@@ -3495,6 +6123,968 @@ void rsx_draw_engine_method(u32 method, u32 arg)
       * preserve them with the wider mask. */
      u32 m = (method >= 0xE000u) ? (method & 0xFFFCu) : (method & 0x1FFCu);
      rsx_dispatch_method(&g.rsx, m, arg);
@@ -23755,6 +23762,7 @@ index 8dff6011..809da7ed 100644
 +    int obs_seen;             /* ... and a display copy read it */
 +    int guest;                /* this buffer copy goes the guest's way */
 +    int live;                 /* the slot is in use */
++    int skipped;              /* the SPU MLAA pass of this copy was skipped (mlaa_skip.c) */
 +    u32 last_use;             /* g.frames it was last touched */
 +} eng_mlaa_view;
 +enum { MLAA_VIEWS_MAX = 4 };
@@ -23797,6 +23805,7 @@ index 8dff6011..809da7ed 100644
 + * display copy reads. Racy by design: a stale 1 costs one frame of the SPU
 + * result while the engine is on its own path anyway; a stale 0 runs the
 + * tasks as before. */
++static u64 s_skchk[4];   /* skipped copies: native, materialized, never shown, read as left */
 +int rsx_draw_engine_mlaa_left_out(void)
 +{
 +    if (s_mlaa.d.mode != 1u) return 0;
@@ -23808,7 +23817,20 @@ index 8dff6011..809da7ed 100644
 +        if (__atomic_load_n(&m->guest, __ATOMIC_RELAXED) && m->frame == g.frames) return 0;
 +        if (__atomic_load_n(&m->pend, __ATOMIC_RELAXED) && !__atomic_load_n(&m->used, __ATOMIC_RELAXED)) any = 1;
 +    }
++    if (any)
++        for (u32 i = 0; i < eng_mlaa_nviews(); i++)
++            if (s_mlaa.v[i].pend && !s_mlaa.v[i].used) __atomic_store_n(&s_mlaa.v[i].skipped, 1, __ATOMIC_RELAXED);
 +    return any;
++}
++
++/* What became of the copies whose SPU pass was skipped: shown by the native
++ * pass, shown after eng_mlaa_materialize put the target's own bytes in the
++ * buffer (the SPU pass's result would have been overwritten too), never
++ * shown, or -- the case that must not happen -- read by a guest display copy
++ * as the SPU left it. */
++void rsx_draw_engine_mlaa_check(unsigned long long out[4])
++{
++    for (int i = 0; i < 4; i++) out[i] = s_skchk[i];
 +}
 +
 +static void eng_mlaa_fallback(eng_mlaa_view* m, const char* why)
@@ -23831,6 +23853,7 @@ index 8dff6011..809da7ed 100644
 + * copy that follows reads a picture (without the antialiasing). */
 +static void eng_mlaa_materialize(eng_mlaa_view* m)
 +{
++    if (m->skipped) { s_skchk[1]++; m->skipped = 0; }
 +    eng_surface* s = &g.surfaces[m->src_slot];
 +    if (!s->handle || !s->guest_pitch) return;
 +    const u32 row = s->guest_pitch;
@@ -23972,6 +23995,8 @@ index 8dff6011..809da7ed 100644
 +            return 0;
 +        }
 +        if (!m->pend || m->used) {
++            if (m->skipped && !m->used) s_skchk[2]++;
++            m->skipped = 0;
 +            m->pend = 1; m->used = 0; m->frame = g.frames;
 +            m->src_slot = slot; m->src_stamp = s->stamp;
 +            m->dst_loc = c->dst_location; m->delta = delta;
@@ -24003,6 +24028,7 @@ index 8dff6011..809da7ed 100644
 +        if (nv > 1 && (bx < m->obs_x0 || by < m->obs_y0 || bx >= m->obs_x1 || by >= m->obs_y1)) continue;
 +        if (eng_blit_target(RSX_LOCATION_LOCAL, dst_px, c->dst_pitch, &dx, &dy) != ENG_INVALID) {
 +            m->obs_seen = 1;
++            if (m->skipped) { s_skchk[3]++; m->skipped = 0; }   /* the guest's copy reads the buffer */
 +            return 0;
 +        }
 +    }
@@ -24058,6 +24084,7 @@ index 8dff6011..809da7ed 100644
 +        return 0;
 +    }
 +    g.surfaces[dslot].stamp = g.surfaces[dslot].cwstamp = ++s_surf_clock;
++    if (m->skipped) { s_skchk[0]++; m->skipped = 0; }
 +    m->used = 1;
 +    s_mlaa_armed = eng_mlaa_any_armed();
 +    s_mlaa.n_native++;
@@ -24217,7 +24244,7 @@ index 8dff6011..809da7ed 100644
  }
  
  void rsx_draw_engine_set_display_buffer(u32 buffer_id, u32 location, u32 offset,
-@@ -3524,13 +7094,17 @@ void rsx_draw_engine_present(void)
+@@ -3524,13 +7114,17 @@ void rsx_draw_engine_present(void)
       * re-present a double-buffered title's OTHER scanout. Presenting twice is
       * harmless either way -- the engine never clears the surface, so a second
       * present just blits the same image again. */

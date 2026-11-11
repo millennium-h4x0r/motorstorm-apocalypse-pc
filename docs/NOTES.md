@@ -2621,3 +2621,14 @@ settings (scale 2, VSync off, HUD on), 1P race: 59.6 / 59.9 fps, median
   0x85D1A0) while the RSX thread is busy the whole frame. 4P is bound by the
   RSX thread's ~2.8 us a draw over ~10 000 draws; it needs about half that
   for 60 fps.
+
+### The MLAA skip, measured (2026-11-11)
+
+The engine now records, for every MLAA buffer copy whose SPU pass was
+skipped, how the frame reached the screen (`[mlaa-skip]` line): by the
+native pass; after eng_mlaa_materialize put the target's own bytes in the
+buffer (which would overwrite an SPU result too); never shown; or read by a
+guest display copy as the SPU left it -- the one outcome that would change
+a displayed pixel. 1P windowed with the player's settings: 7372 / 0 / 0 / 0.
+1P headless 720p: 7372 / 0 / 0 / 0. 4P split screen: 16377 / 0 / 0 / 0
+(the skip engages in 4P too, every view shown natively).
