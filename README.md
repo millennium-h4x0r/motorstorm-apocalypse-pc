@@ -156,8 +156,8 @@ scripts/lift.sh     # translates the PPU and SPU code of YOUR EBOOT.elf (checks 
 scripts/build.sh    # compiles into work/port/build-vk
 ```
 
-`lift.sh` takes about 12 minutes. `build.sh` takes long: about an hour with the
-defaults (4 jobs, 14 GB memory cap). With more RAM, raise both, for example
+`lift.sh` takes about 12 minutes and `build.sh` about 35 with the defaults
+(4 jobs, 14 GB memory cap), measured from a fresh clone on a Ryzen 9 5950X. With more RAM, raise both, for example
 `JOBS=16 PORT_BUILD_MEM=48G scripts/build.sh` (each job can need ~3 GB).
 A build that runs out of memory is stopped by the cap rather than freezing
 the machine; run it again with fewer jobs and it carries on where it stopped.
