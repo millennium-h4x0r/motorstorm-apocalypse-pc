@@ -13,6 +13,7 @@
 #include "gamefiles.h"
 
 #include "imgui.h"
+#include "imgui_internal.h"   /* the nav highlight after a programmatic focus */
 #include "rsx_ui.h"
 
 #include <SDL2/SDL.h>
@@ -341,7 +342,7 @@ void page_mods(port_settings& s)
     ImGui::TextUnformatted("Installed mods");
     static port_mod mods[64];
     static int nmods = -1;
-    if (nmods < 0 || ImGui::Button("Rescan")) nmods = port_mods_scan(mods, 64);
+    if (ImGui::Button("Rescan") || nmods < 0) nmods = port_mods_scan(mods, 64);
     if (!nmods) {
         hint("No mods in the mods/ folder. Each mod is a folder with files/ mirroring the game's "
              "USRDIR and, optionally, a mod.ini (name, author, version, description).");
@@ -389,7 +390,8 @@ void page_controller(port_settings& s)
         const char* name = SDL_GameControllerName(gc);
         if (port >= 0) ImGui::Text("Player %d: %s", port + 1, name ? name : "controller");
         else           ImGui::Text("%s (%s)", name ? name : "controller",
-                                   ours ? "the game picks it up when it starts" : "no free player slot: four are in use");
+                                   ours || g_start ? "the game picks it up when it starts"
+                                                   : "no free player slot: four are in use");
         static const struct { SDL_GameControllerButton b; const char* n; } k[] = {
             { SDL_CONTROLLER_BUTTON_A, "Cross/A" }, { SDL_CONTROLLER_BUTTON_B, "Circle/B" },
             { SDL_CONTROLLER_BUTTON_X, "Square/X" }, { SDL_CONTROLLER_BUTTON_Y, "Triangle/Y" },
@@ -413,10 +415,46 @@ void page_controller(port_settings& s)
         ImGui::Text("No controller found. Plug one in at any time: the game picks it up; up to four play split screen.");
     ImGui::Separator();
     hint("In the game: F1, the controller's home button, or Select and Start held for half a second, opens this menu. "
-         "D-pad or stick moves, Cross/A chooses, Circle/B goes back.");
+         "D-pad or stick moves, Cross chooses, Circle goes back, L1 and R1 change the tab. On a slider, Cross "
+         "takes hold of it, left and right move it, Circle lets go.");
     ImGui::Separator();
     bool b = s.skip_launcher;
     if (ImGui::Checkbox("Skip the start screen (F1 opens the options in game)", &b)) { s.skip_launcher = b; save(); }
+}
+
+/* Whether a popup (a combo's list, a question) or an active widget (a slider
+ * being moved) had Circle/Escape to itself this frame or the one before:
+ * ImGui closes those in NewFrame, so by the time a page asks, the press that
+ * closed a list would also leave the page. Call once a frame, after the UI. */
+bool g_busy_prev = false, g_busy_now = false;
+void busy_track()
+{
+    g_busy_prev = g_busy_now;
+    g_busy_now = ImGui::IsAnyItemActive() ||
+                 ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+}
+bool back_pressed()
+{
+    if (g_busy_prev || g_busy_now || ImGui::IsAnyItemActive() ||
+        ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return false;
+    return ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+}
+
+/* A focus set by the page (its first row) shows its frame at once when the
+ * player is on a controller or the keyboard, not only after the next press. */
+int g_nav_show = 0;
+void nav_show_tick()
+{
+    if (g_nav_show <= 0) return;
+    g_nav_show--;
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    if (g.NavId) { g.NavCursorVisible = true; g.NavHighlightItemUnderNav = true; }
+}
+bool last_input_not_mouse()
+{
+    const ImGuiContext& g = *ImGui::GetCurrentContext();
+    return g.NavInputSource == ImGuiInputSource_Gamepad || g.NavInputSource == ImGuiInputSource_Keyboard ||
+           g.NavCursorVisible;
 }
 
 /* ---- controller legends ---------------------------------------------------
@@ -532,7 +570,7 @@ bool tabs_begin(const char* id)
     const ImGuiID bar = ImGui::GetID(id);
     if (bar != g_tabs.bar) { g_tabs.bar = bar; g_tabs.n = 0; g_tabs.sel = 0; g_tabs.want = -1; }
     g_tabs.i = 0;
-    if (g_tabs.n > 1 && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
+    if (g_tabs.n > 1 && !g_busy_now && !g_busy_prev) {
         int step = 0;
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_PageUp, false)) step = -1;
         if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_PageDown, false)) step = 1;
@@ -566,7 +604,7 @@ template <class F> void tab(const char* label, float keep, F&& body)
     if (!ImGui::BeginTabItem(label, nullptr, fl)) return;
     g_tabs.sel = idx;
     scrolled(label, keep, [&] {
-        if (g_tabs.focus && !fl) { ImGui::SetKeyboardFocusHere(); g_tabs.focus = false; }
+        if (g_tabs.focus && !fl) { ImGui::SetKeyboardFocusHere(); g_tabs.focus = false; g_nav_show = 3; }
         body();
     });
     ImGui::EndTabItem();
@@ -673,8 +711,7 @@ void draw_menu()
         tabs_end();
     }
     /* Circle with nothing open to back out of: the menu closes. */
-    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) && !ImGui::IsAnyItemActive() &&
-        !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+    if (!pui::saves_popup_open() && back_pressed() && !ImGui::IsKeyPressed(ImGuiKey_Escape, false))
         rsx_ui_set_menu_open(0);
     const std::string note = restart_note(s);
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - gst.WindowPadding.y - foot);
@@ -988,7 +1025,13 @@ void draw_backdrop(const ImVec2& d)
     bg->AddRectFilled(ImVec2(0, 0), d, IM_COL32(0, 0, 0, g_page != MENU_MAIN ? 120 : 40));
 }
 
-void go_page(MenuPage p) { g_page = p; g_page_focus = true; }
+void go_page(MenuPage p)
+{
+    g_page = p; g_page_focus = true;
+    g_tabs.focus = p == MENU_OPTIONS || p == MENU_MORE;      /* the tab's first row */
+    if (g_tabs.focus) g_page_focus = false;
+    if (last_input_not_mouse()) g_nav_show = 10;     /* a few frames: the focus lands after the page is up */
+}
 
 void draw_start()
 {
@@ -1008,9 +1051,7 @@ void draw_start()
     bg->AddRectFilled(ImVec2(tp.x + 4, tp.y + th * 1.06f), ImVec2(tp.x + 4 + fs * 5.0f, tp.y + th * 1.06f + 5), k_accent);
 
     /* Circle, Escape: back to the main page. */
-    if (g_page != MENU_MAIN && !pui::saves_popup_open() && !ImGui::IsAnyItemActive() &&
-        !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
-        (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
+    if (g_page != MENU_MAIN && !g_setup && !pui::saves_popup_open() && back_pressed())
         go_page(MENU_MAIN);
 
     const float top = tp.y + th * 1.06f + fs * 2.4f;
@@ -1061,6 +1102,7 @@ void draw_start()
             port_log_drain();
             _Exit(0);
         }
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false)) go = true;     /* Start plays */
         break; }
     case MENU_OPTIONS: {
         if (tabs_begin("pages")) {
@@ -1073,7 +1115,10 @@ void draw_start()
     case MENU_GAME: {
         /* Where the game is and what is there (ui_game.cpp): the whole start
          * screen while the game is not ready. */
-        scrolled("game", keep, [&] { pui::page_game(s); });
+        { const bool first = g_page_focus && !g_setup;
+          if (first) g_page_focus = false;
+          /* The first row that can take the focus: greyed-out ones are passed over. */
+          scrolled("game", keep, [&] { if (first) ImGui::SetKeyboardFocusHere(); pui::page_game(s); }); }
         if (g_setup) {
             ImGui::SetCursorPosY(height - fs * 3.9f);
             ImGui::Separator();
@@ -1083,7 +1128,10 @@ void draw_start()
         } else footer(nullptr);
         break; }
     case MENU_SAVES: {
-        scrolled("saves", keep, [&] { pui::page_saves(s); });
+        { const bool first = g_page_focus && !g_setup;
+          if (first) g_page_focus = false;
+          /* The first row that can take the focus: greyed-out ones are passed over. */
+          scrolled("saves", keep, [&] { if (first) ImGui::SetKeyboardFocusHere(); pui::page_saves(s); }); }
         footer(nullptr);
         break; }
     case MENU_MORE: {
@@ -1137,9 +1185,15 @@ void draw(void*)
         g_fps = (double)(f - g_fps_frames) / g_fps_t;
         g_fps_frames = f; g_fps_t = 0.0;
     }
-    if (g_start) { draw_start(); return; }
+    nav_show_tick();
+    if (g_start) { draw_start(); busy_track(); return; }
     if (port_settings_get()->fps_counter) draw_fps();
-    if (rsx_ui_menu_open()) draw_menu();
+    { static bool was_open = false;
+      const bool open = rsx_ui_menu_open() != 0;
+      if (open && !was_open) { g_tabs.focus = true; g_busy_now = g_busy_prev = false; }
+      was_open = open;
+      if (open) draw_menu(); }
+    busy_track();
 }
 
 } /* namespace */

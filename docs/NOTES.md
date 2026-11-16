@@ -2882,3 +2882,29 @@ compares) as the first run.
   input to it, and /dev/uinput is not writable): the paging and focus were
   driven through the keyboard path (PS3RECOMP_UI_KEYS PageDown/PageUp), which
   shares the code; the home button is an edge on SDL's own button state.
+
+### The menus could not be worked with a controller alone (2026-11-16)
+
+What was wrong, found with a scripted controller (below):
+- SDL's controller support started only when the game looked for pads
+  (cellPad, after Play): the start screen and the set-up page never saw a
+  pad. rsx_ui_vk_init starts it now.
+- Circle on an open list (a combo) or a held slider closed that and, in the
+  same press, left the page: ImGui closes the popup in NewFrame, before the
+  page asks whether one is open. ui.cpp keeps the state of the frame before
+  (busy_track, back_pressed); tab paging uses it too.
+- Entering a page left the focus on BACK, with no frame drawn: now the
+  page's first usable row has it and its frame shows at once when the page
+  was opened from a pad or the keyboard (go_page, nav_show_tick). On the
+  Saves page with no saves the frame still appears only with the first
+  D-pad press.
+- The Mods tab's Rescan button was not submitted on the first frame, so the
+  focus skipped to BACK. Start on the main page plays.
+`PS3RECOMP_UI_KEYS` takes `pad:<button>` (A B X Y Up Down Left Right L1 R1
+Start Back Guide): a press on a virtual SDL controller made on the first
+one (SDL_JoystickAttachVirtualEx), so the real pad is never touched. Driven
+through: start screen (every page, combo, slider, tabs, back, Start) under
+Xvfb, and the in-game menu in a real window (Guide opens and closes, L1/R1,
+D-pad down to Quit, the question, Circle cancels then closes). The first
+`pad:` token only creates the pad: SDL has not opened it yet, so that press
+is lost.

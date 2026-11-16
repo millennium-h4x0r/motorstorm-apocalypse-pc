@@ -27425,10 +27425,10 @@ index 1ac2845e..e8a4c4ca 100644
  #endif
 diff --git a/libs/video/rsx_ui.cpp b/libs/video/rsx_ui.cpp
 new file mode 100644
-index 00000000..a65f0045
+index 00000000..6691de8a
 --- /dev/null
 +++ b/libs/video/rsx_ui.cpp
-@@ -0,0 +1,795 @@
+@@ -0,0 +1,837 @@
 +/*
 + * ps3recomp - a user interface over the game's window (Dear ImGui, Vulkan).
 + * See rsx_ui.h for the threads, rsx_ui_vk.h for the backend's side.
@@ -27914,8 +27914,14 @@ index 00000000..a65f0045
 + * Tab, or one letter) are pushed into SDL's queue as a press and a release
 + * each, one key a frame, as if typed into the focused window; the file is
 + * emptied once read. For a compositor that will not take synthetic X input. */
++static SDL_Joystick* s_vpad; static int s_vpad_btn = -1, s_vpad_frames;
 +static void ui_script_keys(void)
 +{
++    /* A scripted pad press lasts four frames; the next token waits two more. */
++    if (s_vpad_frames > -2) {
++        if (s_vpad_frames == 0 && s_vpad && s_vpad_btn >= 0) SDL_JoystickSetVirtualButton(s_vpad, s_vpad_btn, 0);
++        if (s_vpad_btn >= 0) { if (--s_vpad_frames > -2) return; s_vpad_btn = -1; }
++    }
 +    static const char* path = (const char*)-1;
 +    static char pending[512]; static size_t at, len;
 +    if (path == (const char*)-1) path = getenv("PS3RECOMP_UI_KEYS");
@@ -27933,6 +27939,34 @@ index 00000000..a65f0045
 +    size_t e = at; while (e < len && pending[e] != ' ' && pending[e] != '\n' && pending[e] != '\t' && pending[e] != '\r') e++;
 +    char name[32]; size_t n = e - at < sizeof name - 1 ? e - at : sizeof name - 1;
 +    memcpy(name, pending + at, n); name[n] = 0; at = e;
++    /* pad:<button> -- a press of that button on a virtual controller (made
++     * on the first one): A B X Y Up Down Left Right L1 R1 Start Back Guide. */
++    if (!strncmp(name, "pad:", 4)) {
++        static const struct { const char* n; int b; } pm[] = {
++            { "A", SDL_CONTROLLER_BUTTON_A }, { "B", SDL_CONTROLLER_BUTTON_B }, { "X", SDL_CONTROLLER_BUTTON_X },
++            { "Y", SDL_CONTROLLER_BUTTON_Y }, { "Up", SDL_CONTROLLER_BUTTON_DPAD_UP },
++            { "Down", SDL_CONTROLLER_BUTTON_DPAD_DOWN }, { "Left", SDL_CONTROLLER_BUTTON_DPAD_LEFT },
++            { "Right", SDL_CONTROLLER_BUTTON_DPAD_RIGHT }, { "L1", SDL_CONTROLLER_BUTTON_LEFTSHOULDER },
++            { "R1", SDL_CONTROLLER_BUTTON_RIGHTSHOULDER }, { "Start", SDL_CONTROLLER_BUTTON_START },
++            { "Back", SDL_CONTROLLER_BUTTON_BACK }, { "Guide", SDL_CONTROLLER_BUTTON_GUIDE } };
++        if (!s_vpad) {
++            SDL_VirtualJoystickDesc d; SDL_zero(d);
++            d.version = SDL_VIRTUAL_JOYSTICK_DESC_VERSION;
++            d.type = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
++            d.naxes = SDL_CONTROLLER_AXIS_MAX; d.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
++            d.name = "Scripted pad";
++            const int idx = SDL_JoystickAttachVirtualEx(&d);
++            if (idx >= 0) s_vpad = SDL_JoystickOpen(idx);
++            fprintf(stderr, "[ui] scripted pad %s\n", s_vpad ? "attached" : SDL_GetError());
++        }
++        for (auto& m : pm)
++            if (s_vpad && !strcmp(m.n, name + 4)) {
++                SDL_JoystickSetVirtualButton(s_vpad, m.b, 1);
++                s_vpad_btn = m.b; s_vpad_frames = 4;
++                fprintf(stderr, "[ui] scripted pad %s\n", m.n);
++            }
++        return;
++    }
 +    { int x, y;   /* click:X,Y -- a left click at window pixel X,Y */
 +      if (sscanf(name, "click:%d,%d", &x, &y) == 2) {
 +          SDL_Event ev; memset(&ev, 0, sizeof ev);
@@ -28058,6 +28092,14 @@ index 00000000..a65f0045
 +        fprintf(stderr, "[ui] ImGui did not start: the game runs without its menu\n");
 +        ImGui::DestroyContext();
 +        return -1;
++    }
++    /* The menus are moved through with a controller from the first frame: the
++     * start screen is up before the game has looked for pads (cellPad), so
++     * SDL's controller support starts here, with cellPad's hint. */
++    if (SDL_WasInit(SDL_INIT_GAMECONTROLLER) == 0) {
++        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
++        if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0)
++            fprintf(stderr, "[ui] no controller support: %s\n", SDL_GetError());
 +    }
 +    /* Any connected controller moves through the menus, not only the first. */
 +    ImGui_ImplSDL2_SetGamepadMode(ImGui_ImplSDL2_GamepadMode_AutoAll);
