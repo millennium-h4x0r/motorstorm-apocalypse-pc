@@ -31,6 +31,7 @@
 /* The lifter's generated header, which declares ppu_context and the function
  * table. It comes first: everything below is written against that struct. */
 #include "settings.h"
+#include "gamefiles.h"
 #include "ui.h"
 #include "ppu_recomp.h"
 
@@ -587,6 +588,18 @@ extern "C" void port_log_drain(void)
         pthread_mutex_unlock(&L.lock);
     }
 }
+/* Before the process starts itself again (ui.cpp): stdout and stderr are
+ * their own targets again. Left on the pipes, the new process would pump its
+ * log into this one's, which nothing reads any more: every line after a
+ * restart was lost. */
+extern "C" void port_log_direct(void)
+{
+    port_log_drain();
+    for (int i = 0; i < 2; i++) {
+        if (s_logs[i].in < 0 || s_logs[i].out < 0) continue;
+        dup2(s_logs[i].out, i ? STDERR_FILENO : STDOUT_FILENO);
+    }
+}
 static void log_pump_start(void)
 {
     const char* e = getenv("PS3_LOG_DIRECT");
@@ -599,6 +612,8 @@ static void log_pump_start(void)
         fcntl(fds[1], F_SETPIPE_SZ, 1 << 20);
         s_logs[i].out = dup(fd);
         s_logs[i].in = fds[0];
+        fcntl(s_logs[i].out, F_SETFD, FD_CLOEXEC);      /* the pump's own ends stay in this process */
+        fcntl(s_logs[i].in, F_SETFD, FD_CLOEXEC);
         dup2(fds[1], fd);
         close(fds[1]);
         pthread_t a, b;
@@ -631,8 +646,10 @@ int main(int argc, char** argv)
 #ifndef _WIN32
     log_pump_start();
 #endif
-    if (argc < 2) {
-        printf("usage: %s <PPU ELF>\n", argv[0]);
+    if (argc > 1 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
+        printf("usage: %s [the game: the folder holding PS3_GAME, or its EBOOT.elf] [--play]\n"
+               "Without it: PS3_GAME_DIR, then the folder chosen in the port's menu "
+               "(settings.ini, [game] path), then disc/.\n", argv[0]);
         return 2;
     }
 
@@ -648,8 +665,22 @@ int main(int argc, char** argv)
       port_settings_export(ps);
       printf("[settings] %s %s: scale %d, voices %s, text %s, VSync %s\n",
              had ? "read" : "defaults, no", port_settings_path(), ps->scale, ps->voice, ps->text,
-             ps->vsync ? "on" : "off");
-      port_ui_init(argc, argv); }
+             ps->vsync ? "on" : "off"); }
+
+    /* Where the game is, and whether everything the port needs is there
+     * (gamefiles.h): the path given here when it exists, else PS3_GAME_DIR,
+     * else the one chosen in the menu, else disc/. Nothing below reads the
+     * game before this has passed; when it has not, a window shows what is
+     * missing and lets the player choose the folder (ui_game.cpp), and no
+     * guest boots. */
+    const bool windowed = vk_window && vk_window[0] && vk_window[0] != '0';
+    const gamefiles::Boot& game = gamefiles::resolve(argc, argv, windowed ? port_settings_get()->game_path : nullptr);
+    {
+        static const char* const from[] = { "given on the command line", "PS3_GAME_DIR", "settings.ini", "the default" };
+        printf("[game] %s (%s)%s%s\n", game.report.root.c_str(), from[game.source],
+               game.report.ready ? "" : " -- not ready: ", game.report.problem.c_str());
+    }
+    if (windowed) port_ui_init(argc, argv);
 
     /* Runtime defaults. An environment override always wins. The ones marked
      * "inherited from inFAMOUS 2" were tuned on (or needed by) that port; the
@@ -835,7 +866,23 @@ int main(int argc, char** argv)
     /* Paths first, before anything that may start a thread: setenv racing a
      * getenv on another thread is undefined in glibc. derive_vfs_root needs only
      * the path. */
-    derive_vfs_root(argv[1]);
+    if (!game.report.ready) {
+        for (const gamefiles::Item& it : game.report.items)
+            if (it.state != gamefiles::FOUND)
+                fprintf(stderr, "[game] %s: %s\n", it.name.c_str(), it.detail.c_str());
+        if (!port_ui_setup()) {
+            fprintf(stderr, "ERROR: the game is not set up (%s). Start the port in its window "
+                            "(work/play.sh) to set it up, or give the game's folder as the argument.\n",
+                    game.report.problem.c_str());
+            return 1;
+        }
+        /* The set-up screen: the window and the UI, nothing of the game. The
+         * UI starts the process again once the folder is right, or quits. */
+        CreateThread(NULL, 4u * 1024 * 1024, frame_clock, NULL, 0, NULL);
+        port_ui_wait_start();
+        return 1;
+    }
+    derive_vfs_root(game.report.eboot.c_str());
     sync_sys_fs_root();
     printf("[boot] VFS root: %s\n", ppu_vfs_root);
     /* Without it cellGame reports the placeholder title id BLES00000. */
@@ -851,6 +898,18 @@ int main(int argc, char** argv)
      * from RPCS3's install of the user's own PUP, Flatpak or native; on
      * Windows, where RPCS3 keeps it beside rpcs3.exe, from a dev_flash beside
      * the disc tree. The environment wins for both. */
+    if (game.source == gamefiles::FROM_ENVIRONMENT || game.source == gamefiles::FROM_SETTINGS) {
+        /* A game the player pointed at, somewhere else on the disk: its hdd0
+         * and hdd1 stay here with the saves, not beside the dump (which may
+         * be read-only, and which another choice would leave behind). */
+        env_default("PS3_HDD0_ROOT", "./hdd0");
+        env_default("PS3_HDD1_ROOT", "./hdd1");
+#ifdef _WIN32
+        _mkdir(getenv("PS3_HDD0_ROOT"));
+#else
+        mkdir(getenv("PS3_HDD0_ROOT"), 0755);
+#endif
+    }
     if (!getenv("PS3_HDD0_ROOT")) {
         static char hdd0[1024];
         snprintf(hdd0, sizeof hdd0, "%s", ppu_vfs_root);
@@ -922,9 +981,9 @@ int main(int argc, char** argv)
     printf("[boot] /dev_hdd0 -> %s, /dev_flash -> %s\n",
            getenv("PS3_HDD0_ROOT"), getenv("PS3_DEV_FLASH") ? getenv("PS3_DEV_FLASH") : "(runtime default)");
 
-    uint32_t entry = ppu_load_elf(argv[1]);
+    uint32_t entry = ppu_load_elf(game.report.eboot.c_str());
     if (!entry) {
-        fprintf(stderr, "ERROR: could not load %s\n", argv[1]);
+        fprintf(stderr, "ERROR: could not load %s\n", game.report.eboot.c_str());
         return 1;
     }
 

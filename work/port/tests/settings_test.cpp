@@ -74,6 +74,9 @@ int main()
         unsetenv("PS3RECOMP_VK_FULLSCREEN"); unsetenv("PS3RECOMP_VK_PRESENT"); unsetenv("PS3RECOMP_VK_STRETCH");
         unsetenv("PS3RECOMP_VK_DISPLAY"); unsetenv("PS3RECOMP_FPS_LIMIT"); setenv("PS3RECOMP_BE_THREAD", "0", 1);
         unsetenv("PS3RECOMP_FULLRES_PARTICLES"); unsetenv("PS3RECOMP_ANISO");
+        unsetenv("PS3RECOMP_VK_WINDOW_SIZE"); unsetenv("PS3RECOMP_VK_FILTER"); unsetenv("PS3RECOMP_VK_SHARPEN");
+        unsetenv("PS3RECOMP_VK_BRIGHTNESS"); unsetenv("PS3RECOMP_VK_GAMMA");
+        unsetenv("PS3_SIM_FPS");                              /* the exports above set it */
         port_settings b;
         CHECK(port_settings_load(&b, p2.c_str()) == 1);
         const unsigned pin = port_settings_from_env(&b);
@@ -124,6 +127,64 @@ int main()
         remove(p4.c_str());
     }
 
+    /* display and picture: round trip, bad values, the environment */
+    {
+        const std::string p5 = std::string(dir) + "/picture.ini";
+        unsetenv("PS3RECOMP_VK_WINDOW_SIZE"); unsetenv("PS3RECOMP_VK_FILTER"); unsetenv("PS3RECOMP_VK_SHARPEN");
+        unsetenv("PS3RECOMP_VK_BRIGHTNESS"); unsetenv("PS3RECOMP_VK_GAMMA");
+        port_settings a; port_settings_defaults(&a);
+        { port_settings n; port_settings_defaults(&n); port_settings_from_env(&n); }   /* nothing pinned */
+        CHECK(a.window_w == 0 && a.window_h == 0 && a.filter == 0 && a.sharpen == 0 && a.brightness == 0 &&
+              a.gamma == 100);
+        a.scale = 4; a.window_w = 1920; a.window_h = 1080; a.filter = 1; a.sharpen = 35; a.brightness = -12;
+        a.gamma = 140;
+        CHECK(port_settings_save(&a, p5.c_str()) == 0);
+        port_settings b;
+        CHECK(port_settings_load(&b, p5.c_str()) == 1);
+        CHECK(!memcmp(&a, &b, sizeof a));
+        a.window_w = a.window_h = -1;                             /* fit the screen */
+        CHECK(port_settings_save(&a, p5.c_str()) == 0);
+        CHECK(port_settings_load(&b, p5.c_str()) == 1);
+        CHECK(b.window_w == -1 && b.window_h == -1);
+        FILE* g = fopen(p5.c_str(), "w");
+        fputs("[video]\nscale = 5\nwindow = 10x10\nfilter = cubic\nsharpen = 101\nbrightness = -51\ngamma = 20\n", g);
+        fclose(g);
+        CHECK(port_settings_load(&b, p5.c_str()) == 1);          /* out of range: the defaults */
+        CHECK(b.scale == 1 && b.window_w == 0 && b.window_h == 0 && b.filter == 0 && b.sharpen == 0 &&
+              b.brightness == 0 && b.gamma == 100);
+        g = fopen(p5.c_str(), "w");
+        fputs("[video]\nwindow = 2560x1440 ; a comment\nfilter = nearest\nbrightness = 50\ngamma = 200\n", g);
+        fclose(g);
+        CHECK(port_settings_load(&b, p5.c_str()) == 1);
+        CHECK(b.window_w == 2560 && b.window_h == 1440 && b.filter == 1 && b.brightness == 50 && b.gamma == 200);
+
+        /* the environment wins, is clamped as the backend clamps it, and the file keeps its own */
+        setenv("PS3RECOMP_VK_WINDOW_SIZE", "fit", 1); setenv("PS3RECOMP_VK_SHARPEN", "250", 1);
+        setenv("PS3RECOMP_VK_GAMMA", "x", 1); setenv("PS3RECOMP_VK_FILTER", "linear", 1);
+        const unsigned pin = port_settings_from_env(&b);
+        CHECK((pin & PORT_PIN_WINDOW_SIZE) && (pin & PORT_PIN_SHARPEN) && (pin & PORT_PIN_GAMMA) &&
+              (pin & PORT_PIN_FILTER) && !(pin & PORT_PIN_BRIGHTNESS));
+        CHECK(b.window_w == -1 && b.sharpen == 100 && b.gamma == 100 && b.filter == 0 && b.brightness == 50);
+        b.sharpen = 7; b.brightness = 9;                          /* the UI changes both */
+        CHECK(port_settings_save(&b, p5.c_str()) == 0);
+        port_settings c;
+        CHECK(port_settings_load(&c, p5.c_str()) == 1);
+        CHECK(c.window_w == 2560 && c.window_h == 1440 && c.filter == 1 && c.sharpen == 0 && c.gamma == 200);
+        CHECK(c.brightness == 9);                                 /* not pinned: saved */
+        unsetenv("PS3RECOMP_VK_WINDOW_SIZE"); unsetenv("PS3RECOMP_VK_SHARPEN");
+        unsetenv("PS3RECOMP_VK_GAMMA"); unsetenv("PS3RECOMP_VK_FILTER");
+
+        /* exported as the backend reads them */
+        unsetenv("PS3RECOMP_VK_BRIGHTNESS");
+        setenv("PS3_VOICE_LANG", "english", 1);                   /* the caller's: export must not claim it */
+        c.window_w = 1600; c.window_h = 900; c.sharpen = 40;
+        port_settings_export(&c);
+        CHECK(!strcmp(getenv("PS3RECOMP_VK_WINDOW_SIZE"), "1600x900") && !strcmp(getenv("PS3RECOMP_VK_FILTER"), "nearest"));
+        CHECK(!strcmp(getenv("PS3RECOMP_VK_SHARPEN"), "40") && !strcmp(getenv("PS3RECOMP_VK_BRIGHTNESS"), "9") &&
+              !strcmp(getenv("PS3RECOMP_VK_GAMMA"), "200"));
+        remove(p5.c_str());
+    }
+
     /* voices: text-only languages are refused */
     f = fopen(path.c_str(), "w");
     fputs("\xEF\xBB\xBF[language]\nvoice = korean\ntext = korean\n", f);   /* with a BOM */
@@ -150,6 +211,50 @@ int main()
         CHECK(!scale && keep && skip && voice && extra);
         CHECK(getenv("PS3RECOMP_RES_SCALE") != nullptr);      /* this process keeps its own */
         free(env);
+    }
+
+    /* [game] path: empty by default; the whole line, with spaces, ; and #; PS3_GAME_DIR pins it */
+    {
+        const std::string p5 = std::string(dir) + "/game.ini";
+        unsetenv("PS3_GAME_DIR");
+        port_settings a; port_settings_defaults(&a);
+        CHECK(a.game_path[0] == 0);
+        snprintf(a.game_path, sizeof a.game_path, "/mnt/My Games/dump #2; europe/BCES-00484");
+        CHECK(port_settings_save(&a, p5.c_str()) == 0);
+        port_settings b;
+        CHECK(port_settings_load(&b, p5.c_str()) == 1);
+        CHECK(!strcmp(b.game_path, "/mnt/My Games/dump #2; europe/BCES-00484"));
+        CHECK(!(port_settings_from_env(&b) & PORT_PIN_GAME));
+        setenv("PS3_GAME_DIR", "/from/env", 1);
+        CHECK(port_settings_from_env(&b) & PORT_PIN_GAME);
+        CHECK(!strcmp(b.game_path, "/from/env"));              /* what the game runs with */
+        CHECK(port_settings_save(&b, p5.c_str()) == 0);        /* the file keeps its own */
+        unsetenv("PS3_GAME_DIR");
+        CHECK(port_settings_load(&b, p5.c_str()) == 1);
+        CHECK(!strcmp(b.game_path, "/mnt/My Games/dump #2; europe/BCES-00484"));
+        port_settings_from_env(&b);                            /* nothing pinned for what follows */
+        a.game_path[0] = 0;
+        CHECK(port_settings_save(&a, p5.c_str()) == 0);
+        CHECK(port_settings_load(&b, p5.c_str()) == 1 && b.game_path[0] == 0);
+        remove(p5.c_str());
+    }
+
+    /* [saves]: on and 8 by default, saved, read back, clamped */
+    {
+        const std::string p6 = std::string(dir) + "/saves.ini";
+        port_settings a; port_settings_defaults(&a);
+        CHECK(a.backup_on_play == 1 && a.keep_backups == 8);
+        a.backup_on_play = 0; a.keep_backups = 25;
+        CHECK(port_settings_save(&a, p6.c_str()) == 0);
+        port_settings b;
+        CHECK(port_settings_load(&b, p6.c_str()) == 1);
+        CHECK(b.backup_on_play == 0 && b.keep_backups == 25);
+        FILE* g = fopen(p6.c_str(), "w");
+        fputs("[saves]\nbackup_on_play = 2\nkeep_backups = 0\n", g);
+        fclose(g);
+        CHECK(port_settings_load(&b, p6.c_str()) == 1);
+        CHECK(b.backup_on_play == 1 && b.keep_backups == 8);   /* out of range: the defaults */
+        remove(p6.c_str());
     }
 
     remove(path.c_str());

@@ -34,10 +34,15 @@ for f in $files; do
     # allowed. A frame capture is a picture of the game, not a part of it.
     shot=0
     case "$f" in docs/screenshots/*.jpg) shot=1; limit=524288 ;; esac
+    # The menus' fonts: Inter (SIL Open Font License, beside them), subset.
+    font=0
+    case "$f" in work/port/assets/fonts/*.otf) font=1; limit=131072 ;; esac
     [ "$size" -gt "$limit" ] && bad "$f: larger than $limit bytes ($size)"
     # Binary content.
     if [ "$shot" -eq 1 ]; then
         [ "$(head -c 3 "$f" | od -An -tx1 | tr -d ' ')" = "ffd8ff" ] || bad "$f: not a JPEG"
+    elif [ "$font" -eq 1 ]; then
+        [ "$(head -c 4 "$f")" = "OTTO" ] || bad "$f: not an OpenType font"
     elif [ "$size" -gt 0 ] && ! grep -Iq . "$f"; then bad "$f: binary file"; fi
     # Code lifted from the game: the names the lifters give its SPU images
     # (job modules, plugins, the policy module) and its PPU functions.

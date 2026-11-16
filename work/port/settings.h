@@ -12,11 +12,16 @@ extern "C" {
 
 typedef struct port_settings {
     /* [video] */
-    int scale;          /* render scale: 1 (720p), 2 (1440p), 3 (4K) */
+    int scale;          /* render scale: 1 (720p), 2 (1440p), 3 (4K), 4 (5K) */
     int fullscreen;     /* 0 window, 1 full screen */
     int vsync;          /* 1 fifo, 0 mailbox */
     int stretch;        /* 1 stretch to the window, 0 black bars */
     int display;        /* which monitor the window opens on */
+    int window_w, window_h; /* the window's size in pixels: 0 x 0 the picture's own, -1 x -1 fit the screen */
+    int filter;         /* scaling the picture to the window: 0 smooth (bilinear), 1 nearest */
+    int sharpen;        /* sharpening, 0 (off) .. 100 */
+    int brightness;     /* -50 .. 50, 0 as the game draws */
+    int gamma;          /* hundredths, 50 .. 200, 100 as the game draws */
     /* [language] */
     char voice[24];     /* the voice language (PS3_VOICE_LANG), e.g. "english" */
     char text[24];      /* the text language (PS3_TEXT_LANG, and PS3_SYS_LANG from it) */
@@ -31,6 +36,11 @@ typedef struct port_settings {
     int fullres_particles;  /* PS3RECOMP_FULLRES_PARTICLES */
     int aniso;              /* PS3RECOMP_ANISO: 0 (the game's own), 2, 4, 8, 16 */
     char mods_on[512];      /* the enabled mod folders, comma-separated, in load order */
+    /* [saves] */
+    int backup_on_play;     /* back up the saves when Play is pressed (saves.h) */
+    int keep_backups;       /* how many automatic backups stay: 1..99 */
+    /* [game] */
+    char game_path[1024];   /* where the game is: the folder holding PS3_GAME (gamefiles.h); empty: disc/ */
 } port_settings;
 
 /* The defaults: 720p, a window, mailbox, black bars, English voices and
@@ -52,6 +62,9 @@ enum {
     PORT_PIN_STRETCH = 1 << 3, PORT_PIN_DISPLAY = 1 << 4, PORT_PIN_VOICE = 1 << 5,
     PORT_PIN_TEXT = 1 << 6, PORT_PIN_FPS_LIMIT = 1 << 7, PORT_PIN_RECORD_THREAD = 1 << 8,
     PORT_PIN_PARTICLES = 1 << 9, PORT_PIN_ANISO = 1 << 10, PORT_PIN_FRAME_RATE = 1 << 11,
+    PORT_PIN_GAME = 1 << 28,    /* PS3_GAME_DIR */
+    PORT_PIN_WINDOW_SIZE = 1 << 20, PORT_PIN_FILTER = 1 << 21, PORT_PIN_SHARPEN = 1 << 22,
+    PORT_PIN_BRIGHTNESS = 1 << 23, PORT_PIN_GAMMA = 1 << 24,
 };
 
 /* Before port_settings_export: each field whose variable is set takes the

@@ -48,6 +48,11 @@ void port_settings_defaults(port_settings* s)
     s->vsync = 0;
     s->stretch = 0;
     s->display = 0;
+    s->window_w = s->window_h = 0;
+    s->filter = 0;
+    s->sharpen = 0;
+    s->brightness = 0;
+    s->gamma = 100;
     snprintf(s->voice, sizeof s->voice, "english");
     snprintf(s->text, sizeof s->text, "english");
     s->fps_limit = 0;
@@ -57,12 +62,35 @@ void port_settings_defaults(port_settings* s)
     s->skip_launcher = 0;
     s->fullres_particles = 1;
     s->aniso = 16;
+    s->backup_on_play = 1;
+    s->keep_backups = 8;
 }
 
 static std::string trim(const std::string& t)
 {
     size_t a = t.find_first_not_of(" \t\r\n"), b = t.find_last_not_of(" \t\r\n");
     return a == std::string::npos ? std::string() : t.substr(a, b - a + 1);
+}
+
+/* The window's size as the file and PS3RECOMP_VK_WINDOW_SIZE write it:
+ * "auto" (the picture's own size), "fit" (the screen) or <w>x<h> pixels.
+ * Anything else leaves the old value. */
+static void set_window(int* w, int* h, const char* v)
+{
+    int a = 0, b = 0;
+    char tail = 0;
+    if (!strcmp(v, "auto")) *w = *h = 0;
+    else if (!strcmp(v, "fit")) *w = *h = -1;
+    else if (sscanf(v, "%dx%d%c", &a, &b, &tail) == 2 && a >= 320 && a <= 16384 && b >= 180 && b <= 16384) {
+        *w = a; *h = b;
+    }
+}
+
+static std::string window_text(const port_settings* s)
+{
+    if (s->window_w < 0) return "fit";
+    if (s->window_w == 0 || s->window_h == 0) return "auto";
+    return std::to_string(s->window_w) + "x" + std::to_string(s->window_h);
 }
 
 /* An integer in [lo, hi], else the old value. */
@@ -81,7 +109,7 @@ int port_settings_load(port_settings* s, const char* path)
     FILE* f = path ? fopen(path, "r") : nullptr;
     if (!f) return 0;
     std::string section;
-    char line[512];
+    char line[2048];
     bool first = true;
     while (fgets(line, sizeof line, f)) {
         std::string l = trim(line);
@@ -98,10 +126,16 @@ int port_settings_load(port_settings* s, const char* path)
         if (eq == std::string::npos) continue;
         const std::string k = trim(l.substr(0, eq));
         std::string v = trim(l.substr(eq + 1));
+        const std::string whole = v;    /* a path may hold ; or # */
         const size_t c = v.find_first_of(";#");
         if (c != std::string::npos) v = trim(v.substr(0, c));
         if (section == "video") {
-            if (k == "scale") set_int(&s->scale, v, 1, 3);
+            if (k == "scale") set_int(&s->scale, v, 1, 4);
+            else if (k == "window") set_window(&s->window_w, &s->window_h, v.c_str());
+            else if (k == "filter") { if (v == "nearest") s->filter = 1; else if (v == "linear") s->filter = 0; }
+            else if (k == "sharpen") set_int(&s->sharpen, v, 0, 100);
+            else if (k == "brightness") set_int(&s->brightness, v, -50, 50);
+            else if (k == "gamma") set_int(&s->gamma, v, 50, 200);
             else if (k == "fullscreen") set_int(&s->fullscreen, v, 0, 1);
             else if (k == "vsync") set_int(&s->vsync, v, 0, 1);
             else if (k == "stretch") set_int(&s->stretch, v, 0, 1);
@@ -116,10 +150,15 @@ int port_settings_load(port_settings* s, const char* path)
             else if (k == "record_thread") set_int(&s->record_thread, v, 0, 1);
         } else if (section == "launcher") {
             if (k == "skip") set_int(&s->skip_launcher, v, 0, 1);
+        } else if (section == "game") {
+            if (k == "path") snprintf(s->game_path, sizeof s->game_path, "%s", whole.c_str());
         } else if (section == "mods") {
             if (k == "fullres_particles") set_int(&s->fullres_particles, v, 0, 1);
             else if (k == "aniso") set_int(&s->aniso, v, 0, 16);
             else if (k == "enabled") snprintf(s->mods_on, sizeof s->mods_on, "%s", v.c_str());
+        } else if (section == "saves") {
+            if (k == "backup_on_play") set_int(&s->backup_on_play, v, 0, 1);
+            else if (k == "keep_backups") set_int(&s->keep_backups, v, 1, 99);
         }
     }
     fclose(f);
@@ -136,6 +175,11 @@ int port_settings_save(const port_settings* in, const char* path)
     if (s_pinned & PORT_PIN_VSYNC)         out.vsync = s_file.vsync;
     if (s_pinned & PORT_PIN_STRETCH)       out.stretch = s_file.stretch;
     if (s_pinned & PORT_PIN_DISPLAY)       out.display = s_file.display;
+    if (s_pinned & PORT_PIN_WINDOW_SIZE)   { out.window_w = s_file.window_w; out.window_h = s_file.window_h; }
+    if (s_pinned & PORT_PIN_FILTER)        out.filter = s_file.filter;
+    if (s_pinned & PORT_PIN_SHARPEN)       out.sharpen = s_file.sharpen;
+    if (s_pinned & PORT_PIN_BRIGHTNESS)    out.brightness = s_file.brightness;
+    if (s_pinned & PORT_PIN_GAMMA)         out.gamma = s_file.gamma;
     if (s_pinned & PORT_PIN_VOICE)         memcpy(out.voice, s_file.voice, sizeof out.voice);
     if (s_pinned & PORT_PIN_TEXT)          memcpy(out.text, s_file.text, sizeof out.text);
     if (s_pinned & PORT_PIN_FPS_LIMIT)     out.fps_limit = s_file.fps_limit;
@@ -143,6 +187,7 @@ int port_settings_save(const port_settings* in, const char* path)
     if (s_pinned & PORT_PIN_PARTICLES)     out.fullres_particles = s_file.fullres_particles;
     if (s_pinned & PORT_PIN_ANISO)         out.aniso = s_file.aniso;
     if (s_pinned & PORT_PIN_FRAME_RATE)    out.frame_rate = s_file.frame_rate;
+    if (s_pinned & PORT_PIN_GAME)          memcpy(out.game_path, s_file.game_path, sizeof out.game_path);
     std::string dir = path;
     const size_t slash = dir.find_last_of("/\\");
     if (slash != std::string::npos) {
@@ -162,11 +207,16 @@ int port_settings_save(const port_settings* in, const char* path)
             "; MotorStorm Apocalypse port settings. A variable set in the environment wins over\n"
             "; this file. The launcher and the in-game menu (F1) write it.\n"
             "\n[video]\n"
-            "scale = %d          ; 1 = 720p, 2 = 1440p, 3 = 4K\n"
+            "scale = %d          ; 1 = 720p, 2 = 1440p, 3 = 4K, 4 = 5K\n"
             "fullscreen = %d\n"
             "vsync = %d\n"
             "stretch = %d        ; 0 = black bars, 1 = stretch\n"
             "display = %d\n"
+            "window = %s      ; the window's size: auto (the picture's), fit (the screen) or <w>x<h> pixels\n"
+            "filter = %s      ; scaling to the window: linear (smooth) or nearest\n"
+            "sharpen = %d        ; 0 = off .. 100\n"
+            "brightness = %d     ; -50 .. 50\n"
+            "gamma = %d        ; in hundredths, 50 .. 200; 100 = as the game draws\n"
             "\n[language]\n"
             "voice = %s\n"
             "text = %s\n"
@@ -182,8 +232,18 @@ int port_settings_save(const port_settings* in, const char* path)
             "aniso = %d             ; 0 = the game's own, 2..16\n"
             "enabled = %s ; mod folders under mods/, in load order (later wins)\n",
             s->scale, s->fullscreen, s->vsync, s->stretch, s->display,
+            window_text(s).c_str(), s->filter ? "nearest" : "linear", s->sharpen, s->brightness, s->gamma,
             s->voice, s->text, s->fps_limit, s->fps_counter, s->frame_rate, s->record_thread,
             s->skip_launcher, s->fullres_particles, s->aniso, s->mods_on);
+    /* The whole line after "path =" is the path: no comment on it. */
+    fprintf(f, "\n[game]\n"
+               "; where the game is: the folder that holds PS3_GAME. Empty: disc/\n"
+               "path = %s\n", s->game_path);
+    fprintf(f,
+            "\n[saves]\n"
+            "backup_on_play = %d ; back up the saves each time Play is pressed\n"
+            "keep_backups = %d   ; how many automatic backups to keep (1..99)\n",
+            s->backup_on_play, s->keep_backups);
     const int ok = fclose(f) == 0;
 #ifdef _WIN32
     /* The CRT's rename() refuses an existing target. */
@@ -194,7 +254,7 @@ int port_settings_save(const port_settings* in, const char* path)
     return 0;
 }
 
-static std::string s_exported[32];
+static std::string s_exported[64];
 static int s_nexported;
 
 static void put(const char* name, const char* value)
@@ -205,11 +265,21 @@ static void put(const char* name, const char* value)
 #else
     setenv(name, value, 1);
 #endif
-    if (s_nexported < 32) s_exported[s_nexported++] = name;
+    if (s_nexported < 64) s_exported[s_nexported++] = name;
 }
 
 /* The backend's reading of a switch: set, not empty, not "0". */
 static int env_on(const char* v) { return v[0] && v[0] != '0'; }
+
+/* The backend's reading of a number: clamped to [lo, hi], `def` when it is
+ * not one. */
+static int env_range(const char* v, int def, int lo, int hi)
+{
+    char* end = nullptr;
+    const long n = strtol(v, &end, 10);
+    if (end == v) return def;
+    return n < lo ? lo : n > hi ? hi : (int)n;
+}
 
 unsigned port_settings_from_env(port_settings* s)
 {
@@ -218,12 +288,21 @@ unsigned port_settings_from_env(port_settings* s)
     const char* v;
     if ((v = getenv("PS3RECOMP_RES_SCALE"))) {
         const int n = atoi(v);
-        if (n >= 1 && n <= 3) { s->scale = n; pin |= PORT_PIN_SCALE; }
+        if (n >= 1 && n <= 4) { s->scale = n; pin |= PORT_PIN_SCALE; }
     }
     if ((v = getenv("PS3RECOMP_VK_FULLSCREEN"))) { s->fullscreen = env_on(v); pin |= PORT_PIN_FULLSCREEN; }
     if ((v = getenv("PS3RECOMP_VK_PRESENT")))    { s->vsync = !strcmp(v, "fifo"); pin |= PORT_PIN_VSYNC; }
     if ((v = getenv("PS3RECOMP_VK_STRETCH")))    { s->stretch = env_on(v); pin |= PORT_PIN_STRETCH; }
     if ((v = getenv("PS3RECOMP_VK_DISPLAY")))    { s->display = atoi(v) < 0 ? 0 : atoi(v); pin |= PORT_PIN_DISPLAY; }
+    if ((v = getenv("PS3RECOMP_VK_WINDOW_SIZE"))) {
+        s->window_w = s->window_h = 0;              /* as the backend: anything unknown is the picture's size */
+        set_window(&s->window_w, &s->window_h, v);
+        pin |= PORT_PIN_WINDOW_SIZE;
+    }
+    if ((v = getenv("PS3RECOMP_VK_FILTER")))     { s->filter = !strcmp(v, "nearest"); pin |= PORT_PIN_FILTER; }
+    if ((v = getenv("PS3RECOMP_VK_SHARPEN")))    { s->sharpen = env_range(v, 0, 0, 100); pin |= PORT_PIN_SHARPEN; }
+    if ((v = getenv("PS3RECOMP_VK_BRIGHTNESS"))) { s->brightness = env_range(v, 0, -50, 50); pin |= PORT_PIN_BRIGHTNESS; }
+    if ((v = getenv("PS3RECOMP_VK_GAMMA")))      { s->gamma = env_range(v, 100, 50, 200); pin |= PORT_PIN_GAMMA; }
     if ((v = getenv("PS3_VOICE_LANG")) && voice_known(v)) {
         snprintf(s->voice, sizeof s->voice, "%s", v); pin |= PORT_PIN_VOICE;
     }
@@ -234,6 +313,7 @@ unsigned port_settings_from_env(port_settings* s)
     if ((v = getenv("PS3_SIM_FPS")))             { s->frame_rate = atoi(v) == 30 ? 30 : 60; pin |= PORT_PIN_FRAME_RATE; }
     if ((v = getenv("PS3RECOMP_BE_THREAD")))     { s->record_thread = env_on(v); pin |= PORT_PIN_RECORD_THREAD; }
     if ((v = getenv("PS3RECOMP_FULLRES_PARTICLES"))) { s->fullres_particles = env_on(v); pin |= PORT_PIN_PARTICLES; }
+    if ((v = getenv("PS3_GAME_DIR")) && *v)      { snprintf(s->game_path, sizeof s->game_path, "%s", v); pin |= PORT_PIN_GAME; }
     if ((v = getenv("PS3RECOMP_ANISO")))         { s->aniso = atoi(v) < 0 ? 0 : atoi(v) > 16 ? 16 : atoi(v); pin |= PORT_PIN_ANISO; }
     s_pinned = pin;
     return pin;
@@ -273,6 +353,11 @@ void port_settings_export(const port_settings* s)
     put("PS3RECOMP_VK_PRESENT", s->vsync ? "fifo" : "mailbox");
     put("PS3RECOMP_VK_STRETCH", s->stretch ? "1" : "0");
     snprintf(b, sizeof b, "%d", s->display);       put("PS3RECOMP_VK_DISPLAY", b);
+    put("PS3RECOMP_VK_WINDOW_SIZE", window_text(s).c_str());
+    put("PS3RECOMP_VK_FILTER", s->filter ? "nearest" : "linear");
+    snprintf(b, sizeof b, "%d", s->sharpen);       put("PS3RECOMP_VK_SHARPEN", b);
+    snprintf(b, sizeof b, "%d", s->brightness);    put("PS3RECOMP_VK_BRIGHTNESS", b);
+    snprintf(b, sizeof b, "%d", s->gamma);         put("PS3RECOMP_VK_GAMMA", b);
     put("PS3_VOICE_LANG", s->voice);
     put("PS3_TEXT_LANG", s->text);
     /* The console language (cellSysutil, PS3_SYS_LANG) follows the text

@@ -204,6 +204,11 @@ add_executable(${PROJECT_NAME}
     main.cpp
     settings.cpp
     ui.cpp
+    ui_image.cpp
+    ui_game.cpp
+    gamefiles.cpp
+    ui_saves.cpp
+    saves.cpp
     stubs.cpp
     port_cpu_check.c
     native_passes.c

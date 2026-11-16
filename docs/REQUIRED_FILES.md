@@ -54,6 +54,18 @@ for f in "$SRC"/USRDIR/*; do [ "$(basename "$f")" = EBOOT.BIN ] || ln -s "$f" di
 cp /path/to/EBOOT.elf disc/PS3_GAME/USRDIR/
 ```
 
+### The game somewhere else
+
+`disc/` is only the default. When the port starts in its window and something
+it needs is not there, it shows a set-up screen instead of the game: what was
+found, what is missing and how to get it, and a button to choose the folder of
+your dump (the folder holding `PS3_GAME`; `PS3_GAME`, its `USRDIR` or the
+`EBOOT.elf` in it work too). The choice is kept in `user/settings.ini`
+(`[game] path`). The order: the path given to the binary when it exists, then
+`PS3_GAME_DIR`, then that setting, then `disc/`. The folder only moves the
+game's data and its `EBOOT.elf`: the code is in the port, built from the one
+executable above.
+
 ## Firmware
 
 Reads from `/dev_flash` (fonts and system files) come from RPCS3's install of

@@ -11,3 +11,10 @@
 - **[RPCS3](https://rpcs3.net)** (GPL-2.0): the behavioral reference for many
   RSX and lv2 details (cited where they are used), and the tool used to decrypt
   the executable.
+
+- **[Inter](https://rsms.me/inter/)**, by The Inter Project Authors (SIL Open
+  Font License 1.1): the menus' typeface. Subsets of two faces are in
+  `work/port/assets/fonts/`, with the license.
+
+- **[Dear ImGui](https://github.com/ocornut/imgui)**, by Omar Cornut and
+  contributors (MIT): the menus are drawn with it.

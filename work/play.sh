@@ -88,7 +88,7 @@ watch_stall() {
     set +e                             # a failing probe must not end the watcher
     local gpid="" off=0 same=0 seen=0 size chunk fps slow=0 profiles=0 last_prof=0
     for _ in $(seq 1 100); do
-        gpid=$(pgrep -P $$ -f "build-vk/MotorStormRecomp " | head -1); [ -n "$gpid" ] && break; sleep 0.2
+        gpid=$(pgrep -P $$ -f "build-vk/MotorStormRecomp( |\$)" | head -1); [ -n "$gpid" ] && break; sleep 0.2
     done
     [ -n "$gpid" ] || return 0
     # Each thread's CPU share every 10 s, beside the fps in the log, into
@@ -161,5 +161,14 @@ watch_stall() {
 watch_stall &
 WATCH=$!
 cd "$ROOT"
-"$BIN" disc/PS3_GAME/USRDIR/EBOOT.elf ${GAME_ARGS[@]+"${GAME_ARGS[@]}"} 2>&1 | tee "$LOG"
+# The game: disc/, as ever -- unless PS3_GAME_DIR names a folder or one was
+# chosen in the port's menu (settings.ini, [game] path). The port finds those
+# itself, and a path given here would win over them.
+GAME=(disc/PS3_GAME/USRDIR/EBOOT.elf)
+SETTINGS="${PS3_USER_DIR:-user}/settings.ini"
+if [ -n "${PS3_GAME_DIR:-}" ] ||
+   { [ -f "$SETTINGS" ] && awk '/^\[/ { g = ($0 ~ /^\[game\]/) } g && /^path *= *[^ ]/ { f = 1 } END { exit !f }' "$SETTINGS"; }; then
+    GAME=()
+fi
+"$BIN" ${GAME[@]+"${GAME[@]}"} ${GAME_ARGS[@]+"${GAME_ARGS[@]}"} 2>&1 | tee "$LOG"
 kill "$WATCH" 2>/dev/null || true

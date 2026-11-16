@@ -9,6 +9,9 @@
 
 #ifdef PS3RECOMP_UI
 
+#include "ui_internal.h"
+#include "gamefiles.h"
+
 #include "imgui.h"
 #include "rsx_ui.h"
 
@@ -46,6 +49,9 @@ extern "C" void rsx_vulkan_backend_set_fps_limit(int fps);
 extern "C" int rsx_vulkan_backend_fullscreen(void);
 extern "C" unsigned ppu_boot_frames_presented(void);
 extern "C" void port_log_drain(void);       /* main.cpp: the log reaches its file */
+#ifndef _WIN32
+extern "C" void port_log_direct(void);      /* main.cpp: before an exec, the log off its pump */
+#endif
 extern "C" unsigned rsx_vulkan_backend_guest_draws(void);  /* draws in the last frame */
 extern "C" void port_sim_set_fps(int fps);  /* ppu_native.cpp: 60 or 30, live */
 extern "C" int port_sim_fps(void);
@@ -75,7 +81,6 @@ const Lang k_langs[] = {
     { "korean",     "Korean (experimental)",        false },
     { "chinese",    "Chinese (experimental)",       false },
 };
-const char* const k_scales[] = { "720p (1x)", "1440p (2x)", "4K (3x)" };
 const int k_fps_limits[] = { 0, 30, 60, 120, -1 };
 const char* const k_fps_names[] = { "Unlimited", "30", "60", "120", "Monitor refresh rate" };
 
@@ -83,6 +88,7 @@ port_settings g_boot;          /* as the game started: what a restart would chan
 int g_argc; char** g_argv;
 std::atomic<int> g_go{1};      /* the main thread may boot the guest */
 bool g_want_start = false;     /* the start screen was asked for */
+bool g_setup = false;          /* the game is not ready: the start screen is its set-up page, nothing boots */
 std::atomic<bool> g_start{false};  /* ...and is showing */
 double g_fps = 0.0, g_fps_t = 0.0;
 unsigned g_fps_frames = 0;
@@ -264,36 +270,6 @@ bool backup_saves()
     return ok;
 }
 
-void page_video(port_settings& s)
-{
-    int sc = s.scale - 1;
-    pin_begin(PORT_PIN_SCALE);
-    if (ImGui::Combo("Resolution", &sc, k_scales, 3)) { s.scale = sc + 1; save(); }
-    pin_end(PORT_PIN_SCALE);
-    /* The window as it is: F11 changes it without the menu. */
-    bool b = rsx_vulkan_backend_fullscreen();
-    if (ImGui::Checkbox("Fullscreen  (F11)", &b)) { s.fullscreen = b; rsx_vulkan_backend_set_fullscreen(b); save(); }
-    b = s.vsync;
-    if (ImGui::Checkbox("VSync", &b)) { s.vsync = b; rsx_vulkan_backend_set_vsync(b); save(); }
-    b = s.stretch;
-    if (ImGui::Checkbox("Stretch the picture (no black bars)", &b)) {
-        s.stretch = b; rsx_vulkan_backend_set_stretch(b); save();
-    }
-    const int nd = SDL_GetNumVideoDisplays();
-    if (nd > 1 && !pinned(PORT_PIN_DISPLAY)) {
-        const char* cur = SDL_GetDisplayName(s.display < nd ? s.display : 0);
-        if (ImGui::BeginCombo("Monitor", cur ? cur : "?")) {
-            for (int i = 0; i < nd; i++) {
-                const char* n = SDL_GetDisplayName(i);
-                char label[160]; snprintf(label, sizeof label, "%d: %s", i + 1, n ? n : "?");
-                if (ImGui::Selectable(label, i == s.display)) { s.display = i; save(); }
-            }
-            ImGui::EndCombo();
-        }
-    }
-    hint("Resolution and monitor take effect the next time the game starts.");
-}
-
 void page_language(port_settings& s)
 {
     pin_begin(PORT_PIN_VOICE);
@@ -360,23 +336,6 @@ void page_performance(port_settings& s)
 
 void page_mods(port_settings& s)
 {
-    ImGui::TextUnformatted("Beyond the PS3");
-    bool b = s.fullres_particles;
-    pin_begin(PORT_PIN_PARTICLES);
-    if (ImGui::Checkbox("Full-resolution particles", &b)) { s.fullres_particles = b; save(); }
-    pin_end(PORT_PIN_PARTICLES);
-    hint("Particle effects the game draws at a reduced resolution and stretches; "
-         "on, they are drawn at the resolution of the rest of the picture.");
-    static const char* const k_aniso_names[] = { "Game default", "2x", "4x", "8x", "16x" };
-    static const int k_aniso[] = { 0, 2, 4, 8, 16 };
-    int ai = 0;
-    for (int i = 0; i < 5; i++) if (k_aniso[i] == s.aniso) ai = i;
-    pin_begin(PORT_PIN_ANISO);
-    if (ImGui::Combo("Anisotropic filtering", &ai, k_aniso_names, 5)) { s.aniso = k_aniso[ai]; save(); }
-    pin_end(PORT_PIN_ANISO);
-    hint("Sharper ground and walls at a distance and at an angle.");
-
-    ImGui::Separator();
     ImGui::TextUnformatted("Installed mods");
     static port_mod mods[64];
     static int nmods = -1;
@@ -397,8 +356,9 @@ void page_mods(port_settings& s)
             hint(d);
         }
     }
+    if (ImGui::Button("Open the mods folder")) open_folder(port_mods_dir());
     hint("Mods enabled last win when two replace the same file. "
-         "The options on this page take effect the next time the game starts.");
+         "A change here takes effect the next time the game starts.");
 }
 
 extern "C" int cellPad_port_of_instance(int instance_id);   /* libs/input/cellPad.c */
@@ -450,25 +410,87 @@ void page_controller(port_settings& s)
     if (!shown)
         ImGui::Text("No controller found. Plug one in at any time: the game picks it up; up to four play split screen.");
     ImGui::Separator();
-    if (ImGui::Button("Open the saves folder")) open_folder(saves_dir());
-    ImGui::SameLine();
-    if (ImGui::Button("Back up the saves")) backup_saves();
-    if (ImGui::Button("Open the logs folder")) open_folder("work/runs");
-    if (!g_last_backup.empty()) hint(g_last_backup.c_str());
+    hint("In the game: F1, or Select and Start held for half a second, opens this menu. "
+         "D-pad or stick moves, Cross/A chooses, Circle/B goes back.");
     ImGui::Separator();
     bool b = s.skip_launcher;
     if (ImGui::Checkbox("Skip the start screen (F1 opens the options in game)", &b)) { s.skip_launcher = b; save(); }
 }
 
-/* The options' pages, as tabs: the in-game menu and the start screen's
- * Options page share them. */
-void option_tabs(port_settings& s)
+/* A page inside a scrolling area that takes the rest of the window less
+ * `keep` (the footer under it): the pages are taller than a 720p window. */
+template <class F> void scrolled(const char* id, float keep, F&& body)
 {
-    if (ImGui::BeginTabItem("Video")) { page_video(s); ImGui::EndTabItem(); }
-    if (ImGui::BeginTabItem("Language")) { page_language(s); ImGui::EndTabItem(); }
-    if (ImGui::BeginTabItem("Performance")) { page_performance(s); ImGui::EndTabItem(); }
-    if (ImGui::BeginTabItem("Mods")) { page_mods(s); ImGui::EndTabItem(); }
-    if (ImGui::BeginTabItem("Controller & saves")) { page_controller(s); ImGui::EndTabItem(); }
+    float h = ImGui::GetContentRegionAvail().y - keep;
+    if (h < ImGui::GetFontSize() * 4.0f) h = ImGui::GetFontSize() * 4.0f;
+    ImGui::BeginChild(id, ImVec2(0.0f, h), ImGuiChildFlags_NavFlattened);
+    body();
+    ImGui::EndChild();
+}
+
+template <class F> void tab(const char* label, float keep, F&& body)
+{
+    if (!ImGui::BeginTabItem(label)) return;
+    scrolled(label, keep, body);
+    ImGui::EndTabItem();
+}
+
+/* Help: the keys, the folders, what this is. */
+void page_help(port_settings&)
+{
+    ImGui::SeparatorText("Keys");
+    if (ImGui::BeginTable("keys", 2, ImGuiTableFlags_SizingFixedFit)) {
+        static const char* const k[][2] = {
+            { "F1", "This menu (on a controller: Select and Start held for half a second)" },
+            { "F10", "Performance HUD: detailed, compact, off" },
+            { "F11", "Full screen on and off" },
+            { "R2 / L2", "Throttle and brake, as on the PS3; the game's own options change the layout" },
+        };
+        for (const auto& r : k) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(r[0]);
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(r[1]);
+        }
+        ImGui::EndTable();
+    }
+    hint("Up to four controllers play split screen: plug them in and press Start on each in the game's "
+         "Wreckreation menu.");
+
+    ImGui::SeparatorText("Folders");
+    if (ImGui::Button("Logs")) open_folder("work/runs");
+    ImGui::SameLine();
+    if (ImGui::Button("Saves")) open_folder(saves_dir());
+    ImGui::SameLine();
+    if (ImGui::Button("Mods")) open_folder(port_mods_dir());
+    ImGui::SameLine();
+    if (ImGui::Button("Settings")) {
+        std::string d = port_settings_path();
+        const size_t k = d.find_last_of("/\\");
+        open_folder(k == std::string::npos ? "." : d.substr(0, k).c_str());
+    }
+    hint("For a bug report: the newest play-*.log in the logs folder, and what you were doing.");
+
+    ImGui::SeparatorText("About");
+    ImGui::TextWrapped("MotorStorm Apocalypse for PC: the PS3 game's own code, recompiled to run natively, "
+                       "drawing with Vulkan. It plays your own copy of the game (BCES-00484).");
+    hint("Built " __DATE__ ". Settings are in settings.ini; every change in these menus is saved at once.");
+}
+
+/* Settings: the same four pages on the start screen and in the game. */
+void settings_tabs(port_settings& s, float keep)
+{
+    tab("Display & picture", keep, [&] { pui::page_image(s); });
+    tab("Performance", keep, [&] { page_performance(s); });
+    tab("Language", keep, [&] { page_language(s); });
+    tab("Controller", keep, [&] { page_controller(s); });
+}
+
+/* More: the game's folder, mods, help. */
+void more_tabs(port_settings& s, float keep)
+{
+    tab("Your game", keep, [&] { pui::page_game(s); });
+    tab("Mods", keep, [&] { page_mods(s); });
+    tab("Help", keep, [&] { page_help(s); });
 }
 
 /* What changed since the game started and needs a restart. */
@@ -478,33 +500,43 @@ std::string restart_note(const port_settings& s)
     auto add = [&](const char* w) { n += n.empty() ? "" : ", "; n += w; };
     if (s.scale != g_boot.scale) add("resolution");
     if (s.display != g_boot.display) add("monitor");
+    if (s.aniso != g_boot.aniso) add("anisotropic filtering");
+    if (s.fullres_particles != g_boot.fullres_particles) add("particles");
     if (strcmp(s.voice, g_boot.voice) || strcmp(s.text, g_boot.text)) add("language");
     if (s.record_thread != g_boot.record_thread) add("recording thread");
+    if (strcmp(s.mods_on, g_boot.mods_on)) add("mods");
     return n;
 }
 
+/* The in-game menu (F1): every page as a tab. The game shows through around
+ * it, and only lightly dimmed, so brightness and sharpening can be judged. */
 void draw_menu()
 {
     port_settings& s = *port_settings_get();
     ImGuiIO& io = ImGui::GetIO();
-    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 150));
+    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 70));
     const float fs = ImGui::GetFontSize();
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
                             ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(fs * 38.0f < io.DisplaySize.x * 0.92f ? fs * 38.0f : io.DisplaySize.x * 0.92f,
-                                    fs * 26.0f < io.DisplaySize.y * 0.9f ? fs * 26.0f : io.DisplaySize.y * 0.9f),
+    ImGui::SetNextWindowSize(ImVec2(fs * 50.0f < io.DisplaySize.x * 0.94f ? fs * 50.0f : io.DisplaySize.x * 0.94f,
+                                    fs * 34.0f < io.DisplaySize.y * 0.92f ? fs * 34.0f : io.DisplaySize.y * 0.92f),
                              ImGuiCond_Always);
-    ImGui::Begin("MotorStorm Apocalypse  ·  Options", nullptr,
+    ImGui::Begin("MotorStorm Apocalypse", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar);
+                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar |
+                 ImGuiWindowFlags_NoScrollWithMouse);
+    const float keep = fs * 3.0f;      /* the footer */
     if (ImGui::BeginTabBar("pages")) {
-        option_tabs(s);
+        settings_tabs(s, keep);
+        tab("Saves", keep, [&] { pui::page_saves(s); });
+        more_tabs(s, keep);
         ImGui::EndTabBar();
     }
     const std::string note = restart_note(s);
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - fs * 3.2f);
+    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - fs * 2.9f);
     ImGui::Separator();
     if (!note.empty()) {
+        ImGui::AlignTextToFramePadding();
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.35f, 1.0f));
         ImGui::Text("Restart the game to apply: %s.", note.c_str());
         ImGui::PopStyleColor();
@@ -685,28 +717,45 @@ int hotkey(int key, void*)
     return 1;
 }
 
+/* The same binary again with `argv` and the settings read anew; with
+ * `to_start_screen` it opens on its start screen, else straight into the
+ * game. Returns only when that failed. */
+void restart_process(char** argv, bool to_start_screen)
+{
+    fflush(stderr); fflush(stdout);
+    if (char** env = port_settings_restart_env(nullptr)) {
+        if (to_start_screen) {          /* without the PS3_SKIP_LAUNCHER=1 it adds */
+            char** w = env;
+            for (char** r = env; *r; r++)
+                if (strcmp(*r, "PS3_SKIP_LAUNCHER=1") != 0) *w++ = *r;
+            *w = nullptr;
+        }
+        /* The binary's own path, not /proc/self/exe: the process keeps
+         * its name (MotorStormRecomp), which play.sh and the scripts look for. */
+#ifdef _WIN32
+        win_restart(argv, env);
+#else
+        port_log_direct();              /* the new process writes its own log */
+        char self[4096];
+        const ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+        if (n > 0) { self[n] = 0; execve(self, argv, env); }
+        execve("/proc/self/exe", argv, env);
+#endif
+        free(env);
+    }
+}
+
 /* "Play": boot, or start the process again when an option that only takes
  * effect at start changed here. */
 void play()
 {
     port_settings& s = *port_settings_get();
     save();
+    if (g_setup) return;            /* nothing to boot until the game's folder is right */
+    pui::backup_before_play();      /* ui_saves.cpp: when the settings ask for it; never in Play's way */
     if (!restart_note(s).empty() && g_argv) {
         fprintf(stderr, "[ui] starting again with the new settings\n");
-        fflush(stderr); fflush(stdout);
-        if (char** env = port_settings_restart_env(nullptr)) {
-            /* The binary's own path, not /proc/self/exe: the process keeps
-             * its name (MotorStormRecomp), which play.sh and the scripts look for. */
-#ifdef _WIN32
-            win_restart(g_argv, env);
-#else
-            char self[4096];
-            const ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
-            if (n > 0) { self[n] = 0; execve(self, g_argv, env); }
-            execve("/proc/self/exe", g_argv, env);
-#endif
-            free(env);
-        }
+        restart_process(g_argv, false);
         fprintf(stderr, "[ui] could not start again: the old settings stay for this run\n");
     }
     g_start = false;
@@ -719,7 +768,7 @@ void play()
 /* The start screen, over the disc's own picture (PIC1.PNG): Play, the port's
  * Options, Quit. MotorStorm has its own main menu and save handling, so Play
  * just boots the game. A pad moves through it as a keyboard or a mouse does. */
-enum MenuPage { MENU_MAIN, MENU_OPTIONS };
+enum MenuPage { MENU_MAIN, MENU_OPTIONS, MENU_GAME, MENU_SAVES, MENU_MORE };
 MenuPage g_page = MENU_MAIN;
 bool g_page_focus = true;      /* focus the page's first item on its first frame */
 
@@ -730,7 +779,7 @@ const ImU32 k_accent = IM_COL32(70, 200, 255, 255);
 bool menu_item(const char* id, const char* label, const char* sub, float scale = 1.0f)
 {
     const float fs = ImGui::GetFontSize();
-    ImFont* tf = (ImFont*)rsx_ui_title_font();
+    ImFont* tf = (ImFont*)rsx_ui_heading_font();   /* baked at this size */
     const float big = fs * 1.75f * scale;
     const float h = big * 1.25f + (sub ? fs * 1.35f : 0.0f);
     const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -764,7 +813,7 @@ void draw_backdrop(const ImVec2& d)
     }
     const ImU32 dark = IM_COL32(0, 0, 0, 225), clear = IM_COL32(0, 0, 0, 0);
     bg->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(d.x * 0.65f, d.y), dark, clear, clear, dark);
-    bg->AddRectFilled(ImVec2(0, 0), d, IM_COL32(0, 0, 0, g_page == MENU_OPTIONS ? 120 : 40));
+    bg->AddRectFilled(ImVec2(0, 0), d, IM_COL32(0, 0, 0, g_page != MENU_MAIN ? 120 : 40));
 }
 
 void go_page(MenuPage p) { g_page = p; g_page_focus = true; }
@@ -775,6 +824,7 @@ void draw_start()
     ImGuiIO& io = ImGui::GetIO();
     const ImVec2 d = io.DisplaySize;
     const float fs = ImGui::GetFontSize();
+    if (g_setup) g_page = MENU_GAME;       /* until the game's folder is right there is nothing else */
     draw_backdrop(d);
 
     /* the title, top left */
@@ -786,61 +836,96 @@ void draw_start()
     bg->AddRectFilled(ImVec2(tp.x + 4, tp.y + th * 1.06f), ImVec2(tp.x + 4 + fs * 5.0f, tp.y + th * 1.06f + 5), k_accent);
 
     /* Circle, Escape: back to the main page. */
-    if (g_page != MENU_MAIN &&
+    if (g_page != MENU_MAIN && !pui::saves_popup_open() &&
         (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
         go_page(MENU_MAIN);
 
     const float top = tp.y + th * 1.06f + fs * 2.4f;
-    const float width = g_page == MENU_OPTIONS ? (fs * 38.0f < d.x * 0.86f ? fs * 38.0f : d.x * 0.86f)
+    /* The pages with paths, lists and steps to read are wider. */
+    const float wide = g_page == MENU_GAME || g_page == MENU_MORE ? fs * 62.0f
+                     : g_page == MENU_SAVES ? fs * 52.0f : fs * 46.0f;
+    const float width = g_page != MENU_MAIN ? (wide < d.x * 0.86f ? wide : d.x * 0.86f)
                                                : (fs * 34.0f < d.x * 0.62f ? fs * 34.0f : d.x * 0.62f);
     const float height = d.y - top - fs * 3.2f;
     ImGui::SetNextWindowPos(ImVec2(tp.x - fs * 0.9f, top), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
-    if (g_page != MENU_OPTIONS) ImGui::SetNextWindowBgAlpha(0.0f);
-    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_NavHighlight, ImVec4(0, 0, 0, 0));
+    if (g_page == MENU_MAIN) ImGui::SetNextWindowBgAlpha(0.0f);
+    /* The main page's lines draw their own highlight. */
+    const int quiet = g_page == MENU_MAIN ? 4 : 0;
+    if (quiet) {
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_NavHighlight, ImVec4(0, 0, 0, 0));
+    }
     ImGui::Begin("##start", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
-                 ImGuiWindowFlags_NoScrollbar);
+                 ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     bool go = false;
+    const float keep = fs * 4.4f;       /* under a page: the line, BACK and a note */
+    /* BACK and a note, under a page. */
+    auto footer = [&](const char* note) {
+        ImGui::SetCursorPosY(height - fs * 3.9f);
+        ImGui::Separator();
+        if (g_page_focus) { ImGui::SetKeyboardFocusHere(); g_page_focus = false; }
+        if (ImGui::Button("BACK", ImVec2(fs * 8.0f, fs * 1.8f))) go_page(MENU_MAIN);
+        if (note && *note) { ImGui::SameLine(); hint(note); }
+    };
+    const std::string note = restart_note(s);
+    const std::string restart = note.empty() ? std::string()
+                              : "The game restarts on Play to apply: " + note + ".";
     switch (g_page) {
     case MENU_MAIN: {
-        if (menu_item("##play", "PLAY", nullptr)) go = true;
-        if (menu_item("##options", "OPTIONS", nullptr)) go_page(MENU_OPTIONS);
+        const bool backs_up = s.backup_on_play != 0;
+        if (menu_item("##play", "PLAY", !restart.empty() ? restart.c_str()
+                                        : backs_up ? "Backs up your saves, then starts the game"
+                                                   : "Starts the game")) go = true;
+        if (menu_item("##options", "SETTINGS", "Display, picture, performance, language, controller"))
+            go_page(MENU_OPTIONS);
+        if (menu_item("##saves", "SAVES", "Back up, restore, export and import")) go_page(MENU_SAVES);
+        if (menu_item("##more", "MORE", "Your game's folder, mods, help and logs")) go_page(MENU_MORE);
         if (menu_item("##quit", "QUIT", nullptr)) {
             port_log_drain();
             _Exit(0);
         }
         break; }
     case MENU_OPTIONS: {
-        ImGui::PopStyleColor(4);   /* the options' own widgets keep their colours */
         if (ImGui::BeginTabBar("pages")) {
-            option_tabs(s);
+            settings_tabs(s, keep);
             ImGui::EndTabBar();
         }
-        const std::string note = restart_note(s);
-        /* Room for the hint beside BACK to wrap onto a second line: at 3 em
-         * from the bottom its second line was cut off. */
-        ImGui::SetCursorPosY(height - fs * 3.9f);
-        ImGui::Separator();
-        if (g_page_focus) { ImGui::SetKeyboardFocusHere(); g_page_focus = false; }
-        if (ImGui::Button("BACK", ImVec2(fs * 8.0f, fs * 1.8f))) go_page(MENU_MAIN);
-        ImGui::SameLine();
-        hint(note.empty() ? "Options are saved. F1 (or Select+Start held) opens them in game."
-                          : ("The game restarts on Play to apply: " + note + ".").c_str());
-        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));   /* rebalance the pop above */
-        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_NavHighlight, ImVec4(0, 0, 0, 0));
+        footer(restart.empty() ? "Settings are saved as you change them. F1 (or Select+Start held) opens them in game."
+                               : restart.c_str());
+        break; }
+    case MENU_GAME: {
+        /* Where the game is and what is there (ui_game.cpp): the whole start
+         * screen while the game is not ready. */
+        scrolled("game", keep, [&] { pui::page_game(s); });
+        if (g_setup) {
+            ImGui::SetCursorPosY(height - fs * 3.9f);
+            ImGui::Separator();
+            if (ImGui::Button("QUIT", ImVec2(fs * 8.0f, fs * 1.8f))) { port_log_drain(); _Exit(0); }
+            ImGui::SameLine();
+            hint("The game starts once its folder and EBOOT.elf are found.");
+        } else footer(nullptr);
+        break; }
+    case MENU_SAVES: {
+        scrolled("saves", keep, [&] { pui::page_saves(s); });
+        footer(nullptr);
+        break; }
+    case MENU_MORE: {
+        if (ImGui::BeginTabBar("more")) {
+            more_tabs(s, keep);
+            ImGui::EndTabBar();
+        }
+        footer(restart.c_str());
         break; }
     }
     ImGui::End();
-    ImGui::PopStyleColor(4);
+    if (quiet) ImGui::PopStyleColor(quiet);
 
     /* the controls, bottom left */
-    const char* keys = g_page == MENU_MAIN ? "X / Enter  select" : "X / Enter  select      O / Esc  back";
+    const char* keys = g_page == MENU_MAIN || g_setup ? "X / Enter  select" : "X / Enter  select      O / Esc  back";
     bg->AddText(ImVec2(tp.x, d.y - fs * 2.2f), IM_COL32(200, 205, 214, 200), keys);
     /* PS3_UI_AUTOPLAY_MS=<ms>: press Play by itself that long after the start
      * screen first draws -- a scripted run through the start screen, the way
@@ -884,6 +969,38 @@ void draw(void*)
 
 } /* namespace */
 
+/* ui_internal.h: the helpers above for the pages in other files. */
+namespace pui {
+void save() { ::save(); }
+void hint(const char* t) { ::hint(t); }
+bool pinned(unsigned bit) { return ::pinned(bit); }
+void pin_begin(unsigned bit) { ::pin_begin(bit); }
+void pin_end(unsigned bit) { ::pin_end(bit); }
+std::string sh_quote(const std::string& t) { return ::sh_quote(t); }
+void open_folder(const char* path) { ::open_folder(path); }
+bool menu_item(const char* id, const char* label, const char* sub, float scale)
+{ return ::menu_item(id, label, sub, scale); }
+const char* saves_dir() { return ::saves_dir(); }
+bool backup_saves() { return ::backup_saves(); }
+const char* last_backup_note() { return g_last_backup.c_str(); }
+const port_settings& boot_settings() { return g_boot; }
+/* Without the argument that named the game: the settings decide where it is. */
+void restart_for_game(bool to_start_screen)
+{
+    static std::vector<char*> av;
+    av.clear();
+    bool dropped = false;
+    for (int i = 0; i < g_argc; i++) {
+        if (i > 0 && !dropped && g_argv[i][0] && strncmp(g_argv[i], "--", 2) != 0) { dropped = true; continue; }
+        av.push_back(g_argv[i]);
+    }
+    av.push_back(nullptr);
+    fprintf(stderr, "[ui] starting again with the game's new folder\n");
+    ::restart_process(av.data(), to_start_screen);
+    fprintf(stderr, "[ui] could not start again\n");
+}
+} /* namespace pui */
+
 /* The disc's PIC1.PNG (PS3_GAME, beside USRDIR) for the start screen. */
 static void load_backdrop(const char* eboot)
 {
@@ -924,11 +1041,18 @@ void port_ui_init(int argc, char** argv)
     }
     const char* skip = getenv("PS3_SKIP_LAUNCHER");
     g_want_start = !play_arg && !(skip && skip[0] == '1') && !port_settings_get()->skip_launcher;
-    if (g_want_start) load_backdrop(argc > 1 ? argv[1] : nullptr);
+    /* The game is not ready (gamefiles.h): the start screen whatever was
+     * asked, as its set-up page. */
+    g_setup = !gamefiles::boot().report.ready;
+    if (g_setup) g_want_start = true;
+    if (g_want_start) load_backdrop(gamefiles::boot().report.eboot.c_str());
     /* PS3_UI_PAGE=options: open the start screen on that page (for a
      * screenshot of it). */
     if (const char* pg = getenv("PS3_UI_PAGE")) {
         if (!strcmp(pg, "options")) g_page = MENU_OPTIONS;
+        if (!strcmp(pg, "game")) g_page = MENU_GAME;
+        if (!strcmp(pg, "saves")) g_page = MENU_SAVES;
+        if (!strcmp(pg, "more")) g_page = MENU_MORE;
     }
     if (g_want_start) g_go = 0;            /* port_ui_backend_ready decides */
 }
@@ -936,6 +1060,11 @@ void port_ui_init(int argc, char** argv)
 void port_ui_backend_ready(void)
 {
     if (!g_want_start) return;
+    if (!rsx_ui_available() && g_setup) {
+        fprintf(stderr, "[ui] no UI to set the game up with: %s\n", pui::game_problem());
+        port_log_drain();
+        _Exit(1);
+    }
     if (!rsx_ui_available()) {
         fprintf(stderr, "[ui] no UI: the game starts without its start screen\n");
         g_go = 1;
@@ -950,6 +1079,11 @@ void port_ui_wait_start(void)
 {
     while (!g_go.load()) {
         /* The window went away under the start screen: nothing can press Play. */
+        if (g_start.load() && !rsx_ui_available() && g_setup) {
+            fprintf(stderr, "[ui] the set-up screen is gone: %s\n", pui::game_problem());
+            port_log_drain();
+            _Exit(1);
+        }
         if (g_start.load() && !rsx_ui_available()) {
             fprintf(stderr, "[ui] the start screen is gone: the game starts\n");
             g_start = false;
@@ -961,6 +1095,7 @@ void port_ui_wait_start(void)
 }
 
 int port_ui_start_screen(void) { return g_start.load() ? 1 : 0; }
+int port_ui_setup(void) { return g_setup ? 1 : 0; }
 
 #else
 
@@ -968,5 +1103,6 @@ void port_ui_init(int, char**) {}
 void port_ui_backend_ready(void) {}
 void port_ui_wait_start(void) {}
 int port_ui_start_screen(void) { return 0; }
+int port_ui_setup(void) { return 0; }
 
 #endif

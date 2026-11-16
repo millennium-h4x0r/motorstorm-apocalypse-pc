@@ -7,6 +7,11 @@
  * for starting the process again with new settings. */
 void port_ui_init(int argc, char** argv);
 
+/* Whether the game is not ready (gamefiles.h) and the UI will show its set-up
+ * screen instead of booting: 0 when it is ready, and when there is no UI to
+ * show (no window, or a build without it). After port_ui_init. */
+int port_ui_setup(void);
+
 /* The rsx thread, once its backend is up: show the start screen if it is
  * wanted and the UI runs, else let the boot go on. */
 void port_ui_backend_ready(void);

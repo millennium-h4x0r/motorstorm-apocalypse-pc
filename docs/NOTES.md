@@ -2771,3 +2771,97 @@ PS3RECOMP_RSX_SPLIT is on unless set to 0. On the default-on build:
 splitscreen PASS (4 views), first_race PASS (race finished, Havok running
 throughout), all_tracks 39/39. No freeze in the hunt's split-on races (5 of
 10 seven-minute windowed mainline races).
+
+### Display and picture options (2026-11-16)
+
+The window's last step is still one vkCmdBlitImage of the frame into the
+swapchain image (vk_window_record with the frame's submission,
+vk_present_window otherwise); the UI's pass follows. Both now go through
+vk_window_blit (rsx_vulkan_backend.c), which adds, each with a variable read
+once and a setter for the menu (rsx_vulkan_backend.h):
+- `PS3RECOMP_VK_FILTER=linear|nearest`: the blit's filter.
+- `PS3RECOMP_VK_SHARPEN=0..100`, `PS3RECOMP_VK_BRIGHTNESS=-50..50`,
+  `PS3RECOMP_VK_GAMMA=50..200` (hundredths): with any of them off its
+  default the frame is blitted into an image of the swapchain's size (same
+  rectangle, same filter) and one pass (vulkan/rsx_vk_post.frag, SPIR-V
+  embedded like the fallback shaders) draws it into the swapchain image:
+  contrast-adaptive sharpening over four neighbours, then ^(1/gamma), then
+  brightness/200 added. Its render pass takes and leaves the image in
+  TRANSFER_DST_OPTIMAL, so the UI pass and the PRESENT_SRC transition after
+  it are unchanged. The pass's objects are made with the next swapchain the
+  first time an option needs them (the setter marks the swapchain dirty,
+  as VSync does); with everything at its default nothing is made and the
+  present is the old blit. Frame dumps read the game's target, before all
+  of this.
+- `PS3RECOMP_VK_WINDOW_SIZE=<w>x<h>|fit` (screen pixels; unset or anything
+  else: the picture's size, as before) and
+  rsx_vulkan_backend_set_window_size: the size goes through
+  vk_window_size_for (desktop scale, fitted to the monitor) and is asked for
+  in the event pump under s_vk_wsi_lock; full screen, it becomes the size
+  F11 comes back to.
+- Full screen (F11, `PS3RECOMP_VK_FULLSCREEN`) is SDL_WINDOW_FULLSCREEN_DESKTOP:
+  borderless, at the desktop's resolution, no mode switch. An exclusive mode
+  was not added (Wayland has none; SDL fakes it with scaling).
+- `PS3RECOMP_RES_SCALE=4` (5120x2880) was already in the backend; the
+  settings now allow it. Fractional scales are not: every target size,
+  viewport and readback is multiplied by an integer.
+- `PS3RECOMP_VK_SHOT=<file>`: the window as presented (picture pass and UI
+  included) as a PPM, written again whenever the file is removed -- how the
+  menus are screenshot in tests. Needs a real surface: Xvfb with lavapipe
+  (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json SDL_VIDEODRIVER=x11`)
+  shows the start screen; the game itself segfaults on lavapipe (so did the
+  build before this change).
+Checked (RTX 3090, COSMIC at 125%): a 1280x720 window's shot with every
+option at its default is byte-identical to the headless frame dump of the
+same screen, from this build and the one before; brightness +8 moves black
+to 10/255; the validation layer is silent on the pass (lavapipe); live
+1600x900 from the menu, full screen and back to it, with and without the
+pass; 4x renders 5120x2880 into a 3731x2100 window.
+COSMIC quirk, also on the build before: when another window appears or
+focus changes, the compositor sets the game's window back to the size it
+first gave it (1024x540 logical for a 1024x576 request), whatever was asked
+since.
+
+### Menus: main menu, pages in their own files, fonts (2026-11-16)
+
+After the launcher of another port (set-up of the game's folder, a fuller
+picture page, a saves manager):
+
+- Start screen: PLAY / SETTINGS / SAVES / MORE / QUIT, each with a line of
+  what it does. F1 in game: the same pages as tabs (Display & picture,
+  Performance, Language, Controller, Saves, Your game, Mods, Help). Every
+  page sits in a scrolling area (ui.cpp `scrolled`/`tab`): the display page
+  is ~40 em tall, more than a 720p window holds.
+- Pages in their own files behind work/port/ui_internal.h (namespace pui):
+  ui_image.cpp (display and picture; backend setters, see above),
+  ui_game.cpp + gamefiles.{h,cpp} (where the game is, its checks, the forced
+  set-up page), ui_saves.cpp + saves.{h,cpp} (backups, restore, export,
+  import). Unit tests: tests/settings_test.cpp, saves_test.cpp,
+  gamefiles_test.cpp (the build line is at the top of each).
+- Fonts. The menu looked pixelated on a system without Inter installed: the
+  fallback was ImGui's 13 px bitmap font blown up to 36 px, and every size
+  was one 36 px atlas scaled per frame. Now: subsets of Inter Medium and
+  Inter Display Black ship in work/port/assets/fonts (OFL, license beside
+  them; found beside the binary, one level up, or under the working
+  directory), then the system's Inter, Noto, Ubuntu, Open Sans, Cantarell,
+  Liberation, DejaVu. The atlas is baked at the exact pixel size the window
+  draws text at (20 px on 1080 lines; titles 3.4x, menu lines 1.75x) and
+  baked again in rsx_ui_vk_swapchain when the window's height changes, so
+  no text is a scaled bitmap. Checked on shots at 1280x720 and 2560x1440.
+- The in-game menu dims the game less (alpha 70, was 150): brightness,
+  gamma and sharpening are judged against the picture behind it.
+- Tests whose RUNS is not on the same filesystem as work/runs/hdd1_seed fail
+  at once ("Invalid cross-device link": the seed is hard-linked): keep RUNS
+  under work/runs.
+
+### Vertex fetch workers: in the tree, off, not validated (2026-11-16)
+
+`PS3RECOMP_ENG_FETCH_WORKERS=<n>` (rsx_draw_engine.c, rsx_be_thread.c
+draw_deferred, drains in cellGcmSys.c's executor) is the phase-2 work of
+2026-11-12: a draw's vertex decode on worker threads, the recording thread
+waiting for it. The session that wrote it ended in the middle of its 4P
+A/B runs, leaving no numbers and no test record. It is off by default (0)
+and the default path passes the suite; before it is turned on it needs the
+A/B (4P and 1P), splitscreen, all_tracks and the frame comparison, with
+`PS3RECOMP_ENG_FETCH_CHECK=1` (the RSX thread decodes too and the queue
+compares) as the first run.

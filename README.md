@@ -38,7 +38,7 @@ Vulkan.
 | Races, single player | 🔧 Races run start to finish with correct lighting, shadows and anti-aliasing; every track is being checked. ~60 fps at 720p and 1440p on a Ryzen 9 5950X (median frame 16.7 ms); dips in physics-heavy moments are being worked on |
 | Split-screen (2–4 players) | 🔧 Races start and render correctly; 4 players run at ~34 fps (limited by the GPU command thread) |
 | Audio, saves, controllers | 🔧 Saves and controllers work; race audio plays (the firmware's MP3 decoder is lifted from your own firmware) |
-| Port menu, options, up to 4K, 60 fps | ✅ Start screen, in-game menu (F1), resolution scale 1–3 (720p / 1440p / 4K), 60 fps simulation (or 30 as on the PS3), performance HUD (F10) |
+| Port menu, options, up to 4K, 60 fps | ✅ Start screen with settings, save backups and game set-up; in-game menu (F1); resolution scale 1–4 (720p to 5120×2880); sharpening, brightness, gamma; 60 fps simulation (or 30 as on the PS3); performance HUD (F10) |
 | Online play | ❌ Not planned (the servers are gone) |
 | Windows | ❌ Not yet: the Vulkan backend is Linux-only |
 
@@ -181,18 +181,41 @@ Connect the controller before starting. Each run's log goes to
 
 ## Settings and keys
 
-The start screen and the in-game menu (**F1**) write `user/settings.ini`;
-the file can also be edited by hand (a variable set in the environment wins
-over it):
+The start screen has **Play**, **Settings**, **Saves**, **More** and **Quit**;
+the in-game menu (**F1**, or Select+Start held on a controller) has the same
+pages as tabs:
+
+- **Settings**: display mode, window size, picture shape, VSync, resolution
+  (720p to 5120×2880), scaling filter, sharpening, brightness, gamma,
+  anisotropic filtering, full-resolution particles; frame rate, FPS limit,
+  performance HUD; voice and text language; the controllers the game sees.
+- **Saves**: back up, restore, export to a `.zip` and import one. Play backs
+  the saves up first (when they changed) and keeps the newest eight; both
+  can be changed there.
+- **More**: where your game is and what the port found there, mods, the
+  keys, the log and save folders.
+
+If the game's folder or `EBOOT.elf` is missing or is not the right one, the
+port opens on a set-up page that says what is missing and how to get it,
+and lets you choose the folder; it is kept in `settings.ini` (`[game] path`),
+and `PS3_GAME_DIR` overrides it.
+
+Everything is saved to `user/settings.ini` as you change it; the file can
+also be edited by hand (a variable set in the environment wins over it):
 
 | Setting | Values |
 |---|---|
-| `scale` | 1 = 720p, 2 = 1440p, 3 = 4K (the window opens at that size) |
+| `scale` | 1 = 720p, 2 = 1440p, 3 = 4K, 4 = 5120×2880 |
+| `window` | `auto` (the resolution's size), `fit` (the screen), or `WxH` |
 | `fullscreen`, `vsync`, `stretch`, `display` | full screen; vsync; stretch instead of black bars; which monitor |
+| `filter`, `sharpen` | `linear` or `nearest`; sharpening 0–100 |
+| `brightness`, `gamma` | −50–50; 50–200 (100 = unchanged) |
 | `frame_rate` | 60, or 30 as on the PS3 |
 | `fps_limit` | 0 = none |
 | `fps_counter` | performance HUD: 0 off, 1 detailed, 2 compact |
 | `fullres_particles`, `aniso` | particles at full resolution; anisotropic filtering 2–16 |
+| `[saves] backup_on_play`, `keep_backups` | back up on Play; automatic backups kept |
+| `[game] path` | the game's folder, when it is not `disc/` |
 
 | Key | |
 |---|---|

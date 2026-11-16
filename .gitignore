@@ -42,6 +42,15 @@
 !/work/port/settings.h
 !/work/port/ui.cpp
 !/work/port/ui.h
+!/work/port/ui_internal.h
+!/work/port/ui_image.cpp
+!/work/port/ui_game.cpp
+!/work/port/ui_saves.cpp
+!/work/port/gamefiles.cpp
+!/work/port/gamefiles.h
+!/work/port/saves.cpp
+!/work/port/saves.h
+!/work/port/assets/
 !/work/port/tests/
 /work/port/tests/*
 !/work/port/tests/*.cpp
