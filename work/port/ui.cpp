@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -124,6 +125,7 @@ void style()
     c[ImGuiCol_Separator]       = ImVec4(0.20f, 0.25f, 0.33f, 1.00f);
     c[ImGuiCol_Text]            = ImVec4(0.90f, 0.93f, 0.97f, 1.00f);
     c[ImGuiCol_TextDisabled]    = ImVec4(0.55f, 0.60f, 0.68f, 1.00f);
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.60f);
 }
 
 void save()
@@ -410,11 +412,139 @@ void page_controller(port_settings& s)
     if (!shown)
         ImGui::Text("No controller found. Plug one in at any time: the game picks it up; up to four play split screen.");
     ImGui::Separator();
-    hint("In the game: F1, or Select and Start held for half a second, opens this menu. "
+    hint("In the game: F1, the controller's home button, or Select and Start held for half a second, opens this menu. "
          "D-pad or stick moves, Cross/A chooses, Circle/B goes back.");
     ImGui::Separator();
     bool b = s.skip_launcher;
     if (ImGui::Checkbox("Skip the start screen (F1 opens the options in game)", &b)) { s.skip_launcher = b; save(); }
+}
+
+/* ---- controller legends ---------------------------------------------------
+ * The buttons as the PS3 pad shows them, drawn rather than named: the four
+ * shapes in their colours, the D-pad, L1/R1 and the PS (home) button. With no
+ * controller connected the keyboard's keys are named instead. */
+enum Glyph { G_CROSS, G_CIRCLE, G_SQUARE, G_TRIANGLE, G_DPAD, G_L1, G_R1, G_PS };
+struct Legend { Glyph g; const char* key; const char* what; };
+
+bool pad_present()
+{
+    static double next = 0.0; static bool have = false;
+    /* PS3_UI_LEGEND=pad|keys: one or the other whatever is connected (for a
+     * screenshot of each). */
+    static const char* force = getenv("PS3_UI_LEGEND");
+    if (force && *force) return force[0] == 'p';
+    const double now = ImGui::GetTime();
+    if (now >= next) {
+        next = now + 1.0;
+        have = false;
+        if (SDL_WasInit(SDL_INIT_GAMECONTROLLER)) {
+            SDL_LockJoysticks();
+            for (int i = 0; i < SDL_NumJoysticks() && !have; i++) have = SDL_IsGameController(i);
+            SDL_UnlockJoysticks();
+        }
+    }
+    return have;
+}
+
+/* One glyph with its left edge at `p`, `h` tall; returns its width. */
+float glyph(ImDrawList* dl, ImVec2 p, float h, Glyph g, bool draw)
+{
+    const float r = h * 0.5f, t = h * 0.085f < 1.3f ? 1.3f : h * 0.085f;
+    const ImU32 body = IM_COL32(26, 30, 40, 235), rim = IM_COL32(150, 160, 176, 255);
+    const ImU32 ink = IM_COL32(228, 232, 240, 255);
+    if (g == G_L1 || g == G_R1 || g == G_PS) {
+        const char* txt = g == G_L1 ? "L1" : g == G_R1 ? "R1" : "PS";
+        const float fsz = h * 0.62f;
+        const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(fsz, FLT_MAX, 0.0f, txt);
+        const float w = g == G_PS ? h : ts.x + h * 0.7f;
+        if (draw) {
+            dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), body, g == G_PS ? r : h * 0.3f);
+            dl->AddRect(p, ImVec2(p.x + w, p.y + h), rim, g == G_PS ? r : h * 0.3f, 0, t * 0.8f);
+            dl->AddText(ImGui::GetFont(), fsz, ImVec2(p.x + (w - ts.x) * 0.5f, p.y + (h - ts.y) * 0.5f), ink, txt);
+        }
+        return w;
+    }
+    if (!draw) return h;
+    const ImVec2 c(p.x + r, p.y + r);
+    if (g == G_DPAD) {
+        const float a = h * 0.17f;          /* half the arm's width */
+        dl->AddRectFilled(ImVec2(c.x - a, p.y + h * 0.06f), ImVec2(c.x + a, p.y + h * 0.94f), rim, a * 0.5f);
+        dl->AddRectFilled(ImVec2(p.x + h * 0.06f, c.y - a), ImVec2(p.x + h * 0.94f, c.y + a), rim, a * 0.5f);
+        dl->AddRectFilled(ImVec2(c.x - a + t, p.y + h * 0.06f + t), ImVec2(c.x + a - t, p.y + h * 0.94f - t), body, a * 0.4f);
+        dl->AddRectFilled(ImVec2(p.x + h * 0.06f + t, c.y - a + t), ImVec2(p.x + h * 0.94f - t, c.y + a - t), body, a * 0.4f);
+        return h;
+    }
+    dl->AddCircleFilled(c, r, body, 32);
+    dl->AddCircle(c, r - t * 0.4f, rim, 32, t * 0.8f);
+    const float k = h * 0.21f;
+    switch (g) {
+    case G_CROSS: {
+        const ImU32 col = IM_COL32(124, 178, 232, 255);
+        dl->AddLine(ImVec2(c.x - k, c.y - k), ImVec2(c.x + k, c.y + k), col, t * 1.25f);
+        dl->AddLine(ImVec2(c.x - k, c.y + k), ImVec2(c.x + k, c.y - k), col, t * 1.25f);
+        break; }
+    case G_CIRCLE:   dl->AddCircle(c, k * 1.12f, IM_COL32(255, 102, 102, 255), 24, t * 1.25f); break;
+    case G_SQUARE:   dl->AddRect(ImVec2(c.x - k, c.y - k), ImVec2(c.x + k, c.y + k), IM_COL32(255, 105, 248, 255), 0.0f, 0, t * 1.25f); break;
+    case G_TRIANGLE: dl->AddTriangle(ImVec2(c.x, c.y - k * 1.2f), ImVec2(c.x + k * 1.2f, c.y + k * 0.85f),
+                                     ImVec2(c.x - k * 1.2f, c.y + k * 0.85f), IM_COL32(64, 226, 160, 255), t * 1.25f); break;
+    default: break;
+    }
+    return h;
+}
+
+/* A row of legends from `p` (the text's top left); returns the row's width.
+ * Two entries with the same text share it: [L1][R1] Tab. */
+float legend_row(ImDrawList* dl, ImVec2 p, const Legend* it, int n, bool draw)
+{
+    const float fs = ImGui::GetFontSize(), h = fs * 1.25f;
+    const bool pad = pad_present();
+    const ImU32 col = IM_COL32(200, 205, 214, 215);
+    float x = p.x;
+    for (int i = 0; i < n; i++) {
+        const bool joined = i + 1 < n && !strcmp(it[i].what, it[i + 1].what);
+        if (pad) {
+            x += glyph(dl, ImVec2(x, p.y - (h - fs) * 0.5f), h, it[i].g, draw) + fs * (joined ? 0.25f : 0.4f);
+        } else if (it[i].key) {
+            if (draw) dl->AddText(ImVec2(x, p.y), IM_COL32(255, 255, 255, 235), it[i].key);
+            x += ImGui::CalcTextSize(it[i].key).x + fs * (joined ? 0.2f : 0.45f);
+            if (joined) {
+                if (draw) dl->AddText(ImVec2(x, p.y), col, "/");
+                x += ImGui::CalcTextSize("/").x + fs * 0.2f;
+            }
+        } else {
+            continue;                       /* nothing on the keyboard does this */
+        }
+        if (joined) continue;
+        if (draw) dl->AddText(ImVec2(x, p.y), col, it[i].what);
+        x += ImGui::CalcTextSize(it[i].what).x + fs * 1.5f;
+    }
+    return x - p.x;
+}
+
+/* ---- tab bars a controller can page through --------------------------------
+ * L1 and R1 (PageUp and PageDown on the keyboard) go to the tab before and
+ * after; the new tab's first item takes the focus. One bar shows at a time. */
+struct { ImGuiID bar = 0; int i = 0, n = 0, sel = 0, want = -1; bool focus = false; } g_tabs;
+
+bool tabs_begin(const char* id)
+{
+    if (!ImGui::BeginTabBar(id, ImGuiTabBarFlags_FittingPolicyScroll)) return false;
+    const ImGuiID bar = ImGui::GetID(id);
+    if (bar != g_tabs.bar) { g_tabs.bar = bar; g_tabs.n = 0; g_tabs.sel = 0; g_tabs.want = -1; }
+    g_tabs.i = 0;
+    if (g_tabs.n > 1 && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
+        int step = 0;
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_PageUp, false)) step = -1;
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_PageDown, false)) step = 1;
+        if (step) g_tabs.want = (g_tabs.sel + step + g_tabs.n) % g_tabs.n;
+    }
+    return true;
+}
+
+void tabs_end()
+{
+    g_tabs.n = g_tabs.i;
+    ImGui::EndTabBar();
 }
 
 /* A page inside a scrolling area that takes the rest of the window less
@@ -430,8 +560,15 @@ template <class F> void scrolled(const char* id, float keep, F&& body)
 
 template <class F> void tab(const char* label, float keep, F&& body)
 {
-    if (!ImGui::BeginTabItem(label)) return;
-    scrolled(label, keep, body);
+    const int idx = g_tabs.i++;
+    ImGuiTabItemFlags fl = 0;
+    if (idx == g_tabs.want) { fl = ImGuiTabItemFlags_SetSelected; g_tabs.want = -1; g_tabs.focus = true; }
+    if (!ImGui::BeginTabItem(label, nullptr, fl)) return;
+    g_tabs.sel = idx;
+    scrolled(label, keep, [&] {
+        if (g_tabs.focus && !fl) { ImGui::SetKeyboardFocusHere(); g_tabs.focus = false; }
+        body();
+    });
     ImGui::EndTabItem();
 }
 
@@ -441,7 +578,7 @@ void page_help(port_settings&)
     ImGui::SeparatorText("Keys");
     if (ImGui::BeginTable("keys", 2, ImGuiTableFlags_SizingFixedFit)) {
         static const char* const k[][2] = {
-            { "F1", "This menu (on a controller: Select and Start held for half a second)" },
+            { "F1", "This menu (on a controller: the home button, or Select and Start held for half a second)" },
             { "F10", "Performance HUD: detailed, compact, off" },
             { "F11", "Full screen on and off" },
             { "R2 / L2", "Throttle and brake, as on the PS3; the game's own options change the layout" },
@@ -518,23 +655,58 @@ void draw_menu()
     const float fs = ImGui::GetFontSize();
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
                             ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(fs * 50.0f < io.DisplaySize.x * 0.94f ? fs * 50.0f : io.DisplaySize.x * 0.94f,
-                                    fs * 34.0f < io.DisplaySize.y * 0.92f ? fs * 34.0f : io.DisplaySize.y * 0.92f),
+    ImGui::SetNextWindowSize(ImVec2(fs * 66.0f < io.DisplaySize.x * 0.94f ? fs * 66.0f : io.DisplaySize.x * 0.94f,
+                                    fs * 40.0f < io.DisplaySize.y * 0.92f ? fs * 40.0f : io.DisplaySize.y * 0.92f),
                              ImGuiCond_Always);
     ImGui::Begin("MotorStorm Apocalypse", nullptr,
                  ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                  ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar |
                  ImGuiWindowFlags_NoScrollWithMouse);
-    const float keep = fs * 3.0f;      /* the footer */
-    if (ImGui::BeginTabBar("pages")) {
+    /* The footer: a line and a row of buttons, on the window's bottom edge. */
+    const ImGuiStyle& gst = ImGui::GetStyle();
+    const float foot = ImGui::GetFrameHeight() + gst.ItemSpacing.y + 1.0f;
+    const float keep = foot + gst.ItemSpacing.y;
+    if (tabs_begin("pages")) {
         settings_tabs(s, keep);
         tab("Saves", keep, [&] { pui::page_saves(s); });
         more_tabs(s, keep);
-        ImGui::EndTabBar();
+        tabs_end();
     }
+    /* Circle with nothing open to back out of: the menu closes. */
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) && !ImGui::IsAnyItemActive() &&
+        !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+        rsx_ui_set_menu_open(0);
     const std::string note = restart_note(s);
-    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - fs * 2.9f);
+    ImGui::SetCursorPosY(ImGui::GetWindowHeight() - gst.WindowPadding.y - foot);
     ImGui::Separator();
+    /* Quit, asked once more: the game saves by itself, at its own moments. */
+    if (ImGui::Button("Quit the game")) ImGui::OpenPopup("Quit the game?");
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
+                            ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Quit the game?", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
+                               ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::TextUnformatted("Quit MotorStorm Apocalypse?");
+        hint("Progress since the game last autosaved is lost.");
+        if (ImGui::Button("Quit", ImVec2(fs * 8.0f, 0))) { port_log_drain(); _Exit(0); }
+        ImGui::SameLine();
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        if (ImGui::Button("Cancel", ImVec2(fs * 8.0f, 0)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    { static const Legend lg[] = { { G_DPAD, "Arrows", "Move" }, { G_CROSS, "Enter", "Select" },
+                                   { G_L1, "PgUp", "Tab" }, { G_R1, "PgDn", "Tab" },
+                                   { G_CIRCLE, nullptr, "Close" }, { G_PS, "F1", "Close" } };
+      const int n = (int)(sizeof lg / sizeof *lg);
+      const float w = legend_row(nullptr, ImVec2(0, 0), lg, n, false);
+      const float room = ImGui::GetWindowWidth() - ImGui::GetCursorPosX() - ImGui::CalcTextSize("Close  (F1)").x - fs * 4.0f;
+      if (note.empty() && w < room) {
+          ImVec2 p = ImGui::GetCursorScreenPos();
+          p.x += fs * 0.8f; p.y += gst.FramePadding.y;
+          legend_row(ImGui::GetWindowDrawList(), p, lg, n, true);
+      } }
     if (!note.empty()) {
         ImGui::AlignTextToFramePadding();
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.35f, 1.0f));
@@ -836,7 +1008,8 @@ void draw_start()
     bg->AddRectFilled(ImVec2(tp.x + 4, tp.y + th * 1.06f), ImVec2(tp.x + 4 + fs * 5.0f, tp.y + th * 1.06f + 5), k_accent);
 
     /* Circle, Escape: back to the main page. */
-    if (g_page != MENU_MAIN && !pui::saves_popup_open() &&
+    if (g_page != MENU_MAIN && !pui::saves_popup_open() && !ImGui::IsAnyItemActive() &&
+        !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
         (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
         go_page(MENU_MAIN);
 
@@ -890,11 +1063,11 @@ void draw_start()
         }
         break; }
     case MENU_OPTIONS: {
-        if (ImGui::BeginTabBar("pages")) {
+        if (tabs_begin("pages")) {
             settings_tabs(s, keep);
-            ImGui::EndTabBar();
+            tabs_end();
         }
-        footer(restart.empty() ? "Settings are saved as you change them. F1 (or Select+Start held) opens them in game."
+        footer(restart.empty() ? "Settings are saved as you change them. F1 or the controller's home button opens them in game."
                                : restart.c_str());
         break; }
     case MENU_GAME: {
@@ -914,9 +1087,9 @@ void draw_start()
         footer(nullptr);
         break; }
     case MENU_MORE: {
-        if (ImGui::BeginTabBar("more")) {
+        if (tabs_begin("more")) {
             more_tabs(s, keep);
-            ImGui::EndTabBar();
+            tabs_end();
         }
         footer(restart.c_str());
         break; }
@@ -925,8 +1098,10 @@ void draw_start()
     if (quiet) ImGui::PopStyleColor(quiet);
 
     /* the controls, bottom left */
-    const char* keys = g_page == MENU_MAIN || g_setup ? "X / Enter  select" : "X / Enter  select      O / Esc  back";
-    bg->AddText(ImVec2(tp.x, d.y - fs * 2.2f), IM_COL32(200, 205, 214, 200), keys);
+    { static const Legend lg[] = { { G_DPAD, "Arrows", "Move" }, { G_CROSS, "Enter", "Select" },
+                                   { G_CIRCLE, "Esc", "Back" }, { G_L1, "PgUp", "Tab" }, { G_R1, "PgDn", "Tab" } };
+      const bool tabs = g_page == MENU_OPTIONS || g_page == MENU_MORE;
+      legend_row(bg, ImVec2(tp.x, d.y - fs * 2.2f), lg, g_page == MENU_MAIN || g_setup ? 2 : tabs ? 5 : 3, true); }
     /* PS3_UI_AUTOPLAY_MS=<ms>: press Play by itself that long after the start
      * screen first draws -- a scripted run through the start screen, the way
      * work/play.sh boots, without a hand on the pad. */

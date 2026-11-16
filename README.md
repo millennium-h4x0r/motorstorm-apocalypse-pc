@@ -219,7 +219,8 @@ also be edited by hand (a variable set in the environment wins over it):
 
 | Key | |
 |---|---|
-| F1 | port menu |
+| F1, or the controller's home (PS / Guide) button | port menu; Select+Start held also opens it. "Quit the game" is at its bottom left |
+| D-pad or stick, Cross, Circle, L1 / R1 | in the menus: move, select, back, previous / next tab (keyboard: arrows, Enter, Esc, PgUp / PgDn) |
 | F10 | performance HUD: detailed / compact / off |
 | F11 or Alt+Enter | full screen and back |
 | Esc | quit |

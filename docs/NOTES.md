@@ -2865,3 +2865,20 @@ and the default path passes the suite; before it is turned on it needs the
 A/B (4P and 1P), splitscreen, all_tracks and the frame comparison, with
 `PS3RECOMP_ENG_FETCH_CHECK=1` (the RSX thread decodes too and the queue
 compares) as the first run.
+
+### Menus on a controller (2026-11-16)
+
+- The home button (SDL_CONTROLLER_BUTTON_GUIDE) on any controller opens and
+  closes the in-game menu (rsx_ui.cpp, beside Select+Start held); ImGui takes
+  every connected pad (ImGui_ImplSDL2_GamepadMode_AutoAll), not the first.
+- L1/R1 (PgUp/PgDn) page through a tab bar and focus the new tab's first row
+  (ui.cpp tabs_begin/tab); Circle goes back on the start screen and closes
+  the in-game menu when no popup or combo is open.
+- Legends are drawn, not named: Cross, Circle, Square, Triangle in the PS3's
+  colours, the D-pad, L1/R1, PS (ui.cpp glyph/legend_row). With no controller
+  they name the keys. PS3_UI_LEGEND=pad|keys forces one for a screenshot.
+- "Quit the game" in the in-game menu, asked once more.
+- Not tested with a real pad's buttons from here (the tests may not send
+  input to it, and /dev/uinput is not writable): the paging and focus were
+  driven through the keyboard path (PS3RECOMP_UI_KEYS PageDown/PageUp), which
+  shares the code; the home button is an edge on SDL's own button state.

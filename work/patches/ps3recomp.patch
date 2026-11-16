@@ -27425,10 +27425,10 @@ index 1ac2845e..e8a4c4ca 100644
  #endif
 diff --git a/libs/video/rsx_ui.cpp b/libs/video/rsx_ui.cpp
 new file mode 100644
-index 00000000..f2006587
+index 00000000..a65f0045
 --- /dev/null
 +++ b/libs/video/rsx_ui.cpp
-@@ -0,0 +1,782 @@
+@@ -0,0 +1,795 @@
 +/*
 + * ps3recomp - a user interface over the game's window (Dear ImGui, Vulkan).
 + * See rsx_ui.h for the threads, rsx_ui_vk.h for the backend's side.
@@ -27515,6 +27515,7 @@ index 00000000..f2006587
 +    std::chrono::steady_clock::time_point last{};
 +    double dt = 0.0;
 +    double hold = 0.0;                /* Select+Start held, seconds */
++    bool guide_down = false;          /* the home button, last frame */
 +    ImFont* title_font = nullptr;
 +    ImFont* head_font = nullptr;    /* the title face at menu-item size */
 +    float font_px = 0.0f;           /* the size the atlas holds the text face at */
@@ -27952,7 +27953,8 @@ index 00000000..f2006587
 +        { "Up", SDLK_UP, SDL_SCANCODE_UP }, { "Down", SDLK_DOWN, SDL_SCANCODE_DOWN },
 +        { "Left", SDLK_LEFT, SDL_SCANCODE_LEFT }, { "Right", SDLK_RIGHT, SDL_SCANCODE_RIGHT },
 +        { "Return", SDLK_RETURN, SDL_SCANCODE_RETURN }, { "Escape", SDLK_ESCAPE, SDL_SCANCODE_ESCAPE },
-+        { "Space", SDLK_SPACE, SDL_SCANCODE_SPACE }, { "Tab", SDLK_TAB, SDL_SCANCODE_TAB } };
++        { "Space", SDLK_SPACE, SDL_SCANCODE_SPACE }, { "Tab", SDLK_TAB, SDL_SCANCODE_TAB },
++        { "PageUp", SDLK_PAGEUP, SDL_SCANCODE_PAGEUP }, { "PageDown", SDLK_PAGEDOWN, SDL_SCANCODE_PAGEDOWN } };
 +    SDL_Keycode k = 0; SDL_Scancode sc = SDL_SCANCODE_UNKNOWN;
 +    for (auto& m : map) if (!strcmp(m.n, name)) { k = m.k; sc = m.sc; }
 +    if (!k && n == 1) { k = (SDL_Keycode)(name[0] | 0x20); sc = SDL_GetScancodeFromKey(k); }
@@ -27977,17 +27979,26 @@ index 00000000..f2006587
 +    reap_locked();
 +    if (!U.ok || !U.imgui_vk) return;
 +
-+    /* Select+Start held half a second opens or closes the menu. */
++    /* The controller's home button (Guide, PS, Xbox) opens or closes the
++     * menu; so does Select+Start held half a second, for pads without one or
++     * where the desktop keeps the button for itself. Any controller. */
 +    /* Under SDL's joystick lock: cellPad opens and polls the same pads from
 +     * the game's threads, and the device list behind SDL_NumJoysticks is
 +     * rebuilt on each call (two threads at once corrupted the heap). */
-+    if (!U.modal) { SDL_GameController* gc = nullptr;
++    if (!U.modal) {
++      bool both = false, guide = false;
 +      SDL_LockJoysticks();
-+      for (int i = 0; i < SDL_NumJoysticks() && !gc; i++)
-+          if (SDL_IsGameController(i)) gc = SDL_GameControllerFromInstanceID(SDL_JoystickGetDeviceInstanceID(i));
-+      const bool both = gc && SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK) &&
-+                        SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START);
++      for (int i = 0; i < SDL_NumJoysticks(); i++) {
++          if (!SDL_IsGameController(i)) continue;
++          SDL_GameController* gc = SDL_GameControllerFromInstanceID(SDL_JoystickGetDeviceInstanceID(i));
++          if (!gc) continue;
++          if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK) &&
++              SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START)) both = true;
++          if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_GUIDE)) guide = true;
++      }
 +      SDL_UnlockJoysticks();
++      if (guide && !U.guide_down) rsx_ui_set_menu_open(!U.menu);
++      U.guide_down = guide;
 +      if (both) {
 +          const double before = U.hold;
 +          U.hold += U.dt;
@@ -28048,6 +28059,8 @@ index 00000000..f2006587
 +        ImGui::DestroyContext();
 +        return -1;
 +    }
++    /* Any connected controller moves through the menus, not only the first. */
++    ImGui_ImplSDL2_SetGamepadMode(ImGui_ImplSDL2_GamepadMode_AutoAll);
 +    const VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 };
 +    VkDescriptorPoolCreateInfo pci = {};
 +    pci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
